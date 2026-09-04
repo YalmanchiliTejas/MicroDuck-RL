@@ -25,6 +25,8 @@ MICRODUCK_GROUNDCONTACT_XML: Path = _ROBOT_DIR / "robot_groundcontact.xml"
 MICRODUCK_ALLCOLLISIONS_XML: Path = _ROBOT_DIR / "robot_allcollisions.xml"
 # 70mm / 15g ball prop for the BallKick task.
 MICRODUCK_BALL_XML: Path = _ROBOT_DIR / "ball.xml"
+# 24mm / 5.5g grape prop for the GrapePick task.
+MICRODUCK_GRAPE_XML: Path = _ROBOT_DIR / "grape.xml"
 # Roller-skate model: 14 actuated joints + passive wheel hinges (passive_*wheel).
 MICRODUCK_GROUNDCONTACT_ROLLERS_XML: Path = _ROBOT_DIR / "robot_groundcontact_rollers.xml"
 # Backlash models: every servo joint gets an unactuated passive_<joint>_backlash
@@ -42,6 +44,7 @@ assert MICRODUCK_GROUNDCONTACT_ROLLERS_XML.exists(), f"XML not found: {MICRODUCK
 assert MICRODUCK_GROUNDCONTACT_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_GROUNDCONTACT_BACKLASH_XML}"
 assert MICRODUCK_WALK_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_WALK_BACKLASH_XML}"
 assert MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML}"
+assert MICRODUCK_GRAPE_XML.exists(), f"XML not found: {MICRODUCK_GRAPE_XML}"
 
 
 def get_walk_spec() -> mujoco.MjSpec:
@@ -68,6 +71,10 @@ def get_allcollisions_spec() -> mujoco.MjSpec:
 
 def get_ball_spec() -> mujoco.MjSpec:
     return mujoco.MjSpec.from_file(str(MICRODUCK_BALL_XML))
+
+
+def get_grape_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(MICRODUCK_GRAPE_XML))
 
 
 def get_backlash_spec() -> mujoco.MjSpec:
@@ -244,6 +251,11 @@ MICRODUCK_ROLLERS_BACKLASH_ROBOT_CFG = EntityCfg(
 MICRODUCK_BALL_CFG = EntityCfg(
     spec_fn=get_ball_spec,
     init_state=EntityCfg.InitialStateCfg(pos=(0.3, 0.0, 0.035)),
+)
+# Free grape prop; reset_grape_in_front_of_robot supplies the episode pose.
+MICRODUCK_GRAPE_CFG = EntityCfg(
+    spec_fn=get_grape_spec,
+    init_state=EntityCfg.InitialStateCfg(pos=(0.09, 0.0, 0.01)),
 )
 
 # Roller skate robot: the 4 passive wheel joints (passive_*wheel) have no XML

@@ -3139,6 +3139,131 @@ def apply_mouth_payload_force(
 
 
 # ==============================================================================
+# Grape-pick task -- physical object placement and task-space rewards
+# ==============================================================================
+
+
+def reset_grape_in_front_of_robot(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    offset: tuple[float, float] = (0.09, 0.0),
+    noise_xy: float = 0.01,
+    grape_half_height: float = 0.01,
+    asset_name: str = "grape",
+) -> None:
+    """Place a grape on the ground at a robot-relative, yaw-aligned offset.
+
+    The actor is intentionally blind to the grape, matching deployment where
+    the operator places/aims the robot.  Small reset noise makes the learned
+    motion tolerant to placement error.  This event must run after the robot's
+    root reset because it reads the final root pose directly from qpos.
+    """
+    if env_ids is None or len(env_ids) == 0:
+        return
+    env_ids = env_ids.to(env.device)
+    robot: Entity = env.scene["robot"]
+    grape: Entity = env.scene[asset_name]
+
+    root = env.sim.data.qpos[env_ids][:, robot.indexing.free_joint_q_adr]
+    qw, qx, qy, qz = root[:, 3], root[:, 4], root[:, 5], root[:, 6]
+    yaw = torch.atan2(2.0 * (qw * qz + qx * qy), 1.0 - 2.0 * (qy * qy + qz * qz))
+    cos_y, sin_y = torch.cos(yaw), torch.sin(yaw)
+
+    n = len(env_ids)
+    off = torch.tensor(offset, device=env.device, dtype=root.dtype).repeat(n, 1)
+    off += (torch.rand(n, 2, device=env.device, dtype=root.dtype) * 2.0 - 1.0) * noise_xy
+
+    pose = torch.zeros(n, 7, device=env.device, dtype=root.dtype)
+    pose[:, 0] = root[:, 0] + cos_y * off[:, 0] - sin_y * off[:, 1]
+    pose[:, 1] = root[:, 1] + sin_y * off[:, 0] + cos_y * off[:, 1]
+    pose[:, 2] = env.scene.terrain.env_origins[env_ids, 2] + grape_half_height
+    pose[:, 3] = 1.0
+    grape.write_root_link_pose_to_sim(pose, env_ids)
+    grape.write_root_link_velocity_to_sim(
+        torch.zeros(n, 6, device=env.device, dtype=root.dtype), env_ids
+    )
+
+
+def mouth_grape_proximity_phased(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    grape_name: str = "grape",
+    grasp_distance: float = 0.01,
+    std: float = 0.04,
+    command_name: str = "twist",
+    descent_end: float = 0.375,
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Reward bringing the mouth to the grape surface during approach/hold."""
+    robot: Entity = env.scene[asset_cfg.name]
+    grape: Entity = env.scene[grape_name]
+    mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
+    center_distance = torch.linalg.vector_norm(
+        mouth - grape.data.root_link_pos_w, dim=-1
+    )
+    surface_error = torch.abs(center_distance - grasp_distance)
+    score = torch.exp(-((surface_error / std) ** 2))
+    gate = phase_pose_blend(
+        _gp_phase(env, command_name), descent_end, hold_end, rise_end
+    )
+    return torch.nan_to_num(gate * score, nan=0.0)
+
+
+def grape_lift_tracking_phased(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    grape_name: str = "grape",
+    ground_height: float = 0.01,
+    target_height: float = 0.12,
+    height_std: float = 0.06,
+    grasp_distance: float = 0.01,
+    grasp_std: float = 0.025,
+    command_name: str = "twist",
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Track a slewed grape lift target while keeping it at the mouth.
+
+    The target rises from ground level to ``target_height`` over the commanded
+    return segment.  A grape lifted early is therefore not a jackpot.  The
+    height and mouth-proximity Gaussians are multiplied so throwing or merely
+    nudging the grape upward cannot satisfy the objective.
+    """
+    robot: Entity = env.scene[asset_cfg.name]
+    grape: Entity = env.scene[grape_name]
+    phase = _gp_phase(env, command_name)
+    blend = phase_rise_gate(phase, hold_end, rise_end)
+
+    terrain_z = env.scene.terrain.env_origins[:, 2]
+    grape_height = grape.data.root_link_pos_w[:, 2] - terrain_z
+    height_target = ground_height + blend * (target_height - ground_height)
+    height_score = torch.exp(-(((grape_height - height_target) / height_std) ** 2))
+
+    mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
+    center_distance = torch.linalg.vector_norm(
+        mouth - grape.data.root_link_pos_w, dim=-1
+    )
+    grasp_error = torch.abs(center_distance - grasp_distance)
+    grasp_score = torch.exp(-((grasp_error / grasp_std) ** 2))
+    return torch.nan_to_num(blend * height_score * grasp_score, nan=0.0)
+
+
+def grape_pos_in_base(
+    env: ManagerBasedRlEnv, asset_name: str = "grape"
+) -> torch.Tensor:
+    """Grape position relative to the robot root, for the critic only."""
+    return ball_pos_in_base(env, asset_name=asset_name)
+
+
+def grape_vel_in_base(
+    env: ManagerBasedRlEnv, asset_name: str = "grape"
+) -> torch.Tensor:
+    """Grape linear velocity in the robot base frame, for the critic only."""
+    return ball_vel_in_base(env, asset_name=asset_name)
+
+
+# ==============================================================================
 # Domain Randomization Events
 # ==============================================================================
 
