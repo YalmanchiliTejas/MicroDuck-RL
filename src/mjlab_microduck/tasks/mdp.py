@@ -3230,23 +3230,101 @@ def grape_lift_tracking_phased(
     height and mouth-proximity Gaussians are multiplied so throwing or merely
     nudging the grape upward cannot satisfy the objective.
     """
+    components = _grape_lift_components(
+        env,
+        asset_cfg=asset_cfg,
+        grape_name=grape_name,
+        ground_height=ground_height,
+        target_height=target_height,
+        height_std=height_std,
+        grasp_distance=grasp_distance,
+        grasp_std=grasp_std,
+        command_name=command_name,
+        hold_end=hold_end,
+        rise_end=rise_end,
+    )
+    return (
+        components["phase_gate"]
+        * components["height_score"]
+        * components["grasp_score"]
+    )
+
+
+def _grape_lift_components(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    grape_name: str,
+    ground_height: float,
+    target_height: float,
+    height_std: float,
+    grasp_distance: float,
+    grasp_std: float,
+    command_name: str,
+    hold_end: float,
+    rise_end: float,
+) -> dict[str, torch.Tensor]:
+    """Compute the physical and scoring components of the grape-lift reward."""
     robot: Entity = env.scene[asset_cfg.name]
     grape: Entity = env.scene[grape_name]
     phase = _gp_phase(env, command_name)
-    blend = phase_rise_gate(phase, hold_end, rise_end)
+    phase_gate = phase_rise_gate(phase, hold_end, rise_end)
 
     terrain_z = env.scene.terrain.env_origins[:, 2]
     grape_height = grape.data.root_link_pos_w[:, 2] - terrain_z
-    height_target = ground_height + blend * (target_height - ground_height)
-    height_score = torch.exp(-(((grape_height - height_target) / height_std) ** 2))
+    target_grape_height = ground_height + phase_gate * (target_height - ground_height)
+    height_score = torch.exp(
+        -(((grape_height - target_grape_height) / height_std) ** 2)
+    )
 
     mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
-    center_distance = torch.linalg.vector_norm(
+    mouth_grape_distance = torch.linalg.vector_norm(
         mouth - grape.data.root_link_pos_w, dim=-1
     )
-    grasp_error = torch.abs(center_distance - grasp_distance)
+    grasp_error = torch.abs(mouth_grape_distance - grasp_distance)
     grasp_score = torch.exp(-((grasp_error / grasp_std) ** 2))
-    return torch.nan_to_num(blend * height_score * grasp_score, nan=0.0)
+
+    return {
+        "grape_height": torch.nan_to_num(grape_height, nan=0.0),
+        "target_grape_height": torch.nan_to_num(target_grape_height, nan=0.0),
+        "mouth_grape_distance": torch.nan_to_num(mouth_grape_distance, nan=0.0),
+        "height_score": torch.nan_to_num(height_score, nan=0.0),
+        "grasp_score": torch.nan_to_num(grasp_score, nan=0.0),
+        "phase": torch.nan_to_num(phase, nan=0.0),
+        "phase_gate": torch.nan_to_num(phase_gate, nan=0.0),
+    }
+
+
+def grape_lift_diagnostic(
+    env: ManagerBasedRlEnv,
+    metric: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    grape_name: str = "grape",
+    ground_height: float = 0.01,
+    target_height: float = 0.12,
+    height_std: float = 0.06,
+    grasp_distance: float = 0.01,
+    grasp_std: float = 0.025,
+    command_name: str = "twist",
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Return one unweighted grape-lift component for diagnostic logging."""
+    components = _grape_lift_components(
+        env,
+        asset_cfg=asset_cfg,
+        grape_name=grape_name,
+        ground_height=ground_height,
+        target_height=target_height,
+        height_std=height_std,
+        grasp_distance=grasp_distance,
+        grasp_std=grasp_std,
+        command_name=command_name,
+        hold_end=hold_end,
+        rise_end=rise_end,
+    )
+    if metric not in components:
+        raise ValueError(f"Unknown grape-lift diagnostic metric: {metric}")
+    return components[metric]
 
 
 def grape_pos_in_base(

@@ -6,6 +6,8 @@
 #   SLURM_PARTITION=gpu SLURM_ACCOUNT=my-account ./slurm.sh
 # Optional training settings:
 #   NUM_ENVS=4096 TARGET_ITERATIONS=20000 ITERATIONS_PER_JOB=4000 ./slurm.sh
+# Start an isolated run from iteration zero (does not see the default run's checkpoints):
+#   GRAPE_RUN_TAG=lift-diagnostics TARGET_ITERATIONS=2000 ITERATIONS_PER_JOB=2000 ./slurm.sh
 
 #SBATCH --job-name=microduck-grape-pick
 #SBATCH --nodes=1
@@ -25,7 +27,19 @@ REPO_DIR="${MICRODUCK_REPO_DIR:-${SCRIPT_DIR}}"
 # long training run cannot silently fill the user's home quota.
 : "${SCRATCH:?The cluster must provide SCRATCH (for example /scratch/$USER).}"
 
-SCRATCH_ROOT="${SCRATCH}/microduck-rl/grape-pick"
+GRAPE_RUN_TAG="${GRAPE_RUN_TAG:-}"
+if [[ -n "${GRAPE_RUN_TAG}" ]] && ! [[ "${GRAPE_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "ERROR: GRAPE_RUN_TAG may contain only letters, digits, '.', '_', and '-'." >&2
+    exit 1
+fi
+
+# An explicit tag gives diagnostic experiments their own checkpoints and event
+# files. With no tag, preserve the historical path so existing runs still resume.
+if [[ -n "${GRAPE_RUN_TAG}" ]]; then
+    SCRATCH_ROOT="${SCRATCH}/microduck-rl/grape-pick-${GRAPE_RUN_TAG}"
+else
+    SCRATCH_ROOT="${SCRATCH}/microduck-rl/grape-pick"
+fi
 OUTPUT_DIR="${SCRATCH_ROOT}/output"
 TENSORBOARD_DIR="${SCRATCH_ROOT}/tensorboard"
 
@@ -98,6 +112,7 @@ echo "Job ID:         ${SLURM_JOB_ID}"
 echo "Host:           $(hostname)"
 echo "Repository:     ${REPO_DIR}"
 echo "Scratch root:   ${SCRATCH_ROOT}"
+echo "Run tag:        ${GRAPE_RUN_TAG:-default}"
 echo "Environments:   ${NUM_ENVS}"
 echo "Target:         ${TARGET_ITERATIONS} total iterations"
 echo "Segment size:   ${ITERATIONS_PER_JOB} new iterations"

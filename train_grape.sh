@@ -11,12 +11,17 @@ TARGET_ITERATIONS="${TARGET_ITERATIONS:-20000}"
 ITERATIONS_PER_JOB="${ITERATIONS_PER_JOB:-4000}"
 NUM_ENVS="${NUM_ENVS:-4096}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
+GRAPE_RUN_TAG="${GRAPE_RUN_TAG:-}"
 
 if ! [[ "${TARGET_ITERATIONS}" =~ ^[1-9][0-9]*$ ]] \
     || ! [[ "${ITERATIONS_PER_JOB}" =~ ^[1-9][0-9]*$ ]] \
     || ! [[ "${NUM_ENVS}" =~ ^[1-9][0-9]*$ ]] \
     || ! [[ "${CHECKPOINT_INTERVAL}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: TARGET_ITERATIONS, ITERATIONS_PER_JOB, NUM_ENVS, and CHECKPOINT_INTERVAL must be positive integers." >&2
+    exit 1
+fi
+if [[ -n "${GRAPE_RUN_TAG}" ]] && ! [[ "${GRAPE_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
+    echo "ERROR: GRAPE_RUN_TAG may contain only letters, digits, '.', '_', and '-'." >&2
     exit 1
 fi
 
@@ -29,7 +34,11 @@ if ! [[ "${MAX_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
     exit 1
 fi
 
-SCRATCH_ROOT="${SCRATCH}/microduck-rl/grape-pick"
+if [[ -n "${GRAPE_RUN_TAG}" ]]; then
+    SCRATCH_ROOT="${SCRATCH}/microduck-rl/grape-pick-${GRAPE_RUN_TAG}"
+else
+    SCRATCH_ROOT="${SCRATCH}/microduck-rl/grape-pick"
+fi
 OUTPUT_DIR="${SCRATCH_ROOT}/output"
 TENSORBOARD_DIR="${SCRATCH_ROOT}/tensorboard"
 COMPLETE_MARKER="${SCRATCH_ROOT}/training-complete-${TARGET_ITERATIONS}"
@@ -44,7 +53,7 @@ common_sbatch_args=(
     --parsable
     --output="${OUTPUT_DIR}/slurm-%j.out"
     --error="${OUTPUT_DIR}/slurm-%j.err"
-    --export="ALL,TARGET_ITERATIONS=${TARGET_ITERATIONS},ITERATIONS_PER_JOB=${ITERATIONS_PER_JOB},NUM_ENVS=${NUM_ENVS},CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL},MICRODUCK_REPO_DIR=${SCRIPT_DIR}"
+    --export="ALL,TARGET_ITERATIONS=${TARGET_ITERATIONS},ITERATIONS_PER_JOB=${ITERATIONS_PER_JOB},NUM_ENVS=${NUM_ENVS},CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL},GRAPE_RUN_TAG=${GRAPE_RUN_TAG},MICRODUCK_REPO_DIR=${SCRIPT_DIR}"
 )
 if [[ -n "${SLURM_PARTITION:-}" ]]; then
     common_sbatch_args+=(--partition="${SLURM_PARTITION}")
@@ -77,6 +86,7 @@ done
 
 echo
 echo "Target iterations: ${TARGET_ITERATIONS}"
+echo "Run tag: ${GRAPE_RUN_TAG:-default}"
 echo "New iterations/job: ${ITERATIONS_PER_JOB}"
 echo "Checkpoint interval: ${CHECKPOINT_INTERVAL}"
 echo "Chain tail job: ${previous_job}"

@@ -70,6 +70,7 @@ from mjlab.envs.mdp.actions import JointPositionActionCfg
 from mjlab.managers import (
     CurriculumTermCfg,
     EventTermCfg,
+    MetricsTermCfg,
     ObservationTermCfg,
     RewardTermCfg,
     TerminationTermCfg,
@@ -224,22 +225,39 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     # the grape to remain at the mouth.  Multiplication rules out reward from
     # batting/throwing the grape, while the moving target removes any incentive
     # to complete the lift violently ahead of schedule.
+    grape_lift_params = {
+        "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+        "grape_name": "grape",
+        "ground_height": GRAPE_HALF_HEIGHT,
+        "target_height": GRAPE_LIFT_HEIGHT,
+        "height_std": 0.08,
+        "grasp_distance": GRAPE_HALF_HEIGHT,
+        "grasp_std": 0.05,
+        "command_name": "twist",
+        "hold_end": HOLD_END,
+        "rise_end": RISE_END,
+    }
     cfg.rewards["grape_lift_tracking"] = RewardTermCfg(
         func=microduck_mdp.grape_lift_tracking_phased,
         weight=8.0,
-        params={
-            "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
-            "grape_name": "grape",
-            "ground_height": GRAPE_HALF_HEIGHT,
-            "target_height": GRAPE_LIFT_HEIGHT,
-            "height_std": 0.08,
-            "grasp_distance": GRAPE_HALF_HEIGHT,
-            "grasp_std": 0.05,
-            "command_name": "twist",
-            "hold_end": HOLD_END,
-            "rise_end": RISE_END,
-        },
+        params=grape_lift_params,
     )
+
+    # Diagnostic-only episode means. These are unweighted, do not enter the
+    # reward, and appear in W&B under Episode_Metrics/<name>.
+    for metric_name in (
+        "grape_height",
+        "target_grape_height",
+        "mouth_grape_distance",
+        "height_score",
+        "grasp_score",
+        "phase",
+        "phase_gate",
+    ):
+        cfg.metrics[metric_name] = MetricsTermCfg(
+            func=microduck_mdp.grape_lift_diagnostic,
+            params={**grape_lift_params, "metric": metric_name},
+        )
 
     # Return phase — legs. Under mjlab 1.3.0 + canonical BAM the passive jaw
     # joints are no longer part of the articulation, so joint_pos is the clean

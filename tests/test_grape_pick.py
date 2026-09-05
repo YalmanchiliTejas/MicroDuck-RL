@@ -32,6 +32,29 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert lift.func is microduck_mdp.grape_lift_tracking_phased
     assert lift.params["target_height"] == GRAPE_LIFT_HEIGHT
     assert lift.params["grasp_std"] == 0.05
+    assert set(cfg.metrics) >= {
+        "grape_height",
+        "target_grape_height",
+        "mouth_grape_distance",
+        "height_score",
+        "grasp_score",
+        "phase",
+        "phase_gate",
+    }
+    for name in (
+        "grape_height",
+        "target_grape_height",
+        "mouth_grape_distance",
+        "height_score",
+        "grasp_score",
+        "phase",
+        "phase_gate",
+    ):
+        metric = cfg.metrics[name]
+        assert metric.func is microduck_mdp.grape_lift_diagnostic
+        assert metric.params["metric"] == name
+        assert metric.params["height_std"] == lift.params["height_std"]
+        assert metric.params["grasp_std"] == lift.params["grasp_std"]
     assert "mouth_ground_proximity" not in cfg.rewards
     assert "mouth_payload_force" not in cfg.rewards
     assert "sample_mouth_payload" not in cfg.events
@@ -122,6 +145,45 @@ def test_lift_reward_tracks_slewed_target_and_rejects_throwing():
     assert out[0] > out[1]
     assert out[0] > 0.49
     assert out[2] < 1e-6
+
+
+def test_lift_diagnostics_expose_reward_components():
+    phase = torch.tensor([0.6125])
+    grape = torch.tensor([[0.0, 0.0, 0.065]])
+    mouth = torch.tensor([[0.01, 0.0, 0.065]])
+    env = _Env(grape, mouth, phase)
+    params = {
+        "asset_cfg": _mouth_cfg(),
+        "height_std": 0.08,
+        "grasp_std": 0.05,
+    }
+
+    values = {
+        name: microduck_mdp.grape_lift_diagnostic(env, metric=name, **params)
+        for name in (
+            "grape_height",
+            "target_grape_height",
+            "mouth_grape_distance",
+            "height_score",
+            "grasp_score",
+            "phase",
+            "phase_gate",
+        )
+    }
+
+    assert torch.allclose(values["grape_height"], torch.tensor([0.065]))
+    assert torch.allclose(values["target_grape_height"], torch.tensor([0.065]))
+    assert torch.allclose(values["mouth_grape_distance"], torch.tensor([0.01]))
+    assert torch.allclose(values["height_score"], torch.ones(1))
+    assert torch.allclose(values["grasp_score"], torch.ones(1))
+    assert torch.allclose(values["phase"], phase)
+    assert torch.allclose(values["phase_gate"], torch.tensor([0.5]))
+
+    reward = microduck_mdp.grape_lift_tracking_phased(env, **params)
+    reconstructed = (
+        values["phase_gate"] * values["height_score"] * values["grasp_score"]
+    )
+    assert torch.allclose(reward, reconstructed)
 
 
 def test_approach_reward_uses_grape_surface_not_ground_height():
