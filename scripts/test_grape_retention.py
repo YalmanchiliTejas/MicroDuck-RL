@@ -270,13 +270,17 @@ def run(args: argparse.Namespace) -> None:
     # env 0's action makes the later physical trials share exactly one script.
     obs = env.get_observations()
     action_trace: list[torch.Tensor] = []
-    with torch.inference_mode():
-        for _ in range(num_steps):
+    for _ in range(num_steps):
+        # Restrict inference mode to the network forward pass. mjlab/BAM creates
+        # and mutates stateful delay-buffer tensors inside env.step/reset; running
+        # those operations under inference mode makes the tensors immutable on
+        # the following reset.
+        with torch.inference_mode():
             policy_action = policy(obs)
-            scripted_action = policy_action[0].detach().clone()
-            action_trace.append(scripted_action)
-            actions = scripted_action.unsqueeze(0).expand(args.trials, -1)
-            obs, _, _, _ = env.step(actions)
+        scripted_action = policy_action[0].detach().clone()
+        action_trace.append(scripted_action)
+        actions = scripted_action.unsqueeze(0).expand(args.trials, -1)
+        obs, _, _, _ = env.step(actions)
 
     # Pass 2: reset, seat once at HOLD_END, and replay the frozen action trace.
     env.reset()
@@ -294,48 +298,46 @@ def run(args: argparse.Namespace) -> None:
     target_height_rows: list[np.ndarray] = []
     mouth_distance_rows: list[np.ndarray] = []
 
-    with torch.inference_mode():
-        for step, scripted_action in enumerate(action_trace):
-            if step == seat_step:
-                applied_offsets = _seat_grape_at_mouth(
-                    raw_env,
-                    local_offset_m=(
-                        args.offset_x_mm / 1000.0,
-                        args.offset_y_mm / 1000.0,
-                        args.offset_z_mm / 1000.0,
-                    ),
-                    placement_noise_m=args.placement_noise_mm / 1000.0,
-                )
-
-            actions = scripted_action.unsqueeze(0).expand(args.trials, -1)
-            env.step(actions)
-
-            phase_t = command._gp_phase.detach()
-            gate_t = torch.where(
-                phase_t < HOLD_END,
-                torch.zeros_like(phase_t),
-                torch.where(
-                    phase_t < RISE_END,
-                    (phase_t - HOLD_END) / (RISE_END - HOLD_END),
-                    torch.ones_like(phase_t),
+    for step, scripted_action in enumerate(action_trace):
+        if step == seat_step:
+            applied_offsets = _seat_grape_at_mouth(
+                raw_env,
+                local_offset_m=(
+                    args.offset_x_mm / 1000.0,
+                    args.offset_y_mm / 1000.0,
+                    args.offset_z_mm / 1000.0,
                 ),
-            )
-            terrain_z = raw_env.scene.terrain.env_origins[:, 2]
-            grape_height_t = grape.data.root_link_pos_w[:, 2] - terrain_z
-            target_t = GRAPE_HALF_HEIGHT + gate_t * (
-                GRAPE_LIFT_HEIGHT - GRAPE_HALF_HEIGHT
-            )
-            distance_t = torch.linalg.vector_norm(
-                robot.data.site_pos_w[:, mouth_id, :]
-                - grape.data.root_link_pos_w,
-                dim=-1,
+                placement_noise_m=args.placement_noise_mm / 1000.0,
             )
 
-            phase_rows.append(phase_t.cpu().numpy().copy())
-            gate_rows.append(gate_t.cpu().numpy().copy())
-            grape_height_rows.append(grape_height_t.cpu().numpy().copy())
-            target_height_rows.append(target_t.cpu().numpy().copy())
-            mouth_distance_rows.append(distance_t.cpu().numpy().copy())
+        actions = scripted_action.unsqueeze(0).expand(args.trials, -1)
+        env.step(actions)
+
+        phase_t = command._gp_phase.detach()
+        gate_t = torch.where(
+            phase_t < HOLD_END,
+            torch.zeros_like(phase_t),
+            torch.where(
+                phase_t < RISE_END,
+                (phase_t - HOLD_END) / (RISE_END - HOLD_END),
+                torch.ones_like(phase_t),
+            ),
+        )
+        terrain_z = raw_env.scene.terrain.env_origins[:, 2]
+        grape_height_t = grape.data.root_link_pos_w[:, 2] - terrain_z
+        target_t = GRAPE_HALF_HEIGHT + gate_t * (
+            GRAPE_LIFT_HEIGHT - GRAPE_HALF_HEIGHT
+        )
+        distance_t = torch.linalg.vector_norm(
+            robot.data.site_pos_w[:, mouth_id, :] - grape.data.root_link_pos_w,
+            dim=-1,
+        )
+
+        phase_rows.append(phase_t.cpu().numpy().copy())
+        gate_rows.append(gate_t.cpu().numpy().copy())
+        grape_height_rows.append(grape_height_t.cpu().numpy().copy())
+        target_height_rows.append(target_t.cpu().numpy().copy())
+        mouth_distance_rows.append(distance_t.cpu().numpy().copy())
 
     raw_env.close()
     if applied_offsets is None:
