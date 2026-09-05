@@ -16,6 +16,7 @@ from mjlab.tasks.velocity.mdp.velocity_command import UniformVelocityCommand, Un
 from mjlab.tasks.velocity.mdp import observations as _velocity_obs
 from mjlab.managers.command_manager import CommandTerm
 from mjlab.managers import CommandTermCfg
+from mjlab.managers.action_manager import ActionTerm, ActionTermCfg
 from mjlab.managers.event_manager import requires_model_fields
 from mjlab.utils.lab_api.math import matrix_from_quat, wrap_to_pi, quat_apply, quat_from_angle_axis
 from rsl_rl.algorithms.ppo import PPO as _PPO
@@ -2982,6 +2983,97 @@ def phase_rise_gate(
 def _gp_phase(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     cmd = env.command_manager.get_command(command_name)
     return (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
+
+
+def ground_pick_mouth_opening(
+    phase: torch.Tensor,
+    close_start: float = 0.375,
+    close_end: float = 0.425,
+) -> torch.Tensor:
+    """Scripted mouth opening fraction for a ground-pick cycle.
+
+    The mouth stays fully open throughout descent, closes linearly while the
+    robot is in its short capture hold, then remains closed through the lift.
+    This function is intentionally mirrored by
+    ``duck_control::model::ground_pick_mouth_opening`` in the runtime repo.
+    """
+    if not 0.0 <= close_start < close_end <= 1.0:
+        raise ValueError(
+            "mouth close window must satisfy 0 <= close_start < close_end <= 1"
+        )
+    closing = (phase - close_start) / (close_end - close_start)
+    return 1.0 - torch.clamp(closing, min=0.0, max=1.0)
+
+
+class GroundPickMouthAction(ActionTerm):
+    """Zero-dimensional action term that drives the physical mouth servo.
+
+    It participates in the action manager so its target is refreshed on every
+    physics substep, but ``action_dim == 0`` means PPO still emits exactly the
+    canonical 14 joint actions.
+    """
+
+    cfg: "GroundPickMouthActionCfg"
+
+    def __init__(self, cfg: "GroundPickMouthActionCfg", env: ManagerBasedRlEnv):
+        super().__init__(cfg=cfg, env=env)
+        joint_ids, joint_names = self._entity.find_joints((cfg.joint_name,))
+        if len(joint_ids) != 1:
+            raise ValueError(
+                f"Expected exactly one scripted mouth joint, found {joint_names}"
+            )
+        self._joint_ids = torch.tensor(joint_ids, device=self.device, dtype=torch.long)
+        self._raw_actions = torch.empty(self.num_envs, 0, device=self.device)
+
+    @property
+    def action_dim(self) -> int:
+        return 0
+
+    @property
+    def raw_action(self) -> torch.Tensor:
+        return self._raw_actions
+
+    def process_actions(self, actions: torch.Tensor) -> None:
+        if actions.shape != self._raw_actions.shape:
+            raise ValueError(
+                f"Invalid scripted-mouth action shape {tuple(actions.shape)}; "
+                f"expected {tuple(self._raw_actions.shape)}"
+            )
+
+    def apply_actions(self) -> None:
+        phase = _gp_phase(self._env, self.cfg.command_name)
+        opening = ground_pick_mouth_opening(
+            phase, self.cfg.close_start, self.cfg.close_end
+        )
+        target = self.cfg.closed_angle + opening * (
+            self.cfg.open_angle - self.cfg.closed_angle
+        )
+        # Match JointPositionAction: the servo closes its firmware loop on the
+        # biased encoder view used by BAM/domain randomization.
+        encoder_bias = self._entity.data.encoder_bias[:, self._joint_ids[0]]
+        self._entity.set_joint_position_target(
+            (target - encoder_bias).unsqueeze(-1), joint_ids=self._joint_ids
+        )
+
+    def reset(self, env_ids: torch.Tensor | slice | None = None) -> None:
+        # No learned/action history to reset; the next substep derives its
+        # target directly from the freshly reset phase command.
+        del env_ids
+
+
+@_dataclass(kw_only=True)
+class GroundPickMouthActionCfg(ActionTermCfg):
+    """Configuration for :class:`GroundPickMouthAction`."""
+
+    joint_name: str = r"^passive_mouth$"
+    command_name: str = "twist"
+    close_start: float = 0.375
+    close_end: float = 0.425
+    closed_angle: float = math.radians(-5.0)
+    open_angle: float = math.radians(30.0)
+
+    def build(self, env: ManagerBasedRlEnv) -> GroundPickMouthAction:
+        return GroundPickMouthAction(self, env)
 
 
 def mouth_ground_proximity_phased(

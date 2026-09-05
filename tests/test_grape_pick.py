@@ -5,12 +5,15 @@ import torch
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
+    DESCENT_END,
     GRAPE_HALF_HEIGHT,
     GRAPE_LIFT_HEIGHT,
     GRAPE_POSITION_NOISE,
+    HOLD_END,
     MicroduckGrapePickRlCfg,
     make_microduck_grape_pick_env_cfg,
 )
+from mjlab_microduck.robot.microduck_constants import get_grape_pick_robot_spec
 
 
 def test_grape_pick_cfg_wires_physical_object_objectives():
@@ -58,6 +61,43 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert "mouth_ground_proximity" not in cfg.rewards
     assert "mouth_payload_force" not in cfg.rewards
     assert "sample_mouth_payload" not in cfg.events
+
+    learned = cfg.actions["joint_pos"]
+    scripted = cfg.actions["scripted_mouth"]
+    assert learned.actuator_names == (r"^(?!passive_).*",)
+    assert isinstance(scripted, microduck_mdp.GroundPickMouthActionCfg)
+    assert scripted.close_start == DESCENT_END
+    assert scripted.close_end == HOLD_END
+
+
+def test_grape_pick_robot_has_separate_moving_mouth():
+    model = get_grape_pick_robot_spec().compile()
+    import mujoco
+
+    mouth_joint = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_JOINT, "passive_mouth"
+    )
+    mouth_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "mouth_jaw")
+    tip = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, "mouth_tip")
+    lower_tip = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_SITE, "lower_mouth_tip"
+    )
+    assert mouth_joint >= 0
+    assert mouth_body >= 0
+    assert model.site_bodyid[tip] != mouth_body
+    assert model.site_bodyid[lower_tip] == mouth_body
+    assert math.isclose(model.jnt_range[mouth_joint, 0], math.radians(-5.0))
+    assert math.isclose(model.jnt_range[mouth_joint, 1], math.radians(30.0))
+
+
+def test_scripted_mouth_opens_descends_closes_and_stays_closed():
+    phases = torch.tensor([0.0, DESCENT_END, 0.4, HOLD_END, 0.8, 0.99])
+    opening = microduck_mdp.ground_pick_mouth_opening(
+        phases, DESCENT_END, HOLD_END
+    )
+    assert torch.allclose(
+        opening, torch.tensor([1.0, 1.0, 0.5, 0.0, 0.0, 0.0]), atol=1e-6
+    )
 
 
 def test_grape_state_is_critic_only_and_actor_contract_stays_61d():

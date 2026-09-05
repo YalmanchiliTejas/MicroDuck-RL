@@ -86,7 +86,10 @@ from mjlab.tasks.velocity.mdp import UniformVelocityCommandCfg
 from mjlab.tasks.velocity.velocity_env_cfg import make_velocity_env_cfg
 from mjlab.utils.noise import UniformNoiseCfg as Unoise
 
-from mjlab_microduck.robot.microduck_constants import MICRODUCK_GROUND_PICK_ROBOT_CFG, MICRODUCK_GRAPE_CFG
+from mjlab_microduck.robot.microduck_constants import (
+    MICRODUCK_GRAPE_CFG,
+    MICRODUCK_GRAPE_PICK_ROBOT_CFG,
+)
 from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.microduck_velocity_env_cfg import HEAD_BODY_NAMES
 from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
@@ -158,7 +161,10 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     # ── Base config ───────────────────────────────────────────────────────────
     cfg = make_velocity_env_cfg()
 
-    cfg.scene.entities = {"robot": MICRODUCK_GROUND_PICK_ROBOT_CFG, "grape": MICRODUCK_GRAPE_CFG}
+    cfg.scene.entities = {
+        "robot": MICRODUCK_GRAPE_PICK_ROBOT_CFG,
+        "grape": MICRODUCK_GRAPE_CFG,
+    }
     cfg.scene.sensors  = (feet_ground_cfg, self_collision_cfg, head_impact_cfg)
     cfg.viewer.body_name = "trunk_base"
     cfg.sim.nconmax=50
@@ -167,6 +173,16 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     joint_pos_action = cfg.actions["joint_pos"]
     assert isinstance(joint_pos_action, JointPositionActionCfg)
     joint_pos_action.scale = 1.0
+    # The physical mouth is a separately scripted 15th servo.  Exclude its
+    # passive_* joint from PPO and add a zero-dimensional action term that
+    # follows the same phase schedule as the hardware runtime.
+    joint_pos_action.actuator_names = (r"^(?!passive_).*",)
+    cfg.actions["scripted_mouth"] = microduck_mdp.GroundPickMouthActionCfg(
+        entity_name="robot",
+        command_name="twist",
+        close_start=DESCENT_END,
+        close_end=HOLD_END,
+    )
     # No NeckOffsetJointPositionAction — head joints are part of the task motion
 
     # ── Rewards: remove walking-specific terms ────────────────────────────────

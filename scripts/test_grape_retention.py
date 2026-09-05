@@ -3,8 +3,8 @@
 
 This is deliberately not an RL evaluation.  It first records one four-second
 action cycle from a trained GrapePick checkpoint.  It then resets the scene,
-places the grape at the mouth exactly once at the start of the rise, and replays
-the recorded actions unchanged across all trials.  If the grape falls, the
+places the grape in the open mouth exactly once just before scripted closure,
+and replays the recorded actions unchanged across all trials.  If the grape falls, the
 failure is in the contact model / trajectory rather than policy exploration.
 
 Example:
@@ -34,6 +34,7 @@ from mjlab.utils.torch import configure_torch_backends
 
 import mjlab_microduck.tasks  # noqa: F401 -- populate the task registry
 from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
+    DESCENT_END,
     GP_PERIOD,
     GRAPE_HALF_HEIGHT,
     GRAPE_LIFT_HEIGHT,
@@ -282,14 +283,15 @@ def run(args: argparse.Namespace) -> None:
         actions = scripted_action.unsqueeze(0).expand(args.trials, -1)
         obs, _, _, _ = env.step(actions)
 
-    # Pass 2: reset, seat once at HOLD_END, and replay the frozen action trace.
+    # Pass 2: reset, seat once while the jaw is still open at DESCENT_END,
+    # then let the scripted mouth close over [DESCENT_END, HOLD_END].
     env.reset()
     robot = raw_env.scene["robot"]
     grape = raw_env.scene["grape"]
     mouth_ids, _ = robot.find_sites(["mouth_tip"])
     mouth_id = int(mouth_ids[0])
     command = raw_env.command_manager.get_term("twist")
-    seat_step = int(math.ceil(HOLD_END * GP_PERIOD / step_dt))
+    seat_step = int(math.ceil(DESCENT_END * GP_PERIOD / step_dt))
     applied_offsets: np.ndarray | None = None
 
     phase_rows: list[np.ndarray] = []
@@ -341,7 +343,7 @@ def run(args: argparse.Namespace) -> None:
 
     raw_env.close()
     if applied_offsets is None:
-        raise RuntimeError("Grape was never seated; cycle ended before HOLD_END")
+        raise RuntimeError("Grape was never seated; cycle ended before DESCENT_END")
 
     phase = np.stack(phase_rows)
     phase_gate = np.stack(gate_rows)

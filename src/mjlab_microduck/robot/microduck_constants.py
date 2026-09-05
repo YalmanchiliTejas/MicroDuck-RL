@@ -19,6 +19,10 @@ MICRODUCK_WALK_XML: Path = _ROBOT_DIR / "robot_walk.xml"
 # shells, head shells, jaw, battery, hips) — NOT every geom. Shared by
 # standup / ground-pick / sitstand / roulade / walk-rollers tasks.
 MICRODUCK_GROUNDCONTACT_XML: Path = _ROBOT_DIR / "robot_groundcontact.xml"
+# Ground-contact model with the physical mouth servo split out as a moving
+# lower-jaw body.  It is task-specific so locomotion/standup models and their
+# established mass properties remain unchanged.
+MICRODUCK_GRAPE_PICK_XML: Path = _ROBOT_DIR / "robot_grape_pick.xml"
 # TRUE all-collisions model: every part carries a collision geom (70 geoms,
 # 37 meshes; power_support demoted to self_collision_only like every variant).
 # No task uses it yet — exported 2026-09 for future envs needing full contact.
@@ -38,6 +42,7 @@ MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML: Path = _ROBOT_DIR / "robot_groundc
 
 assert MICRODUCK_WALK_XML.exists(), f"XML not found: {MICRODUCK_WALK_XML}"
 assert MICRODUCK_GROUNDCONTACT_XML.exists(), f"XML not found: {MICRODUCK_GROUNDCONTACT_XML}"
+assert MICRODUCK_GRAPE_PICK_XML.exists(), f"XML not found: {MICRODUCK_GRAPE_PICK_XML}"
 assert MICRODUCK_ALLCOLLISIONS_XML.exists(), f"XML not found: {MICRODUCK_ALLCOLLISIONS_XML}"
 assert MICRODUCK_BALL_XML.exists(), f"XML not found: {MICRODUCK_BALL_XML}"
 assert MICRODUCK_GROUNDCONTACT_ROLLERS_XML.exists(), f"XML not found: {MICRODUCK_GROUNDCONTACT_ROLLERS_XML}"
@@ -57,6 +62,10 @@ def get_standup_spec() -> mujoco.MjSpec:
 
 def get_ground_pick_spec() -> mujoco.MjSpec:
     return mujoco.MjSpec.from_file(str(MICRODUCK_GROUNDCONTACT_XML))
+
+
+def get_grape_pick_robot_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(MICRODUCK_GRAPE_PICK_XML))
 
 
 def get_walk_rollers_spec() -> mujoco.MjSpec:
@@ -151,6 +160,18 @@ _BAM_ACTUATOR_KWARGS = dict(
 )
 actuators = FrictionDRBamActuatorCfg(**_BAM_ACTUATOR_KWARGS)
 
+# The real alpha has a 15th XL330 for its mouth, but every learned policy is
+# intentionally 14-action.  ``passive_mouth`` is therefore excluded from the
+# policy BAM group above and placed in its own BAM group.  A zero-dimensional
+# scripted action term writes this group's position target from ground-pick
+# phase; it never consumes a PPO output or observation slot.
+mouth_actuator = FrictionDRBamActuatorCfg(
+    **{
+        **_BAM_ACTUATOR_KWARGS,
+        "target_names_expr": (r"^passive_mouth$",),
+    }
+)
+
 # Same BAM actuator, but the firmware position loop reads the encoder THROUGH
 # the passive_<joint>_backlash hinges (the real encoder is on the output side
 # of the gear play). Only for the backlash model; the target regex already
@@ -201,6 +222,16 @@ MICRODUCK_GROUND_PICK_ROBOT_CFG = EntityCfg(
     collisions=(FULL_COLLISION,),
     articulation=EntityArticulationInfoCfg(
         actuators=(actuators,),
+        soft_joint_pos_limit_factor=0.9,
+    ),
+)
+
+MICRODUCK_GRAPE_PICK_ROBOT_CFG = EntityCfg(
+    spec_fn=get_grape_pick_robot_spec,
+    init_state=HOME_FRAME,
+    collisions=(FULL_COLLISION,),
+    articulation=EntityArticulationInfoCfg(
+        actuators=(actuators, mouth_actuator),
         soft_joint_pos_limit_factor=0.9,
     ),
 )
