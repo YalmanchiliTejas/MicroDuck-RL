@@ -91,7 +91,10 @@ def test_grape_pick_robot_has_separate_moving_mouth():
 
 
 def test_scripted_mouth_opens_descends_closes_and_stays_closed():
-    phases = torch.tensor([0.0, DESCENT_END, 0.4, HOLD_END, 0.8, 0.99])
+    close_midpoint = 0.5 * (DESCENT_END + HOLD_END)
+    phases = torch.tensor(
+        [0.0, DESCENT_END, close_midpoint, HOLD_END, 0.8, 0.99]
+    )
     opening = microduck_mdp.ground_pick_mouth_opening(
         phases, DESCENT_END, HOLD_END
     )

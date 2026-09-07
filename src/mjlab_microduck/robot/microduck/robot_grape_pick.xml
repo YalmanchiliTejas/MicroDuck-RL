@@ -231,7 +231,7 @@
               <geom type="mesh" class="visual" pos="-0.0045 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="motor_support" material="motor_support_material"/>
               <!-- Part top_head_shell -->
               <geom type="mesh" class="visual" pos="-0.0045 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="top_head_shell" material="top_head_shell_material"/>
-              <geom type="mesh" class="collision" pos="-0.0045 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="top_head_shell" material="top_head_shell_material"/>
+              <geom name="top_head_shell_collision" type="mesh" class="collision" pos="-0.0045 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="top_head_shell" material="top_head_shell_material"/>
               <!-- Part xl330_11 -->
               <geom type="mesh" class="visual" pos="0 0 0.0145" quat="0.5 -0.5 -0.5 -0.5" mesh="xl330" material="xl330_material"/>
               <!-- Part seeed_bearing__configuration_default_2 -->
@@ -262,7 +262,7 @@
               </body>
               <!-- Part bottom_head_shell -->
               <geom type="mesh" class="visual" pos="-0.0043 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="bottom_head_shell" material="bottom_head_shell_material"/>
-              <geom type="mesh" class="collision" pos="-0.0043 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="bottom_head_shell" material="bottom_head_shell_material"/>
+              <geom name="bottom_head_shell_collision" type="mesh" class="collision" pos="-0.0043 -0 -0.018" quat="0.5 0.5 0.5 0.5" mesh="bottom_head_shell" material="bottom_head_shell_material"/>
               <!-- Part m12_lens_holder -->
               <geom type="mesh" class="visual" pos="0.0155 -9.13778e-05 -0.05558" quat="0.5 -0.5 0.5 -0.5" mesh="m12_lens_holder" material="m12_lens_holder_material"/>
               <!-- Part pcb__raspberry_pi_zero_2_w -->

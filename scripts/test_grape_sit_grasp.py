@@ -73,6 +73,7 @@ TASK_ID = "Mjlab-GrapePick-Flat-MicroDuck"
 
 UPPER_SENSOR = "grape_upper_contact"
 LOWER_SENSOR = "grape_lower_contact"
+FACE_SENSOR = "face_ground_contact"
 
 
 SIT_LEG_POSE = {
@@ -91,17 +92,20 @@ SIT_LEG_POSE = {
 
 
 GROUND_PICK_DOWN_LEGS = {
-    "left_hip_yaw": 0.0,
-    "left_hip_roll": 0.0,
-    "left_hip_pitch": 1.57,
-    "left_knee": 1.57,
-    "left_ankle": 0.0,
+    # Measured, tenable real-robot crouch from the roller-crouch task.  Unlike
+    # the old all-±1.57 target, it includes ankle/hip compensation instead of
+    # throwing the head's centre of mass ahead of zero-angle ankles.
+    "left_hip_yaw": -0.0184,
+    "left_hip_roll": 0.0307,
+    "left_hip_pitch": 1.4082,
+    "left_knee": 1.5248,
+    "left_ankle": -0.0675,
 
-    "right_hip_yaw": 0.0,
-    "right_hip_roll": 0.0,
-    "right_hip_pitch": -1.57,
-    "right_knee": -1.57,
-    "right_ankle": 0.0,
+    "right_hip_yaw": 0.0184,
+    "right_hip_roll": -0.0169,
+    "right_hip_pitch": -1.4757,
+    "right_knee": -1.5907,
+    "right_ankle": 0.0568,
 }
 
 
@@ -137,6 +141,11 @@ def configure_env(args):
     cfg.curriculum = {}
 
     cfg.commands["twist"].randomize_phase = False
+
+    # This diagnostic drives the mouth actuator explicitly.  Leaving the
+    # training action term enabled would overwrite our jaw target every
+    # physics substep from the ground-pick phase command.
+    cfg.actions.pop("scripted_mouth", None)
 
     cfg.events = {
         name: term
@@ -226,6 +235,28 @@ def configure_env(args):
             )
         )
 
+    if FACE_SENSOR not in existing:
+
+        extra.append(
+            ContactSensorCfg(
+                name=FACE_SENSOR,
+                primary=ContactMatch(
+                    mode="geom",
+                    pattern=args.face_geom_pattern,
+                    entity="robot",
+                ),
+                secondary=ContactMatch(
+                    mode="body",
+                    pattern="terrain",
+                ),
+                fields=("found", "force", "dist"),
+                reduce="maxforce",
+                num_slots=1,
+                secondary_policy="first",
+                history_length=args.contact_history,
+            )
+        )
+
     cfg.scene.sensors = (
         tuple(
             cfg.scene.sensors
@@ -234,6 +265,18 @@ def configure_env(args):
             extra
         )
     )
+
+    if args.video:
+        cfg.viewer.origin_type = cfg.viewer.OriginType.ASSET_BODY
+        cfg.viewer.entity_name = "robot"
+        cfg.viewer.body_name = "trunk_base"
+        cfg.viewer.env_idx = 0
+        cfg.viewer.max_extra_envs = 0
+        cfg.viewer.distance = args.video_distance
+        cfg.viewer.azimuth = args.video_azimuth
+        cfg.viewer.elevation = args.video_elevation
+        cfg.viewer.width = args.video_width
+        cfg.viewer.height = args.video_height
 
     return cfg
 
@@ -597,34 +640,15 @@ def force_jaw(
             ),
         )
 
-    robot.write_joint_state_to_sim(
-        position=values[
-            :,
-            None,
-        ],
-
-        velocity=torch.zeros(
-            (
-                env.num_envs,
-                1,
-            ),
-            device=env.device,
-            dtype=values.dtype,
-        ),
-
+    # Set the actuator target; do not overwrite qpos/qvel.  This preserves BAM
+    # torque limits, delay, friction, contact load, and the real closing error.
+    robot.set_joint_position_target(
+        values[:, None],
         joint_ids=torch.tensor(
-            [
-                jaw_id
-            ],
+            [jaw_id],
             device=env.device,
             dtype=torch.long,
         ),
-    )
-
-    env.sim.forward()
-
-    env.scene.update(
-        dt=0.0
     )
 
 
@@ -633,6 +657,7 @@ def step_with_locked_jaw(
     action,
     jaw_id,
     jaw_value,
+    video_frames=None,
 ):
 
     force_jaw(
@@ -645,11 +670,10 @@ def step_with_locked_jaw(
         action
     )
 
-    force_jaw(
-        env,
-        jaw_id,
-        jaw_value,
-    )
+    if video_frames is not None:
+        frame = env.render()
+        if frame is not None:
+            video_frames.append(np.asarray(frame).copy())
 
 
 def ramp_to_pose(
@@ -659,6 +683,9 @@ def ramp_to_pose(
     settle_seconds,
     jaw_id,
     jaw_value,
+    safety_reference_quat=None,
+    face_force_threshold=0.1,
+    video_frames=None,
 ):
 
     robot = env.scene[
@@ -670,6 +697,39 @@ def ramp_to_pose(
         .joint_pos
         .clone()
     )
+
+    max_face_force = torch.zeros(env.num_envs, device=env.device)
+    face_contact_seen = torch.zeros(
+        env.num_envs, device=env.device, dtype=torch.bool
+    )
+    max_orientation_error = torch.zeros(env.num_envs, device=env.device)
+    min_root_height = torch.full(
+        (env.num_envs,), float("inf"), device=env.device
+    )
+    max_root_speed = torch.zeros(env.num_envs, device=env.device)
+
+    def update_safety():
+        nonlocal max_face_force, face_contact_seen
+        nonlocal max_orientation_error, min_root_height, max_root_speed
+
+        face = read_contact_sensor(env.scene[FACE_SENSOR], face_force_threshold)
+        max_face_force = torch.maximum(max_face_force, face["max_force"])
+        face_contact_seen |= face["active"]
+
+        terrain_z = env.scene.terrain.env_origins[:, 2]
+        min_root_height = torch.minimum(
+            min_root_height,
+            robot.data.root_link_pos_w[:, 2] - terrain_z,
+        )
+        max_root_speed = torch.maximum(
+            max_root_speed,
+            torch.linalg.vector_norm(robot.data.root_link_lin_vel_w, dim=-1),
+        )
+        if safety_reference_quat is not None:
+            max_orientation_error = torch.maximum(
+                max_orientation_error,
+                orientation_error_deg(robot, safety_reference_quat),
+            )
 
     move_steps = max(
         1,
@@ -704,7 +764,9 @@ def ramp_to_pose(
             ),
             jaw_id,
             jaw_value,
+            video_frames=video_frames,
         )
+        update_safety()
 
     final_action = pose_to_action(
         env,
@@ -728,7 +790,17 @@ def ramp_to_pose(
             final_action,
             jaw_id,
             jaw_value,
+            video_frames=video_frames,
         )
+        update_safety()
+
+    env._last_transition_safety = {
+        "face_contact_seen": face_contact_seen,
+        "max_face_force_n": max_face_force,
+        "max_orientation_error_deg": max_orientation_error,
+        "min_root_height_m": min_root_height,
+        "max_root_speed_mps": max_root_speed,
+    }
 
     return final_action
 
@@ -1502,6 +1574,19 @@ def full_state_tensors(
                 jaw_id,
             ],
 
+        "jaw_target_rad":
+            robot.data
+            .joint_pos_target[
+                :,
+                jaw_id,
+            ],
+
+        "jaw_error_rad":
+            (
+                robot.data.joint_pos_target[:, jaw_id]
+                - robot.data.joint_pos[:, jaw_id]
+            ),
+
         "grape_vz_mps":
             grape.data
             .root_link_lin_vel_w[
@@ -1521,6 +1606,14 @@ def full_state_tensors(
             env,
             force_threshold,
         )
+    )
+
+    face = read_contact_sensor(env.scene[FACE_SENSOR], force_threshold)
+    result.update(
+        {
+            "face_contact": face["active"].float(),
+            "face_force_n": face["max_force"],
+        }
     )
 
     return result
@@ -1605,6 +1698,28 @@ def body_search(
 
         env.reset()
 
+        # Do not jump directly from standing into a deep fold.  First reach the
+        # repository's stability-verified sit, settle, then bend farther.
+        sit_target = build_leg_pose_batch(
+            env.scene[
+                "robot"
+            ],
+            [0.0] * args.num_envs,
+            leg_joint_ids,
+        )
+
+        ramp_to_pose(
+            env,
+            sit_target,
+            args.sit_seconds,
+            args.sit_settle_seconds,
+            jaw_id,
+            args.jaw_open_rad,
+            safety_reference_quat=standing_reference_quat,
+            face_force_threshold=args.face_force_threshold,
+        )
+        sit_safety = env._last_transition_safety
+
         target = build_leg_pose_batch(
             env.scene[
                 "robot"
@@ -1620,7 +1735,33 @@ def body_search(
             args.body_settle_seconds,
             jaw_id,
             args.jaw_open_rad,
+            safety_reference_quat=standing_reference_quat,
+            face_force_threshold=args.face_force_threshold,
         )
+        fold_safety = env._last_transition_safety
+
+        trajectory_safety = {
+            "face_contact_seen": (
+                sit_safety["face_contact_seen"]
+                | fold_safety["face_contact_seen"]
+            ),
+            "max_face_force_n": torch.maximum(
+                sit_safety["max_face_force_n"],
+                fold_safety["max_face_force_n"],
+            ),
+            "max_orientation_error_deg": torch.maximum(
+                sit_safety["max_orientation_error_deg"],
+                fold_safety["max_orientation_error_deg"],
+            ),
+            "min_root_height_m": torch.minimum(
+                sit_safety["min_root_height_m"],
+                fold_safety["min_root_height_m"],
+            ),
+            "max_root_speed_mps": torch.maximum(
+                sit_safety["max_root_speed_mps"],
+                fold_safety["max_root_speed_mps"],
+            ),
+        }
 
         batch_rows = geometry_rows(
             geometry_tensors(
@@ -1641,7 +1782,23 @@ def body_search(
             },
         )
 
-        for row in batch_rows:
+        for row_index, row in enumerate(batch_rows):
+
+            row["face_contact_seen"] = bool(
+                trajectory_safety["face_contact_seen"][row_index].item()
+            )
+            row["max_face_force_n"] = float(
+                trajectory_safety["max_face_force_n"][row_index].item()
+            )
+            row["max_orientation_error_deg"] = float(
+                trajectory_safety["max_orientation_error_deg"][row_index].item()
+            )
+            row["min_root_height_m"] = float(
+                trajectory_safety["min_root_height_m"][row_index].item()
+            )
+            row["max_root_speed_mps"] = float(
+                trajectory_safety["max_root_speed_mps"][row_index].item()
+            )
 
             row[
                 "candidate_ok"
@@ -1653,6 +1810,10 @@ def body_search(
 
                 and
 
+                row["min_root_height_m"] > 0.015
+
+                and
+
                 row[
                     "root_speed_mps"
                 ]
@@ -1660,13 +1821,19 @@ def body_search(
 
                 and
 
-                row[
-                    "orientation_error_deg"
-                ]
+                row["max_orientation_error_deg"]
                 <= (
                     args
                     .body_candidate_max_orientation_deg
                 )
+
+                and
+
+                not row["face_contact_seen"]
+
+                and
+
+                row["max_face_force_n"] <= args.face_force_threshold
             )
 
             rows.append(
@@ -1901,6 +2068,20 @@ def head_search(
 
         env.reset()
 
+        sit_target = build_leg_pose_batch(
+            env.scene["robot"], [0.0] * args.num_envs, leg_joint_ids
+        )
+        ramp_to_pose(
+            env,
+            sit_target,
+            args.sit_seconds,
+            args.sit_settle_seconds,
+            jaw_id,
+            args.jaw_open_rad,
+            safety_reference_quat=standing_reference_quat,
+            face_force_threshold=args.face_force_threshold,
+        )
+
         body_target = build_leg_pose_batch(
             env.scene[
                 "robot"
@@ -1924,6 +2105,8 @@ def head_search(
             args.body_settle_seconds,
             jaw_id,
             args.jaw_open_rad,
+            safety_reference_quat=standing_reference_quat,
+            face_force_threshold=args.face_force_threshold,
         )
 
         robot = env.scene[
@@ -2083,6 +2266,20 @@ def head_search(
 
         env.reset()
 
+        sit_target = build_leg_pose_batch(
+            env.scene["robot"], [0.0] * args.num_envs, leg_joint_ids
+        )
+        ramp_to_pose(
+            env,
+            sit_target,
+            args.sit_seconds,
+            args.sit_settle_seconds,
+            jaw_id,
+            args.jaw_open_rad,
+            safety_reference_quat=standing_reference_quat,
+            face_force_threshold=args.face_force_threshold,
+        )
+
         body_target = build_leg_pose_batch(
             env.scene[
                 "robot"
@@ -2106,6 +2303,8 @@ def head_search(
             args.body_settle_seconds,
             jaw_id,
             args.jaw_open_rad,
+            safety_reference_quat=standing_reference_quat,
+            face_force_threshold=args.face_force_threshold,
         )
 
         robot = env.scene[
@@ -2165,7 +2364,10 @@ def head_search(
             args.head_settle_seconds,
             jaw_id,
             args.jaw_open_rad,
+            safety_reference_quat=crouch_reference_quat,
+            face_force_threshold=args.face_force_threshold,
         )
+        head_safety = env._last_transition_safety
 
         metrics = geometry_tensors(
             env,
@@ -2225,6 +2427,16 @@ def head_search(
             batch_rows
         ):
 
+            row["face_contact_seen"] = bool(
+                head_safety["face_contact_seen"][i].item()
+            )
+            row["max_face_force_n"] = float(
+                head_safety["max_face_force_n"][i].item()
+            )
+            row["max_posture_change_deg"] = float(
+                head_safety["max_orientation_error_deg"][i].item()
+            )
+
             row[
                 "posture_change_deg"
             ] = float(
@@ -2254,6 +2466,18 @@ def head_search(
                     "posture_change_deg"
                 ]
                 <= args.max_posture_change_deg
+
+                and
+
+                row["max_posture_change_deg"] <= args.max_posture_change_deg
+
+                and
+
+                not row["face_contact_seen"]
+
+                and
+
+                row["max_face_force_n"] <= args.face_force_threshold
             )
 
             validated_rows.append(
@@ -2368,9 +2592,27 @@ def prepare_best_pose(
     jaw_id,
     leg_joint_ids,
     args,
+    reset_env=True,
+    video_frames=None,
 ):
 
-    env.reset()
+    if reset_env:
+        env.reset()
+
+    sit_target = build_leg_pose_batch(
+        env.scene["robot"], [0.0] * env.num_envs, leg_joint_ids
+    )
+    ramp_to_pose(
+        env,
+        sit_target,
+        args.sit_seconds,
+        args.sit_settle_seconds,
+        jaw_id,
+        args.jaw_open_rad,
+        face_force_threshold=args.face_force_threshold,
+        video_frames=video_frames,
+    )
+    sit_safety = env._last_transition_safety
 
     target = build_leg_pose_batch(
         env.scene[
@@ -2387,8 +2629,20 @@ def prepare_best_pose(
         leg_joint_ids,
     )
 
-    target = set_head_batch(
+    ramp_to_pose(
+        env,
         target,
+        args.fold_seconds,
+        args.body_settle_seconds,
+        jaw_id,
+        args.jaw_open_rad,
+        face_force_threshold=args.face_force_threshold,
+        video_frames=video_frames,
+    )
+    fold_safety = env._last_transition_safety
+
+    head_target = set_head_batch(
+        env.scene["robot"].data.joint_pos.clone(),
 
         neck_id,
 
@@ -2411,12 +2665,30 @@ def prepare_best_pose(
 
     action = ramp_to_pose(
         env,
-        target,
-        args.fold_seconds,
+        head_target,
+        args.head_move_seconds,
         args.final_settle_seconds,
         jaw_id,
         args.jaw_open_rad,
+        face_force_threshold=args.face_force_threshold,
+        video_frames=video_frames,
     )
+    head_safety = env._last_transition_safety
+
+    env._last_prepare_safety = {
+        "face_contact_seen": (
+            sit_safety["face_contact_seen"]
+            | fold_safety["face_contact_seen"]
+            | head_safety["face_contact_seen"]
+        ),
+        "max_face_force_n": torch.maximum(
+            torch.maximum(
+                sit_safety["max_face_force_n"],
+                fold_safety["max_face_force_n"],
+            ),
+            head_safety["max_face_force_n"],
+        ),
+    }
 
     force_jaw(
         env,
@@ -2996,7 +3268,10 @@ def final_grasp(
         "=" * 72
     )
 
-    action = prepare_best_pose(
+    # First reproduce the selected pose only to resolve its best grape position
+    # in world coordinates.  Then reset and perform a genuine end-to-end replay:
+    # the grape is already on the floor while the robot starts standing.
+    prepare_best_pose(
         env,
         best_pose,
         neck_id,
@@ -3006,25 +3281,50 @@ def final_grasp(
         args,
     )
 
-    reset_contact_sensors(
-        env
-    )
+    robot = env.scene["robot"]
+    upper = robot.data.geom_pos_w[:, upper_id, :]
+    lower = robot.data.geom_pos_w[:, lower_id, :]
+    fixed_grape_xy = 0.5 * (upper[:, :2] + lower[:, :2])
+    fixed_grape_xy = fixed_grape_xy.clone()
+    fixed_grape_xy[:, 0] += best_placement["offset_x_mm"] / 1000.0
+    fixed_grape_xy[:, 1] += best_placement["offset_y_mm"] / 1000.0
+
+    env.reset()
+
+    reset_upper = robot.data.geom_pos_w[:, upper_id, :]
+    reset_lower = robot.data.geom_pos_w[:, lower_id, :]
+    reset_midpoint_xy = 0.5 * (reset_upper[:, :2] + reset_lower[:, :2])
 
     place_grapes_on_floor(
         env,
         upper_id,
         lower_id,
-
-        best_placement[
-            "offset_x_mm"
-        ]
-        / 1000.0,
-
-        best_placement[
-            "offset_y_mm"
-        ]
-        / 1000.0,
+        fixed_grape_xy[:, 0] - reset_midpoint_xy[:, 0],
+        fixed_grape_xy[:, 1] - reset_midpoint_xy[:, 1],
     )
+
+    video_frames = [] if args.video else None
+    if video_frames is not None:
+        initial_frame = env.render()
+        if initial_frame is not None:
+            video_frames.append(np.asarray(initial_frame).copy())
+
+    action = prepare_best_pose(
+        env,
+        best_pose,
+        neck_id,
+        head_id,
+        jaw_id,
+        leg_joint_ids,
+        args,
+        reset_env=False,
+        video_frames=video_frames,
+    )
+    approach_safety = env._last_prepare_safety
+
+    # Closed-grasp statistics should start after the approach, while the
+    # trajectory-wide face-contact result is retained separately above.
+    reset_contact_sensors(env)
 
     trace = []
 
@@ -3064,6 +3364,7 @@ def final_grasp(
             action,
             jaw_id,
             args.jaw_open_rad,
+            video_frames=video_frames,
         )
 
         record(
@@ -3100,6 +3401,7 @@ def final_grasp(
             action,
             jaw_id,
             jaw_value,
+            video_frames=video_frames,
         )
 
         record(
@@ -3125,6 +3427,7 @@ def final_grasp(
             action,
             jaw_id,
             args.jaw_closed_rad,
+            video_frames=video_frames,
         )
 
         record(
@@ -3177,10 +3480,6 @@ def final_grasp(
         else:
 
             current = 0
-
-    robot = env.scene[
-        "robot"
-    ]
 
     stand_pose = (
         robot.data
@@ -3243,6 +3542,7 @@ def final_grasp(
             ),
             jaw_id,
             args.jaw_closed_rad,
+            video_frames=video_frames,
         )
 
         record(
@@ -3271,6 +3571,7 @@ def final_grasp(
             final_action,
             jaw_id,
             args.jaw_closed_rad,
+            video_frames=video_frames,
         )
 
         record(
@@ -3352,6 +3653,20 @@ def final_grasp(
             post_lift[
                 "lower_contact"
             ],
+
+        "approach_face_contact": bool(
+            approach_safety["face_contact_seen"][0].item()
+        ),
+
+        "approach_max_face_force_n": float(
+            approach_safety["max_face_force_n"][0].item()
+        ),
+
+        "max_face_force_n": max(
+            [row["face_force_n"] for row in trace] + [0.0]
+        ),
+
+        "video_frames": video_frames,
     }
 
 
@@ -4014,7 +4329,18 @@ def make_plots(
         series(
             "jaw_rad"
         ),
-        label="jaw",
+        label="actual jaw",
+    )
+
+    axes[
+        2
+    ].plot(
+        time,
+        series(
+            "jaw_target_rad"
+        ),
+        linestyle="--",
+        label="jaw target",
     )
 
     axes[
@@ -4069,6 +4395,16 @@ def make_plots(
 
     axes[
         3
+    ].plot(
+        time,
+        series(
+            "face_contact"
+        ),
+        label="FACE/FLOOR",
+    )
+
+    axes[
+        3
     ].set_ylim(
         -0.05,
         1.05,
@@ -4102,6 +4438,16 @@ def make_plots(
             "lower_force_n"
         ),
         label="lower force",
+    )
+
+    axes[
+        4
+    ].plot(
+        time,
+        series(
+            "face_force_n"
+        ),
+        label="face/floor force",
     )
 
     axes[
@@ -4181,7 +4527,6 @@ def make_plots(
 # =============================================================================
 
 
-@torch.inference_mode()
 def run(
     args,
 ):
@@ -4267,6 +4612,7 @@ def run(
             args
         ),
         device=device,
+        render_mode="rgb_array" if args.video else None,
     )
 
     env.reset()
@@ -4562,6 +4908,12 @@ def run(
                 ]
                 <= args.max_final_grip_distance
             ),
+
+        "no_face_support": bool(
+            not grasp["approach_face_contact"]
+            and grasp["approach_max_face_force_n"] <= args.face_force_threshold
+            and grasp["max_face_force_n"] <= args.face_force_threshold
+        ),
     }
 
     report = {
@@ -4638,6 +4990,12 @@ def run(
                 ],
         },
 
+        "face_contact": {
+            "approach_contact": grasp["approach_face_contact"],
+            "approach_max_force_n": grasp["approach_max_face_force_n"],
+            "post_approach_max_force_n": grasp["max_face_force_n"],
+        },
+
         "checks":
             checks,
 
@@ -4672,6 +5030,19 @@ def run(
         env.step_dt,
     )
 
+    video_path = output_dir / "sit_grasp_rollout.mp4"
+    if args.video:
+        import mediapy as media
+
+        frames = grasp["video_frames"]
+        if not frames:
+            raise RuntimeError("Video was requested, but the renderer returned no frames")
+        media.write_video(
+            video_path,
+            np.stack(frames),
+            fps=round(1.0 / env.step_dt),
+        )
+
     print()
 
     print(
@@ -4699,6 +5070,9 @@ def run(
         f"Outputs: "
         f"{output_dir}"
     )
+
+    if args.video:
+        print(f"Video:   {video_path}")
 
     env.close()
 
@@ -4744,6 +5118,21 @@ def parse_args():
     )
 
     parser.add_argument(
+        "--face-geom-pattern",
+        default=(
+            r"^(top_head_shell_collision|bottom_head_shell_collision)$"
+        ),
+        help="Robot collision geoms that may never support the crouch.",
+    )
+
+    parser.add_argument(
+        "--face-force-threshold",
+        type=float,
+        default=0.1,
+        help="Maximum permitted face-to-ground force in newtons.",
+    )
+
+    parser.add_argument(
         "--leg-blend-steps",
         type=int,
         default=13,
@@ -4753,6 +5142,19 @@ def parse_args():
         "--fold-seconds",
         type=float,
         default=1.5,
+    )
+
+    parser.add_argument(
+        "--sit-seconds",
+        type=float,
+        default=1.5,
+        help="Time for the standing-to-stable-sit stage.",
+    )
+
+    parser.add_argument(
+        "--sit-settle-seconds",
+        type=float,
+        default=0.5,
     )
 
     parser.add_argument(
@@ -4773,7 +5175,7 @@ def parse_args():
     parser.add_argument(
         "--body-candidate-max-orientation-deg",
         type=float,
-        default=100.0,
+        default=60.0,
     )
 
     # ========================================================
@@ -5005,6 +5407,19 @@ def parse_args():
         ),
     )
 
+    parser.add_argument(
+        "--video",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Write sit_grasp_rollout.mp4 (use --no-video to disable).",
+    )
+
+    parser.add_argument("--video-width", type=int, default=640)
+    parser.add_argument("--video-height", type=int, default=480)
+    parser.add_argument("--video-distance", type=float, default=0.55)
+    parser.add_argument("--video-azimuth", type=float, default=90.0)
+    parser.add_argument("--video-elevation", type=float, default=-15.0)
+
     args = parser.parse_args()
 
     if args.num_envs <= 0:
@@ -5012,6 +5427,9 @@ def parse_args():
         parser.error(
             "--num-envs must be positive"
         )
+
+    if args.face_force_threshold < 0.0:
+        parser.error("--face-force-threshold must be non-negative")
 
     return args
 
