@@ -45,6 +45,8 @@ class ExportConfig:
     video_length: int = 200
     video_height: int | None = None
     video_width: int | None = None
+    video_folder: str | None = None
+    seed: int | None = None
     camera: int | str | None = None
     viewer: Literal["auto", "native", "viser"] = "auto"
 
@@ -70,6 +72,13 @@ def _iteration_of(checkpoint_path: Path | None) -> int | None:
 
 
 def run_export(task_id: str, cfg: ExportConfig) -> ExportResult:
+    # A checkpoint video is useful only if it is comparable to the next one.
+    # Keep this opt-in so ordinary exports retain mjlab's default seeding.
+    if cfg.seed is not None:
+        torch.manual_seed(cfg.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(cfg.seed)
+
     configure_torch_backends()
 
     device = cfg.device or ("cuda:0" if torch.cuda.is_available() else "cpu")
@@ -216,9 +225,14 @@ def run_export(task_id: str, cfg: ExportConfig) -> ExportResult:
     if TRAINED_MODE and cfg.video:
         print("[INFO] Recording videos during play")
         assert log_dir is not None  # log_dir is set in TRAINED_MODE block
+        video_folder = (
+            Path(cfg.video_folder)
+            if cfg.video_folder is not None
+            else log_dir / "videos" / "play"
+        )
         env = VideoRecorder(
             env,
-            video_folder=log_dir / "videos" / "play",
+            video_folder=video_folder,
             step_trigger=lambda step: step == 0,
             video_length=cfg.video_length,
             disable_logger=True,

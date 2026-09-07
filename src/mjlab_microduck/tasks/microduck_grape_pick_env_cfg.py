@@ -156,6 +156,27 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         num_slots=1,
     )
 
+    # A near mouth-to-grape distance is not a grasp.  Keep the two pad contacts
+    # separate so the task can require the grape to remain in the closed jaw.
+    upper_grape_contact_cfg = ContactSensorCfg(
+        name="upper_grape_contact",
+        primary=ContactMatch(mode="geom", pattern=r"^grape_geom$", entity="grape"),
+        secondary=ContactMatch(mode="geom", pattern=r"^upper_mouth_grip$", entity="robot"),
+        fields=("found", "force"),
+        reduce="maxforce",
+        num_slots=1,
+        secondary_policy="first",
+    )
+    lower_grape_contact_cfg = ContactSensorCfg(
+        name="lower_grape_contact",
+        primary=ContactMatch(mode="geom", pattern=r"^grape_geom$", entity="grape"),
+        secondary=ContactMatch(mode="geom", pattern=r"^lower_mouth_grip$", entity="robot"),
+        fields=("found", "force"),
+        reduce="maxforce",
+        num_slots=1,
+        secondary_policy="first",
+    )
+
     foot_frictions_geom_names = ("left_foot_collision", "right_foot_collision")
 
     # ── Base config ───────────────────────────────────────────────────────────
@@ -165,7 +186,10 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         "robot": MICRODUCK_GRAPE_PICK_ROBOT_CFG,
         "grape": MICRODUCK_GRAPE_CFG,
     }
-    cfg.scene.sensors  = (feet_ground_cfg, self_collision_cfg, head_impact_cfg)
+    cfg.scene.sensors  = (
+        feet_ground_cfg, self_collision_cfg, head_impact_cfg,
+        upper_grape_contact_cfg, lower_grape_contact_cfg,
+    )
     cfg.viewer.body_name = "trunk_base"
     cfg.sim.nconmax=50
 
@@ -242,13 +266,17 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     # batting/throwing the grape, while the moving target removes any incentive
     # to complete the lift violently ahead of schedule.
     grape_lift_params = {
-        "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+        # The midpoint between the fixed upper and moving lower tips is the
+        # physical jaw pocket; the upper tip alone rewarded near misses.
+        "asset_cfg": SceneEntityCfg(
+            "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        ),
         "grape_name": "grape",
         "ground_height": GRAPE_HALF_HEIGHT,
         "target_height": GRAPE_LIFT_HEIGHT,
         "height_std": 0.08,
-        "grasp_distance": GRAPE_HALF_HEIGHT,
-        "grasp_std": 0.05,
+        "grasp_distance": 0.0,
+        "grasp_std": 0.018,
         "command_name": "twist",
         "hold_end": HOLD_END,
         "rise_end": RISE_END,
@@ -259,12 +287,37 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         params=grape_lift_params,
     )
 
+    # Dense grip-center tracking gets the policy into the pocket; this term
+    # makes retention after mouth closure a first-class objective.
+    cfg.rewards["grape_dual_contact"] = RewardTermCfg(
+        func=microduck_mdp.grape_dual_contact_phased,
+        weight=12.0,
+        params={
+            "upper_sensor_name": upper_grape_contact_cfg.name,
+            "lower_sensor_name": lower_grape_contact_cfg.name,
+            "command_name": "twist",
+            "hold_end": HOLD_END,
+            "rise_end": RISE_END,
+        },
+    )
+    cfg.metrics["dual_contact"] = MetricsTermCfg(
+        func=microduck_mdp.grape_dual_contact_phased,
+        params={
+            "upper_sensor_name": upper_grape_contact_cfg.name,
+            "lower_sensor_name": lower_grape_contact_cfg.name,
+            "command_name": "twist",
+            "hold_end": HOLD_END,
+            "rise_end": RISE_END,
+        },
+    )
+
     # Diagnostic-only episode means. These are unweighted, do not enter the
     # reward, and appear in W&B under Episode_Metrics/<name>.
     for metric_name in (
         "grape_height",
         "target_grape_height",
         "mouth_grape_distance",
+        "grip_center_distance",
         "height_score",
         "grasp_score",
         "phase",

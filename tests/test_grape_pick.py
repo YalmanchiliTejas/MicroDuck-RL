@@ -34,11 +34,22 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert lift.weight > 0.0
     assert lift.func is microduck_mdp.grape_lift_tracking_phased
     assert lift.params["target_height"] == GRAPE_LIFT_HEIGHT
-    assert lift.params["grasp_std"] == 0.05
+    assert lift.params["grasp_std"] == 0.018
+    assert lift.params["grasp_distance"] == 0.0
+    assert lift.params["asset_cfg"].site_names == [
+        "mouth_tip", "lower_mouth_tip"
+    ]
+    assert "grape_dual_contact" in cfg.rewards
+    assert cfg.rewards["grape_dual_contact"].weight > lift.weight
+    assert cfg.rewards["grape_dual_contact"].func is microduck_mdp.grape_dual_contact_phased
+    assert {sensor.name for sensor in cfg.scene.sensors} >= {
+        "upper_grape_contact", "lower_grape_contact"
+    }
     assert set(cfg.metrics) >= {
         "grape_height",
         "target_grape_height",
         "mouth_grape_distance",
+        "grip_center_distance",
         "height_score",
         "grasp_score",
         "phase",
@@ -144,6 +155,16 @@ class _Scene(dict):
         self.terrain = _Terrain(n)
 
 
+class _SensorData:
+    def __init__(self, found):
+        self.found = found
+
+
+class _Sensor:
+    def __init__(self, found):
+        self.data = _SensorData(found)
+
+
 class _Commands:
     def __init__(self, phases):
         angle = 2.0 * math.pi * phases
@@ -239,3 +260,22 @@ def test_approach_reward_uses_grape_surface_not_ground_height():
 
     assert out[0] > 0.99
     assert out[1] < 0.01
+
+
+def test_dual_contact_requires_both_pads_after_mouth_closes():
+    phase = torch.tensor([0.7, 0.7, 0.3])
+    env = _Env(
+        torch.zeros(3, 3), torch.zeros(3, 3), phase
+    )
+    env.scene.sensors = {
+        "upper": _Sensor(torch.tensor([[True], [True], [True]])),
+        "lower": _Sensor(torch.tensor([[True], [False], [True]])),
+    }
+
+    score = microduck_mdp.grape_dual_contact_phased(
+        env, upper_sensor_name="upper", lower_sensor_name="lower"
+    )
+
+    assert score[0] > 0.0
+    assert score[1] == 0.0
+    assert score[2] == 0.0

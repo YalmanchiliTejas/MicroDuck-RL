@@ -3290,7 +3290,10 @@ def mouth_grape_proximity_phased(
     """Reward bringing the mouth to the grape surface during approach/hold."""
     robot: Entity = env.scene[asset_cfg.name]
     grape: Entity = env.scene[grape_name]
-    mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
+    mouth_sites = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    # Two selected sites define the real closed-jaw pocket.  Mean keeps the
+    # existing one-site callers backward-compatible.
+    mouth = mouth_sites.mean(dim=1)
     center_distance = torch.linalg.vector_norm(
         mouth - grape.data.root_link_pos_w, dim=-1
     )
@@ -3368,7 +3371,10 @@ def _grape_lift_components(
         -(((grape_height - target_grape_height) / height_std) ** 2)
     )
 
-    mouth = robot.data.site_pos_w[:, asset_cfg.site_ids[0], :]
+    mouth_sites = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    # The grape must be centered in the pocket between the fixed upper and
+    # moving lower jaw, rather than merely close to the upper-mouth tip.
+    mouth = mouth_sites.mean(dim=1)
     mouth_grape_distance = torch.linalg.vector_norm(
         mouth - grape.data.root_link_pos_w, dim=-1
     )
@@ -3379,11 +3385,37 @@ def _grape_lift_components(
         "grape_height": torch.nan_to_num(grape_height, nan=0.0),
         "target_grape_height": torch.nan_to_num(target_grape_height, nan=0.0),
         "mouth_grape_distance": torch.nan_to_num(mouth_grape_distance, nan=0.0),
+        "grip_center_distance": torch.nan_to_num(mouth_grape_distance, nan=0.0),
         "height_score": torch.nan_to_num(height_score, nan=0.0),
         "grasp_score": torch.nan_to_num(grasp_score, nan=0.0),
         "phase": torch.nan_to_num(phase, nan=0.0),
         "phase_gate": torch.nan_to_num(phase_gate, nan=0.0),
     }
+
+
+def grape_dual_contact_phased(
+    env: ManagerBasedRlEnv,
+    upper_sensor_name: str,
+    lower_sensor_name: str,
+    command_name: str = "twist",
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Return one only when both physical mouth pads hold the grape.
+
+    This is deliberately gated from the end of the capture hold through the
+    standing rest.  It cannot reward touching the grape with an open mouth,
+    and it turns a post-capture slip into a clear loss of reward.
+    """
+    upper = env.scene.sensors[upper_sensor_name].data.found
+    lower = env.scene.sensors[lower_sensor_name].data.found
+    # Sensor reducers have differed between mjlab versions: flatten all
+    # non-batch dimensions so this remains one contact bit per environment.
+    upper = upper.reshape(env.num_envs, -1).any(dim=1)
+    lower = lower.reshape(env.num_envs, -1).any(dim=1)
+    held = upper.bool() & lower.bool()
+    gate = phase_rise_gate(_gp_phase(env, command_name), hold_end, rise_end)
+    return gate * held.to(dtype=gate.dtype)
 
 
 def grape_lift_diagnostic(
