@@ -2626,8 +2626,15 @@ def head_search(
                 f"posture-change="
                 f"{row['posture_change_deg']:.1f}° | "
 
+                f"max-posture="
+                f"{row['max_posture_change_deg']:.1f}° | "
+
                 f"speed="
                 f"{row['root_speed_mps']:.3f}m/s | "
+
+                f"face="
+                f"{row['face_contact_seen']} "
+                f"({row['max_face_force_n']:.3f}N) | "
 
                 f"valid="
                 f"{row['valid']}"
@@ -2673,8 +2680,15 @@ def head_search(
                 f"posture-change="
                 f"{row['posture_change_deg']:.1f}° | "
 
+                f"max-posture="
+                f"{row['max_posture_change_deg']:.1f}° | "
+
                 f"speed="
                 f"{row['root_speed_mps']:.3f}m/s | "
+
+                f"face="
+                f"{row['face_contact_seen']} "
+                f"({row['max_face_force_n']:.3f}N) | "
 
                 f"root="
                 f"{row['root_height_m']*100:.2f}cm"
