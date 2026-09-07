@@ -751,9 +751,14 @@ def ramp_to_pose(
         move_steps
     ):
 
-        alpha = (
+        raw_alpha = (
             step + 1
         ) / move_steps
+
+        # Zero velocity at both ends of every scripted segment.  The previous
+        # linear ramp stepped instantly to a non-zero joint velocity and could
+        # pitch the free-root robot forward before the legs established support.
+        alpha = raw_alpha * raw_alpha * (3.0 - 2.0 * raw_alpha)
 
         desired = (
             start_pose
@@ -1867,6 +1872,10 @@ def body_search(
                 f"speed="
                 f"{row['root_speed_mps']:.3f}m/s | "
 
+                f"face="
+                f"{row['face_contact_seen']} "
+                f"({row['max_face_force_n']:.3f}N) | "
+
                 f"ok="
                 f"{row['candidate_ok']}"
             )
@@ -1881,9 +1890,76 @@ def body_search(
 
     if not valid:
 
+        failure_video_path = None
+        if args.video and rows:
+            # Preserve visual evidence even when the safety gate correctly
+            # stops the later grasp stages.  Replay the least-bad candidate in
+            # env 0 with every environment using the same blend.
+            best_rejected = min(
+                rows,
+                key=lambda row: (
+                    row["face_contact_seen"],
+                    row["max_face_force_n"],
+                    row["max_orientation_error_deg"],
+                    row["vertical_error_m"],
+                ),
+            )
+            failure_frames = []
+            env.reset()
+            initial_frame = env.render()
+            if initial_frame is not None:
+                failure_frames.append(np.asarray(initial_frame).copy())
+
+            sit_target = build_leg_pose_batch(
+                env.scene["robot"], [0.0] * args.num_envs, leg_joint_ids
+            )
+            ramp_to_pose(
+                env,
+                sit_target,
+                args.sit_seconds,
+                args.sit_settle_seconds,
+                jaw_id,
+                args.jaw_open_rad,
+                face_force_threshold=args.face_force_threshold,
+                video_frames=failure_frames,
+            )
+            rejected_target = build_leg_pose_batch(
+                env.scene["robot"],
+                [best_rejected["leg_blend"]] * args.num_envs,
+                leg_joint_ids,
+            )
+            ramp_to_pose(
+                env,
+                rejected_target,
+                args.fold_seconds,
+                args.body_settle_seconds,
+                jaw_id,
+                args.jaw_open_rad,
+                face_force_threshold=args.face_force_threshold,
+                video_frames=failure_frames,
+            )
+
+            if failure_frames:
+                import mediapy as media
+
+                failure_video_path = (
+                    Path(args.output).expanduser().resolve()
+                    / "00_failed_crouch.mp4"
+                )
+                media.write_video(
+                    failure_video_path,
+                    np.stack(failure_frames),
+                    fps=round(1.0 / env.step_dt),
+                )
+
         raise RuntimeError(
             "No body pose passed "
-            "the exploratory body filters."
+            "the exploratory body filters. "
+            + (
+                f"Failure replay: {failure_video_path}"
+                if failure_video_path is not None
+                else "Run with --video to save the least-bad crouch replay."
+            )
         )
 
     ranked = sorted(
@@ -5149,13 +5225,13 @@ def parse_args():
     parser.add_argument(
         "--fold-seconds",
         type=float,
-        default=1.5,
+        default=3.0,
     )
 
     parser.add_argument(
         "--sit-seconds",
         type=float,
-        default=1.5,
+        default=3.0,
         help="Time for the standing-to-stable-sit stage.",
     )
 
@@ -5183,7 +5259,7 @@ def parse_args():
     parser.add_argument(
         "--body-candidate-max-orientation-deg",
         type=float,
-        default=60.0,
+        default=100.0,
     )
 
     # ========================================================
