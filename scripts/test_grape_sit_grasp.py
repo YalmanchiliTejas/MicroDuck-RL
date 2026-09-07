@@ -4,9 +4,12 @@ GPU-vectorized deterministic MicroDuck grape-pick diagnostic.
 
 No PPO checkpoint is used.
 
-This script tests the mechanical prerequisite chain before RL:
+This script tests the mechanical prerequisite chain before RL.  It starts
+directly from the stability-verified sit state in the sit/stand environment;
+standing-to-sit control is deliberately outside this diagnostic.
 
 1. BODY REACHABILITY
+   - Initialize directly in the known stable sit pose (60 mm trunk height).
    - Different leg-fold blends are simulated in parallel.
    - Root is free.
    - We measure root height, grip height, speed, and standing-relative orientation.
@@ -75,6 +78,10 @@ from mjlab.utils.torch import configure_torch_backends
 
 import mjlab_microduck.tasks  # noqa: F401
 from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import GRAPE_HALF_HEIGHT
+from mjlab_microduck.tasks.microduck_sitstand_env_cfg import (
+    SIT_Z,
+    SITTING_TARGET_OVERRIDES,
+)
 
 
 TASK_ID = "Mjlab-GrapePick-Flat-MicroDuck"
@@ -86,16 +93,16 @@ FACE_SENSOR = "face_ground_contact"
 
 SIT_LEG_POSE = {
     "left_hip_yaw": 0.0,
-    "left_hip_roll": 0.0,
-    "left_hip_pitch": -0.4079,
-    "left_knee": 1.35,
-    "left_ankle": 0.0,
+    "left_hip_roll": SITTING_TARGET_OVERRIDES[1],
+    "left_hip_pitch": SITTING_TARGET_OVERRIDES[2],
+    "left_knee": SITTING_TARGET_OVERRIDES[3],
+    "left_ankle": SITTING_TARGET_OVERRIDES[4],
 
     "right_hip_yaw": 0.0,
-    "right_hip_roll": 0.0,
-    "right_hip_pitch": 0.4079,
-    "right_knee": -1.35,
-    "right_ankle": 0.0,
+    "right_hip_roll": SITTING_TARGET_OVERRIDES[10],
+    "right_hip_pitch": SITTING_TARGET_OVERRIDES[11],
+    "right_knee": SITTING_TARGET_OVERRIDES[12],
+    "right_ankle": SITTING_TARGET_OVERRIDES[13],
 }
 
 
@@ -549,6 +556,81 @@ def build_leg_pose_batch(
         )
 
     return pose
+
+
+def initialize_stable_sit(
+    env,
+    leg_joint_ids,
+    jaw_id,
+    args,
+    reset_env=True,
+    video_frames=None,
+):
+    """Initialize the free robot at the sit/stand env's verified equilibrium.
+
+    This is a state initialization, not a scripted standing-to-sit motion. It
+    isolates whether an already-sitting robot can bend to the grape, clamp it,
+    and rise without using its face as support.
+    """
+
+    if reset_env:
+        env.reset()
+
+    robot = env.scene["robot"]
+    env_ids = torch.arange(env.num_envs, device=env.device)
+    sit_pose = build_leg_pose_batch(
+        robot,
+        [0.0] * env.num_envs,
+        leg_joint_ids,
+    )
+
+    # SIT_Z is measured relative to each environment's terrain origin.
+    root_pose = torch.cat(
+        (
+            robot.data.root_link_pos_w.clone(),
+            robot.data.root_link_quat_w.clone(),
+        ),
+        dim=-1,
+    )
+    root_pose[:, :2] = env.scene.terrain.env_origins[:, :2]
+    root_pose[:, 2] = env.scene.terrain.env_origins[:, 2] + args.sit_root_height
+    root_pose[:, 3:] = 0.0
+    root_pose[:, 3] = 1.0
+
+    robot.write_root_link_pose_to_sim(root_pose, env_ids=env_ids)
+    robot.write_root_link_velocity_to_sim(
+        torch.zeros((env.num_envs, 6), device=env.device),
+        env_ids=env_ids,
+    )
+    robot.write_joint_state_to_sim(
+        sit_pose,
+        torch.zeros_like(sit_pose),
+        env_ids=env_ids,
+    )
+    force_jaw(env, jaw_id, args.jaw_open_rad)
+    env.scene.write_data_to_sim()
+    env.sim.forward()
+    env.scene.update(dt=0.0)
+
+    if video_frames is not None:
+        frame = env.render()
+        if frame is not None:
+            video_frames.append(np.asarray(frame).copy())
+
+    # Hold the exact sit target under the real actuators and contacts before
+    # beginning the forward bend.
+    ramp_to_pose(
+        env,
+        sit_pose,
+        0.0,
+        args.sit_settle_seconds,
+        jaw_id,
+        args.jaw_open_rad,
+        face_force_threshold=args.face_force_threshold,
+        video_frames=video_frames,
+    )
+
+    return env._last_transition_safety
 
 
 def set_head_batch(
@@ -1709,29 +1791,12 @@ def body_search(
             args.num_envs,
         )
 
-        env.reset()
-
-        # Do not jump directly from standing into a deep fold.  First reach the
-        # repository's stability-verified sit, settle, then bend farther.
-        sit_target = build_leg_pose_batch(
-            env.scene[
-                "robot"
-            ],
-            [0.0] * args.num_envs,
-            leg_joint_ids,
-        )
-
-        ramp_to_pose(
+        sit_safety = initialize_stable_sit(
             env,
-            sit_target,
-            args.sit_seconds,
-            args.sit_settle_seconds,
+            leg_joint_ids,
             jaw_id,
-            args.jaw_open_rad,
-            safety_reference_quat=standing_reference_quat,
-            face_force_threshold=args.face_force_threshold,
+            args,
         )
-        sit_safety = env._last_transition_safety
 
         target = build_leg_pose_batch(
             env.scene[
@@ -1905,24 +1970,16 @@ def body_search(
                 ),
             )
             failure_frames = []
-            env.reset()
+            initialize_stable_sit(
+                env,
+                leg_joint_ids,
+                jaw_id,
+                args,
+            )
             initial_frame = env.render()
             if initial_frame is not None:
                 failure_frames.append(np.asarray(initial_frame).copy())
 
-            sit_target = build_leg_pose_batch(
-                env.scene["robot"], [0.0] * args.num_envs, leg_joint_ids
-            )
-            ramp_to_pose(
-                env,
-                sit_target,
-                args.sit_seconds,
-                args.sit_settle_seconds,
-                jaw_id,
-                args.jaw_open_rad,
-                face_force_threshold=args.face_force_threshold,
-                video_frames=failure_frames,
-            )
             rejected_target = build_leg_pose_batch(
                 env.scene["robot"],
                 [best_rejected["leg_blend"]] * args.num_envs,
@@ -2150,20 +2207,11 @@ def head_search(
             args.num_envs,
         )
 
-        env.reset()
-
-        sit_target = build_leg_pose_batch(
-            env.scene["robot"], [0.0] * args.num_envs, leg_joint_ids
-        )
-        ramp_to_pose(
+        initialize_stable_sit(
             env,
-            sit_target,
-            args.sit_seconds,
-            args.sit_settle_seconds,
+            leg_joint_ids,
             jaw_id,
-            args.jaw_open_rad,
-            safety_reference_quat=standing_reference_quat,
-            face_force_threshold=args.face_force_threshold,
+            args,
         )
 
         body_target = build_leg_pose_batch(
@@ -2348,20 +2396,11 @@ def head_search(
             args.num_envs,
         )
 
-        env.reset()
-
-        sit_target = build_leg_pose_batch(
-            env.scene["robot"], [0.0] * args.num_envs, leg_joint_ids
-        )
-        ramp_to_pose(
+        initialize_stable_sit(
             env,
-            sit_target,
-            args.sit_seconds,
-            args.sit_settle_seconds,
+            leg_joint_ids,
             jaw_id,
-            args.jaw_open_rad,
-            safety_reference_quat=standing_reference_quat,
-            face_force_threshold=args.face_force_threshold,
+            args,
         )
 
         body_target = build_leg_pose_batch(
@@ -2677,26 +2716,24 @@ def prepare_best_pose(
     leg_joint_ids,
     args,
     reset_env=True,
+    initialize_sit=True,
     video_frames=None,
 ):
 
-    if reset_env:
-        env.reset()
-
-    sit_target = build_leg_pose_batch(
-        env.scene["robot"], [0.0] * env.num_envs, leg_joint_ids
-    )
-    ramp_to_pose(
-        env,
-        sit_target,
-        args.sit_seconds,
-        args.sit_settle_seconds,
-        jaw_id,
-        args.jaw_open_rad,
-        face_force_threshold=args.face_force_threshold,
-        video_frames=video_frames,
-    )
-    sit_safety = env._last_transition_safety
+    if initialize_sit:
+        sit_safety = initialize_stable_sit(
+            env,
+            leg_joint_ids,
+            jaw_id,
+            args,
+            reset_env=reset_env,
+            video_frames=video_frames,
+        )
+    else:
+        # The caller has already initialized and settled the sit (used by the
+        # final video after the grape is positioned), so retain that safety
+        # history instead of silently discarding it.
+        sit_safety = env._last_transition_safety
 
     target = build_leg_pose_batch(
         env.scene[
@@ -3353,8 +3390,8 @@ def final_grasp(
     )
 
     # First reproduce the selected pose only to resolve its best grape position
-    # in world coordinates.  Then reset and perform a genuine end-to-end replay:
-    # the grape is already on the floor while the robot starts standing.
+    # in world coordinates. Then reset directly into the verified sit and put
+    # the grape on the floor before recording the sit-to-grasp replay.
     prepare_best_pose(
         env,
         best_pose,
@@ -3373,7 +3410,12 @@ def final_grasp(
     fixed_grape_xy[:, 0] += best_placement["offset_x_mm"] / 1000.0
     fixed_grape_xy[:, 1] += best_placement["offset_y_mm"] / 1000.0
 
-    env.reset()
+    initialize_stable_sit(
+        env,
+        leg_joint_ids,
+        jaw_id,
+        args,
+    )
 
     reset_upper = robot.data.geom_pos_w[:, upper_id, :]
     reset_lower = robot.data.geom_pos_w[:, lower_id, :]
@@ -3402,6 +3444,7 @@ def final_grasp(
         leg_joint_ids,
         args,
         reset_env=False,
+        initialize_sit=False,
         video_frames=video_frames,
     )
     approach_safety = env._last_prepare_safety
@@ -4784,6 +4827,12 @@ def run(
     )
 
     print(
+        f"initial:    stable sit "
+        f"(trunk z={args.sit_root_height:.3f}m); "
+        f"standing-to-sit is not tested"
+    )
+
+    print(
         f"mouth:      "
         f"{mouth_names[0]}"
     )
@@ -5016,6 +5065,15 @@ def run(
         "root_fixed":
             False,
 
+        "initial_state":
+            "direct_stable_sit",
+
+        "sit_root_height_m":
+            args.sit_root_height,
+
+        "tests_standing_to_sit":
+            False,
+
         "real_contact_sensors":
             True,
 
@@ -5229,16 +5287,17 @@ def parse_args():
     )
 
     parser.add_argument(
-        "--sit-seconds",
+        "--sit-settle-seconds",
         type=float,
-        default=3.0,
-        help="Time for the standing-to-stable-sit stage.",
+        default=1.0,
+        help="Time to hold and verify the directly initialized stable sit.",
     )
 
     parser.add_argument(
-        "--sit-settle-seconds",
+        "--sit-root-height",
         type=float,
-        default=0.5,
+        default=SIT_Z,
+        help="Stable-sit trunk height in metres (defaults to sit/stand SIT_Z).",
     )
 
     parser.add_argument(
