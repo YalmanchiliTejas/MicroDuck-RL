@@ -2138,6 +2138,15 @@ def head_search(
         .tolist()
     )
 
+    # ``0`` means all body candidates that passed the body safety screen.  The
+    # old top-3 shortcut biased the next stage toward the lowest mouth poses,
+    # which are also the ones most likely to use the head as a ground prop.
+    body_candidates = (
+        body_ranked
+        if args.body_top_k <= 0
+        else body_ranked[:args.body_top_k]
+    )
+
     candidates = [
         {
             "leg_blend":
@@ -2159,9 +2168,7 @@ def head_search(
         }
 
         for body
-        in body_ranked[
-            :args.body_top_k
-        ]
+        in body_candidates
 
         for neck
         in neck_values
@@ -2363,13 +2370,16 @@ def head_search(
             ],
     )
 
+    # ``0`` means physically validate the full coarse grid. Geometry alone
+    # cannot determine face clearance, so validating only the closest dozen
+    # poses can incorrectly conclude that no safe pose exists.
     validation_candidates = (
-        coarse_ranked[
+        coarse_ranked
+        if args.head_validate_top_k <= 0
+        else coarse_ranked[
             :min(
                 args.head_validate_top_k,
-                len(
-                    coarse_ranked
-                ),
+                len(coarse_ranked),
             )
         ]
     )
@@ -2391,7 +2401,7 @@ def head_search(
     print(
         f"Physically validating "
         f"{len(validation_candidates)} "
-        f"best candidates"
+        f"candidates"
     )
 
     validated_rows = []
@@ -2708,10 +2718,83 @@ def head_search(
                 f"{row['root_height_m']*100:.2f}cm"
             )
 
+        failure_video_path = None
+        if args.video and validated_rows:
+            # Do not hide a real mechanical failure behind a traceback. Replay
+            # the least-face-force candidate from the direct stable sit so the
+            # saved video shows exactly how the head reaches the floor.
+            replay = min(
+                validated_rows,
+                key=lambda row: (
+                    row["face_contact_seen"],
+                    row["max_face_force_n"],
+                    row["max_posture_change_deg"],
+                    row["vertical_error_m"],
+                ),
+            )
+            failure_frames = []
+            initialize_stable_sit(
+                env,
+                leg_joint_ids,
+                jaw_id,
+                args,
+                video_frames=failure_frames,
+            )
+            body_target = build_leg_pose_batch(
+                env.scene["robot"],
+                [replay["leg_blend"]] * env.num_envs,
+                leg_joint_ids,
+            )
+            ramp_to_pose(
+                env,
+                body_target,
+                args.fold_seconds,
+                args.body_settle_seconds,
+                jaw_id,
+                args.jaw_open_rad,
+                face_force_threshold=args.face_force_threshold,
+                video_frames=failure_frames,
+            )
+            reset_contact_sensors(env)
+            head_target = set_head_batch(
+                env.scene["robot"].data.joint_pos.clone(),
+                neck_id,
+                head_id,
+                [replay["neck_pitch_rad"]] * env.num_envs,
+                [replay["head_pitch_rad"]] * env.num_envs,
+            )
+            ramp_to_pose(
+                env,
+                head_target,
+                args.head_move_seconds,
+                args.head_settle_seconds,
+                jaw_id,
+                args.jaw_open_rad,
+                face_force_threshold=args.face_force_threshold,
+                video_frames=failure_frames,
+            )
+
+            if failure_frames:
+                import mediapy as media
+
+                failure_video_path = (
+                    Path(args.output).expanduser().resolve()
+                    / "01_failed_head_reach.mp4"
+                )
+                media.write_video(
+                    failure_video_path,
+                    np.stack(failure_frames),
+                    fps=round(1.0 / env.step_dt),
+                )
+
         raise RuntimeError(
-            "No physically validated head/neck pose passed. "
-            "Standing-relative orientation is NOT the gate anymore. "
-            "Inspect posture-change and root-speed above."
+            "No physically validated head/neck pose passed the full safety "
+            "screen. "
+            + (
+                f"Failure replay: {failure_video_path}"
+                if failure_video_path is not None
+                else "Run with --video to save the least-force replay."
+            )
         )
 
     ranked = sorted(
@@ -5337,7 +5420,8 @@ def parse_args():
     parser.add_argument(
         "--body-top-k",
         type=int,
-        default=3,
+        default=0,
+        help="Safe body blends to search; 0 validates all of them.",
     )
 
     # Exploratory only.
@@ -5427,7 +5511,8 @@ def parse_args():
     parser.add_argument(
         "--head-validate-top-k",
         type=int,
-        default=12,
+        default=0,
+        help="Head/neck poses to physically validate; 0 validates the full grid.",
     )
 
     parser.add_argument(
