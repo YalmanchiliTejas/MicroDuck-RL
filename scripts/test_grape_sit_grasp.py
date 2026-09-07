@@ -1134,6 +1134,11 @@ def reset_contact_sensors(
         LOWER_SENSOR
     ].reset()
 
+    # Face contact is a transition-local safety signal. Clear its history
+    # before measuring a new head/neck motion; otherwise a force recorded while
+    # settling the sit is incorrectly attributed to every head candidate.
+    env.scene[FACE_SENSOR].reset()
+
 
 def read_contact_sensor(
     sensor,
@@ -2241,6 +2246,11 @@ def head_search(
             face_force_threshold=args.face_force_threshold,
         )
 
+        # The body transition has already been screened by body_search. Start
+        # the head validation with a clean face-contact history so its result
+        # reflects only the neck/head movement being tested here.
+        reset_contact_sensors(env)
+
         robot = env.scene[
             "robot"
         ]
@@ -2433,6 +2443,10 @@ def head_search(
         robot = env.scene[
             "robot"
         ]
+
+        # The body transition is screened separately. Clear the sensor history
+        # so this validation measures face contact caused by head/neck motion.
+        reset_contact_sensors(env)
 
         # ====================================================
         # IMPORTANT FIX
