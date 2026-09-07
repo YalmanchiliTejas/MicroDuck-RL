@@ -109,7 +109,7 @@ from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
 # fenêtre réelle du runtime.  ⚠️ --ground-pick-period au déploiement = 4.0.
 GP_PERIOD    = 4.0
 DESCENT_END  = 0.375
-HOLD_END     = 0.425
+HOLD_END     = 0.575
 RISE_END     = 0.80
 
 GRAPE_HALF_HEIGHT = 0.01
