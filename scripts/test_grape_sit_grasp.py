@@ -55,7 +55,15 @@ import json
 import math
 import os
 import re
+import sys
 from pathlib import Path
+
+# MuJoCo must choose its OpenGL platform before mjlab (and therefore MuJoCo)
+# is imported.  Compute/Slurm nodes have no DISPLAY, so use EGL to render RGB
+# frames directly into the output MP4 without creating a realtime window.
+if sys.platform.startswith("linux"):
+    os.environ.setdefault("MUJOCO_GL", "egl")
+    os.environ.setdefault("PYOPENGL_PLATFORM", "egl")
 
 import numpy as np
 import torch
