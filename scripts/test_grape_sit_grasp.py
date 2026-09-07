@@ -5045,13 +5045,16 @@ def run(
     )
 
     if not reach_success:
-
-        raise RuntimeError(
+        message = (
             f"Best physically valid pose is "
             f"{best_pose['vertical_error_m']*1000:.2f} mm "
-            f"from grape-center height; "
-            f"tolerance is "
+            f"from grape-center height; tolerance is "
             f"{args.reach_tolerance*1000:.1f} mm."
+        )
+        if args.require_reach:
+            raise RuntimeError(message)
+        print(
+            "WARNING: " + message + " Continuing so placement, jaw, rise, and video diagnostics run."
         )
 
     placement_rows, best_placement = placement_sweep(
@@ -5184,6 +5187,9 @@ def run(
 
         "tests_standing_to_sit":
             False,
+
+        "reach_required":
+            args.require_reach,
 
         "real_contact_sensors":
             True,
@@ -5470,6 +5476,12 @@ def parse_args():
         "--reach-tolerance",
         type=float,
         default=0.008,
+    )
+
+    parser.add_argument(
+        "--require-reach",
+        action="store_true",
+        help="Abort when no safe pose reaches the grape (default: continue diagnostics).",
     )
 
     parser.add_argument(
