@@ -29,8 +29,12 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     approach = cfg.rewards["mouth_grape_proximity"]
     lift = cfg.rewards["grape_lift_tracking"]
     assert approach.weight > 0.0
-    assert approach.func is microduck_mdp.mouth_grape_proximity_phased
-    assert approach.params["std"] == 0.12
+    assert approach.func is microduck_mdp.grip_pocket_grape_alignment_phased
+    assert approach.params["forward_std"] == 0.12
+    assert approach.params["asset_cfg"].site_names == [
+        "mouth_tip", "lower_mouth_tip"
+    ]
+    assert cfg.rewards["mouth_perpendicular_to_ground"].weight == 0.5
     assert lift.weight > 0.0
     assert lift.func is microduck_mdp.grape_lift_tracking_phased
     assert lift.params["target_height"] == GRAPE_LIFT_HEIGHT
@@ -42,6 +46,14 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert "grape_dual_contact" in cfg.rewards
     assert cfg.rewards["grape_dual_contact"].weight > lift.weight
     assert cfg.rewards["grape_dual_contact"].func is microduck_mdp.grape_dual_contact_phased
+    assert (
+        cfg.rewards["grape_pad_contacts"].weight
+        < cfg.rewards["grape_dual_contact"].weight
+    )
+    assert (
+        cfg.rewards["grape_pad_contacts"].func
+        is microduck_mdp.grape_pad_contact_shaping_phased
+    )
     assert {sensor.name for sensor in cfg.scene.sensors} >= {
         "upper_grape_contact",
         "lower_grape_contact",
@@ -61,6 +73,7 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     )
     assert set(cfg.metrics) >= {
         "kneel_support_with_reach",
+        "pad_contacts",
         "grape_height",
         "target_grape_height",
         "mouth_grape_distance",
@@ -195,7 +208,12 @@ class _Env:
     def __init__(self, grape_pos, mouth_pos, phases):
         n = len(phases)
         robot_data = _Data()
-        robot_data.site_pos_w = mouth_pos[:, None, :]
+        robot_data.site_pos_w = (
+            mouth_pos[:, None, :] if mouth_pos.dim() == 2 else mouth_pos
+        )
+        num_sites = robot_data.site_pos_w.shape[1]
+        robot_data.site_quat_w = torch.zeros(n, num_sites, 4)
+        robot_data.site_quat_w[:, :, 0] = 1.0
         grape_data = _Data()
         grape_data.root_link_pos_w = grape_pos
         grape_data.root_link_lin_vel_w = torch.zeros(n, 3)
@@ -208,6 +226,14 @@ class _Env:
 def _mouth_cfg():
     cfg = SceneEntityCfg("robot", site_names=["mouth_tip"])
     cfg.site_ids = [0]
+    return cfg
+
+
+def _grip_cfg():
+    cfg = SceneEntityCfg(
+        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+    )
+    cfg.site_ids = [0, 1]
     return cfg
 
 
@@ -265,12 +291,14 @@ def test_lift_diagnostics_expose_reward_components():
     assert torch.allclose(reward, reconstructed)
 
 
-def test_approach_reward_uses_grape_surface_not_ground_height():
+def test_approach_reward_targets_center_between_both_jaw_sites():
     phase = torch.tensor([0.40, 0.40])
     grape = torch.tensor([[0.0, 0.0, 0.01], [0.0, 0.0, 0.01]])
-    mouth = torch.tensor([[0.01, 0.0, 0.01], [0.10, 0.0, 0.01]])
-    out = microduck_mdp.mouth_grape_proximity_phased(
-        _Env(grape, mouth, phase), asset_cfg=_mouth_cfg()
+    upper = torch.tensor([[0.0, 0.0, 0.03], [0.0, 0.0, 0.03]])
+    lower = torch.tensor([[0.0, 0.0, -0.01], [0.0, 0.20, -0.01]])
+    mouth = torch.stack((upper, lower), dim=1)
+    out = microduck_mdp.grip_pocket_grape_alignment_phased(
+        _Env(grape, mouth, phase), asset_cfg=_grip_cfg()
     )
 
     assert out[0] > 0.99
@@ -296,10 +324,29 @@ def test_dual_contact_requires_both_pads_after_mouth_closes():
     assert score[2] == 0.0
 
 
+def test_single_pad_contact_provides_partial_capture_shaping():
+    phase = torch.tensor([0.4, 0.4, 0.2])
+    env = _Env(torch.zeros(3, 3), torch.zeros(3, 3), phase)
+    env.scene.sensors = {
+        "upper": _Sensor(torch.tensor([[True], [True], [True]])),
+        "lower": _Sensor(torch.tensor([[True], [False], [True]])),
+    }
+
+    score = microduck_mdp.grape_pad_contact_shaping_phased(
+        env, upper_sensor_name="upper", lower_sensor_name="lower"
+    )
+
+    assert score[0] == 1.0
+    assert score[1] == 0.5
+    assert score[2] == 0.0
+
+
 def test_kneel_support_requires_both_legs_and_only_pays_in_down_phase():
     phase = torch.tensor([0.4, 0.4, 0.9])
     grape = torch.tensor([[0.0, 0.0, 0.01]]).expand(3, -1)
-    mouth = torch.tensor([[0.01, 0.0, 0.01]]).expand(3, -1)
+    upper = torch.tensor([[0.0, 0.0, 0.03]]).expand(3, -1)
+    lower = torch.tensor([[0.0, 0.0, -0.01]]).expand(3, -1)
+    mouth = torch.stack((upper, lower), dim=1)
     env = _Env(grape, mouth, phase)
     env.scene.sensors = {
         "left_kneel": _Sensor(torch.tensor([[True], [True], [True]])),
@@ -310,7 +357,7 @@ def test_kneel_support_requires_both_legs_and_only_pays_in_down_phase():
         env,
         left_sensor_name="left_kneel",
         right_sensor_name="right_kneel",
-        asset_cfg=_mouth_cfg(),
+        asset_cfg=_grip_cfg(),
     )
 
     assert score[0] > 0.99

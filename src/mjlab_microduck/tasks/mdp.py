@@ -3307,29 +3307,61 @@ def reset_grape_in_front_of_robot(
     )
 
 
-def mouth_grape_proximity_phased(
+def _grip_pocket_alignment_score(
     env: ManagerBasedRlEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    asset_cfg: SceneEntityCfg,
+    grape_name: str,
+    forward_std: float,
+    lateral_std: float,
+    opening_std: float,
+) -> torch.Tensor:
+    """Score a grape at the live midpoint of the upper and lower jaw tips.
+
+    Errors are resolved in the upper-mouth site frame so a small spherical
+    distance cannot hide a large error across the jaw opening or laterally.
+    Site-frame x/y/z are treated as forward/lateral/opening coordinates.
+    """
+    from mjlab.utils.lab_api.math import quat_apply_inverse
+
+    if len(asset_cfg.site_ids) != 2:
+        raise ValueError("grip-pocket alignment requires upper and lower mouth sites")
+    robot: Entity = env.scene[asset_cfg.name]
+    grape: Entity = env.scene[grape_name]
+    sites = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    pocket_center = sites.mean(dim=1)
+    grape_from_pocket_w = grape.data.root_link_pos_w - pocket_center
+    upper_quat_w = robot.data.site_quat_w[:, asset_cfg.site_ids[0], :]
+    error_local = quat_apply_inverse(upper_quat_w, grape_from_pocket_w)
+
+    forward = torch.exp(-((error_local[:, 0] / forward_std) ** 2))
+    lateral = torch.exp(-((error_local[:, 1] / lateral_std) ** 2))
+    opening = torch.exp(-((error_local[:, 2] / opening_std) ** 2))
+    return torch.nan_to_num(forward * lateral * opening, nan=0.0)
+
+
+def grip_pocket_grape_alignment_phased(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg(
+        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+    ),
     grape_name: str = "grape",
-    grasp_distance: float = 0.01,
-    std: float = 0.04,
+    forward_std: float = 0.12,
+    lateral_std: float = 0.04,
+    opening_std: float = 0.04,
     command_name: str = "twist",
     descent_end: float = 0.375,
     hold_end: float = 0.425,
     rise_end: float = 0.80,
 ) -> torch.Tensor:
-    """Reward bringing the mouth to the grape surface during approach/hold."""
-    robot: Entity = env.scene[asset_cfg.name]
-    grape: Entity = env.scene[grape_name]
-    mouth_sites = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
-    # Two selected sites define the real closed-jaw pocket.  Mean keeps the
-    # existing one-site callers backward-compatible.
-    mouth = mouth_sites.mean(dim=1)
-    center_distance = torch.linalg.vector_norm(
-        mouth - grape.data.root_link_pos_w, dim=-1
+    """Dense approach reward for placing the grape inside the jaw pocket."""
+    score = _grip_pocket_alignment_score(
+        env,
+        asset_cfg=asset_cfg,
+        grape_name=grape_name,
+        forward_std=forward_std,
+        lateral_std=lateral_std,
+        opening_std=opening_std,
     )
-    surface_error = torch.abs(center_distance - grasp_distance)
-    score = torch.exp(-((surface_error / std) ** 2))
     gate = phase_pose_blend(
         _gp_phase(env, command_name), descent_end, hold_end, rise_end
     )
@@ -3449,14 +3481,39 @@ def grape_dual_contact_phased(
     return gate * held.to(dtype=gate.dtype)
 
 
+def grape_pad_contact_shaping_phased(
+    env: ManagerBasedRlEnv,
+    upper_sensor_name: str,
+    lower_sensor_name: str,
+    command_name: str = "twist",
+    close_start: float = 0.375,
+) -> torch.Tensor:
+    """Give partial capture credit for each mouth pad touching the grape.
+
+    One pad yields 0.5 and both yield 1.0 after jaw closure begins. The larger
+    dual-contact reward remains the actual grasp criterion, while this term
+    tells PPO which direction a near miss improved.
+    """
+    upper = env.scene.sensors[upper_sensor_name].data.found
+    lower = env.scene.sensors[lower_sensor_name].data.found
+    upper = upper.reshape(env.num_envs, -1).any(dim=1).float()
+    lower = lower.reshape(env.num_envs, -1).any(dim=1).float()
+    phase = _gp_phase(env, command_name)
+    gate = (phase >= close_start).to(dtype=phase.dtype)
+    return gate * 0.5 * (upper + lower)
+
+
 def kneel_support_with_reach_phased(
     env: ManagerBasedRlEnv,
     left_sensor_name: str,
     right_sensor_name: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg(
+        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+    ),
     grape_name: str = "grape",
-    grasp_distance: float = 0.01,
-    reach_std: float = 0.08,
+    forward_std: float = 0.12,
+    lateral_std: float = 0.04,
+    opening_std: float = 0.04,
     command_name: str = "twist",
     descent_end: float = 0.375,
     hold_end: float = 0.425,
@@ -3476,12 +3533,14 @@ def kneel_support_with_reach_phased(
     right = right.reshape(env.num_envs, -1).any(dim=1)
     bilateral_support = left.bool() & right.bool()
 
-    robot: Entity = env.scene[asset_cfg.name]
-    grape: Entity = env.scene[grape_name]
-    mouth = robot.data.site_pos_w[:, asset_cfg.site_ids, :].mean(dim=1)
-    distance = torch.linalg.vector_norm(mouth - grape.data.root_link_pos_w, dim=-1)
-    reach_error = torch.abs(distance - grasp_distance)
-    reach_score = torch.exp(-((reach_error / reach_std) ** 2))
+    reach_score = _grip_pocket_alignment_score(
+        env,
+        asset_cfg=asset_cfg,
+        grape_name=grape_name,
+        forward_std=forward_std,
+        lateral_std=lateral_std,
+        opening_std=opening_std,
+    )
 
     gate = phase_pose_blend(
         _gp_phase(env, command_name), descent_end, hold_end, rise_end

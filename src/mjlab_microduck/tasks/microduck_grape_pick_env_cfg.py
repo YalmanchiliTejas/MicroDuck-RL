@@ -246,20 +246,22 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 
     # ── Rewards: main ground pick objectives ──────────────────────────────────
 
-    # Approach the actual object rather than a hard-coded ground height.  The
-    # target distance is the grape radius, so the optimum is mouth-to-surface
-    # contact rather than overlapping the grape center.
+    # Dense approach guidance targets the live pocket between the fixed upper
+    # and moving lower jaw. Axis-wise errors stop a nearby face/upper tip from
+    # masquerading as a grape placed inside the opening.
     cfg.rewards["mouth_grape_proximity"] = RewardTermCfg(
-        func=microduck_mdp.mouth_grape_proximity_phased,
+        func=microduck_mdp.grip_pocket_grape_alignment_phased,
         weight=4.0,
         params={
-            "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+            "asset_cfg": SceneEntityCfg(
+                "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+            ),
             "grape_name": "grape",
-            "grasp_distance": GRAPE_HALF_HEIGHT,
-            # HOME mouth-to-grape distance is ~0.226 m on the current model.
-            # A broad 0.12 m bootstrap Gaussian still scores ~0.04 there;
-            # 0.04 m made the objective numerically invisible before contact.
-            "std": 0.12,
+            # Keep the approach axis broad enough to bootstrap from standing,
+            # while lateral/opening errors must put the grape between the pads.
+            "forward_std": 0.12,
+            "lateral_std": 0.04,
+            "opening_std": 0.04,
             "command_name": "twist",
             "descent_end": DESCENT_END,
             "hold_end": HOLD_END,
@@ -267,13 +269,11 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         },
     )
 
-    # Approach phase: reward mouth tip x-axis pointing downward (perpendicular to ground).
-    # alignment ∈ [-1, 1]: 1 = x-axis perfectly vertical, 0 = horizontal, -1 = pointing up.
-    # Orientation : axe bouche vers le bas (perpendiculaire au sol). Poids monté
-    # 1.0 -> 2.0 -> "orienter correctement" est un objectif explicite.
+    # Weak orientation hint only. Pocket alignment above is the real objective;
+    # a large weight here previously made pointing the face down an easy proxy.
     cfg.rewards["mouth_perpendicular_to_ground"] = RewardTermCfg(
         func=microduck_mdp.mouth_perpendicular_phased,
-        weight=2.0,
+        weight=0.5,
         params={
             "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
             "command_name": "twist",
@@ -321,6 +321,23 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "hold_end": HOLD_END,
             "rise_end": RISE_END,
         },
+    )
+    # Dense contact bridge: one pad earns half-credit after closing starts.
+    # Dual contact remains much more valuable and is required during the lift.
+    pad_contact_params = {
+        "upper_sensor_name": upper_grape_contact_cfg.name,
+        "lower_sensor_name": lower_grape_contact_cfg.name,
+        "command_name": "twist",
+        "close_start": DESCENT_END,
+    }
+    cfg.rewards["grape_pad_contacts"] = RewardTermCfg(
+        func=microduck_mdp.grape_pad_contact_shaping_phased,
+        weight=3.0,
+        params=pad_contact_params,
+    )
+    cfg.metrics["pad_contacts"] = MetricsTermCfg(
+        func=microduck_mdp.grape_pad_contact_shaping_phased,
+        params=pad_contact_params,
     )
     cfg.metrics["dual_contact"] = MetricsTermCfg(
         func=microduck_mdp.grape_dual_contact_phased,
@@ -432,10 +449,13 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     kneel_support_params = {
         "left_sensor_name": left_kneel_ground_cfg.name,
         "right_sensor_name": right_kneel_ground_cfg.name,
-        "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+        "asset_cfg": SceneEntityCfg(
+            "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        ),
         "grape_name": "grape",
-        "grasp_distance": GRAPE_HALF_HEIGHT,
-        "reach_std": 0.08,
+        "forward_std": 0.12,
+        "lateral_std": 0.04,
+        "opening_std": 0.04,
         "command_name": "twist",
         "descent_end": DESCENT_END,
         "hold_end": HOLD_END,
