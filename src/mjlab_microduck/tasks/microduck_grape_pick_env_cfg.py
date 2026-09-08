@@ -269,11 +269,35 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         },
     )
 
-    # Weak orientation hint only. Pocket alignment above is the real objective;
-    # a large weight here previously made pointing the face down an easy proxy.
+    # High-value precision objective. The 3.5 cm Gaussian is deliberately much
+    # narrower than the bootstrap alignment above, so a shallow knee bend earns
+    # little and placing the actual jaw pocket on the grape dominates the stack.
+    grip_pocket_precision_params = {
+        "asset_cfg": SceneEntityCfg(
+            "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        ),
+        "grape_name": "grape",
+        "std": 0.035,
+        "command_name": "twist",
+        "descent_end": DESCENT_END,
+        "hold_end": HOLD_END,
+        "rise_end": RISE_END,
+    }
+    cfg.rewards["grip_pocket_precision"] = RewardTermCfg(
+        func=microduck_mdp.grip_pocket_grape_distance_phased,
+        weight=10.0,
+        params=grip_pocket_precision_params,
+    )
+    cfg.metrics["grip_pocket_precision"] = MetricsTermCfg(
+        func=microduck_mdp.grip_pocket_grape_distance_phased,
+        params=grip_pocket_precision_params,
+    )
+
+    # Disabled: even at a small weight the policy farmed this hint by pitching
+    # the face down without bringing the jaw pocket to the grape.
     cfg.rewards["mouth_perpendicular_to_ground"] = RewardTermCfg(
         func=microduck_mdp.mouth_perpendicular_phased,
-        weight=0.5,
+        weight=0.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
             "command_name": "twist",

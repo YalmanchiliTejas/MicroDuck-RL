@@ -34,7 +34,11 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert approach.params["asset_cfg"].site_names == [
         "mouth_tip", "lower_mouth_tip"
     ]
-    assert cfg.rewards["mouth_perpendicular_to_ground"].weight == 0.5
+    assert cfg.rewards["mouth_perpendicular_to_ground"].weight == 0.0
+    precision = cfg.rewards["grip_pocket_precision"]
+    assert precision.func is microduck_mdp.grip_pocket_grape_distance_phased
+    assert precision.weight == 10.0
+    assert precision.params["std"] == 0.035
     assert lift.weight > 0.0
     assert lift.func is microduck_mdp.grape_lift_tracking_phased
     assert lift.params["target_height"] == GRAPE_LIFT_HEIGHT
@@ -74,6 +78,7 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert set(cfg.metrics) >= {
         "kneel_support_with_reach",
         "pad_contacts",
+        "grip_pocket_precision",
         "grape_height",
         "target_grape_height",
         "mouth_grape_distance",
@@ -303,6 +308,21 @@ def test_approach_reward_targets_center_between_both_jaw_sites():
 
     assert out[0] > 0.99
     assert out[1] < 0.01
+
+
+def test_precision_reward_strongly_prefers_grape_inside_jaw_pocket():
+    phase = torch.tensor([0.4, 0.4])
+    grape = torch.tensor([[0.0, 0.0, 0.01], [0.0, 0.0, 0.01]])
+    centered_upper = torch.tensor([[0.0, 0.0, 0.03], [0.0, 0.0, 0.03]])
+    lower = torch.tensor([[0.0, 0.0, -0.01], [0.10, 0.0, -0.01]])
+    mouth = torch.stack((centered_upper, lower), dim=1)
+
+    score = microduck_mdp.grip_pocket_grape_distance_phased(
+        _Env(grape, mouth, phase), asset_cfg=_grip_cfg(), std=0.035
+    )
+
+    assert score[0] > 0.99
+    assert score[1] < 0.14
 
 
 def test_dual_contact_requires_both_pads_after_mouth_closes():

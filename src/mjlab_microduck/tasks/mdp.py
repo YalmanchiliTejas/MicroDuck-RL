@@ -3368,6 +3368,42 @@ def grip_pocket_grape_alignment_phased(
     return torch.nan_to_num(gate * score, nan=0.0)
 
 
+def grip_pocket_grape_distance_phased(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg(
+        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+    ),
+    grape_name: str = "grape",
+    std: float = 0.035,
+    command_name: str = "twist",
+    descent_end: float = 0.375,
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Strong precision reward for moving the jaw pocket onto the grape.
+
+    Unlike the old upper-tip/head proxy, the target is the live midpoint of
+    the fixed upper and moving lower jaw tips. The narrow Gaussian is paired
+    with the broader axis-wise alignment term: the broad term bootstraps the
+    descent, while this term makes actually reaching the grape much more
+    valuable than merely pitching the face downward.
+    """
+    if len(asset_cfg.site_ids) != 2:
+        raise ValueError("grip-pocket distance requires upper and lower mouth sites")
+    robot: Entity = env.scene[asset_cfg.name]
+    grape: Entity = env.scene[grape_name]
+    sites = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
+    pocket_center = sites.mean(dim=1)
+    distance = torch.linalg.vector_norm(
+        pocket_center - grape.data.root_link_pos_w, dim=-1
+    )
+    score = torch.exp(-((distance / std) ** 2))
+    gate = phase_pose_blend(
+        _gp_phase(env, command_name), descent_end, hold_end, rise_end
+    )
+    return torch.nan_to_num(gate * score, nan=0.0)
+
+
 def grape_lift_tracking_phased(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
