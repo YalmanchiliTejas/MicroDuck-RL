@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import subprocess
 import sys
@@ -73,7 +74,13 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
             "--seed", str(args.seed),
         ]
         print("[record]", " ".join(command), flush=True)
-        subprocess.run(command, check=True)
+        child_env = os.environ.copy()
+        # Headless Linux nodes need a renderer backend chosen before MuJoCo is
+        # imported.  EGL is GPU-backed; OSMesa is the optional CPU software
+        # fallback when the cluster image provides libOSMesa.
+        child_env["MUJOCO_GL"] = args.mujoco_gl
+        child_env["PYOPENGL_PLATFORM"] = args.mujoco_gl
+        subprocess.run(command, check=True, env=child_env)
 
     if not list(destination.rglob("*.mp4")):
         raise RuntimeError(
@@ -106,6 +113,8 @@ def parse_args() -> argparse.Namespace:
                         help="Fixed evaluation seed, shared by every checkpoint video.")
     parser.add_argument("--device", default="cpu",
                         help="Evaluation device; CPU avoids contending with the training GPU.")
+    parser.add_argument("--mujoco-gl", choices=("egl", "osmesa"), default="egl",
+                        help="Headless renderer: egl (GPU) or osmesa (CPU, requires libOSMesa).")
     parser.add_argument("--uv-command", default="uv")
     parser.add_argument("--once", action="store_true",
                         help="Record the currently stable checkpoints, then exit.")
