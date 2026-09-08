@@ -1642,6 +1642,37 @@ def feet_grounded_reward(
     return torch.clamp(found, 0.0, 2.0) / 2.0
 
 
+def feet_grounded_return_phased(
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    command_name: str = "twist",
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Reward both feet on terrain only while rising and standing.
+
+    Ground-pick previously paid this throughout descent, biasing exploration
+    toward a standing lean. A kneeling pickup must be free to transfer support
+    from the feet to the lower legs, then recover foot support on the way up.
+    """
+    grounded = feet_grounded_reward(env, sensor_name)
+    gate = phase_rise_gate(_gp_phase(env, command_name), hold_end, rise_end)
+    return gate * grounded
+
+
+def feet_flat_return_phased(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg = _ROLLER_FEET_SITE_CFG,
+    command_name: str = "twist",
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Penalize tilted feet only during the return-to-stand segment."""
+    cost = feet_flat_penalty(env, asset_cfg=asset_cfg)
+    gate = phase_rise_gate(_gp_phase(env, command_name), hold_end, rise_end)
+    return gate * cost
+
+
 def body_impact_cost(
     env: ManagerBasedRlEnv,
     sensor_name: str,
@@ -3416,6 +3447,47 @@ def grape_dual_contact_phased(
     held = upper.bool() & lower.bool()
     gate = phase_rise_gate(_gp_phase(env, command_name), hold_end, rise_end)
     return gate * held.to(dtype=gate.dtype)
+
+
+def kneel_support_with_reach_phased(
+    env: ManagerBasedRlEnv,
+    left_sensor_name: str,
+    right_sensor_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    grape_name: str = "grape",
+    grasp_distance: float = 0.01,
+    reach_std: float = 0.08,
+    command_name: str = "twist",
+    descent_end: float = 0.375,
+    hold_end: float = 0.425,
+    rise_end: float = 0.80,
+) -> torch.Tensor:
+    """Reward bilateral lower-leg support during the pickup approach.
+
+    A small contact component makes kneeling discoverable. Most of the score
+    is multiplied by mouth-to-grape proximity so dropping to the knees and
+    parking there is not an attractive substitute for performing the pickup.
+    The down-phase gate removes the reward as the robot rises and pays nothing
+    during the final standing rest.
+    """
+    left = env.scene.sensors[left_sensor_name].data.found
+    right = env.scene.sensors[right_sensor_name].data.found
+    left = left.reshape(env.num_envs, -1).any(dim=1)
+    right = right.reshape(env.num_envs, -1).any(dim=1)
+    bilateral_support = left.bool() & right.bool()
+
+    robot: Entity = env.scene[asset_cfg.name]
+    grape: Entity = env.scene[grape_name]
+    mouth = robot.data.site_pos_w[:, asset_cfg.site_ids, :].mean(dim=1)
+    distance = torch.linalg.vector_norm(mouth - grape.data.root_link_pos_w, dim=-1)
+    reach_error = torch.abs(distance - grasp_distance)
+    reach_score = torch.exp(-((reach_error / reach_std) ** 2))
+
+    gate = phase_pose_blend(
+        _gp_phase(env, command_name), descent_end, hold_end, rise_end
+    )
+    score = bilateral_support.to(dtype=gate.dtype) * (0.25 + 0.75 * reach_score)
+    return torch.nan_to_num(gate * score, nan=0.0)
 
 
 def grape_lift_diagnostic(

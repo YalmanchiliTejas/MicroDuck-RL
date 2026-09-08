@@ -43,9 +43,24 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert cfg.rewards["grape_dual_contact"].weight > lift.weight
     assert cfg.rewards["grape_dual_contact"].func is microduck_mdp.grape_dual_contact_phased
     assert {sensor.name for sensor in cfg.scene.sensors} >= {
-        "upper_grape_contact", "lower_grape_contact"
+        "upper_grape_contact",
+        "lower_grape_contact",
+        "left_kneel_ground_contact",
+        "right_kneel_ground_contact",
     }
+    kneel = cfg.rewards["kneel_support_with_reach"]
+    assert kneel.func is microduck_mdp.kneel_support_with_reach_phased
+    assert kneel.weight > 0.0
+    assert (
+        cfg.rewards["feet_grounded"].func
+        is microduck_mdp.feet_grounded_return_phased
+    )
+    assert (
+        cfg.rewards["feet_flat"].func
+        is microduck_mdp.feet_flat_return_phased
+    )
     assert set(cfg.metrics) >= {
+        "kneel_support_with_reach",
         "grape_height",
         "target_grape_height",
         "mouth_grape_distance",
@@ -279,3 +294,38 @@ def test_dual_contact_requires_both_pads_after_mouth_closes():
     assert score[0] > 0.0
     assert score[1] == 0.0
     assert score[2] == 0.0
+
+
+def test_kneel_support_requires_both_legs_and_only_pays_in_down_phase():
+    phase = torch.tensor([0.4, 0.4, 0.9])
+    grape = torch.tensor([[0.0, 0.0, 0.01]]).expand(3, -1)
+    mouth = torch.tensor([[0.01, 0.0, 0.01]]).expand(3, -1)
+    env = _Env(grape, mouth, phase)
+    env.scene.sensors = {
+        "left_kneel": _Sensor(torch.tensor([[True], [True], [True]])),
+        "right_kneel": _Sensor(torch.tensor([[True], [False], [True]])),
+    }
+
+    score = microduck_mdp.kneel_support_with_reach_phased(
+        env,
+        left_sensor_name="left_kneel",
+        right_sensor_name="right_kneel",
+        asset_cfg=_mouth_cfg(),
+    )
+
+    assert score[0] > 0.99
+    assert score[1] == 0.0
+    assert score[2] == 0.0
+
+
+def test_feet_ground_reward_is_disabled_until_return_phase():
+    phase = torch.tensor([0.4, 0.9])
+    env = _Env(torch.zeros(2, 3), torch.zeros(2, 3), phase)
+    env.scene.sensors = {
+        "feet": _Sensor(torch.tensor([[1.0, 1.0], [1.0, 1.0]])),
+    }
+
+    score = microduck_mdp.feet_grounded_return_phased(env, sensor_name="feet")
+
+    assert score[0] == 0.0
+    assert score[1] == 1.0

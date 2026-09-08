@@ -156,6 +156,27 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         num_slots=1,
     )
 
+    # The lower-leg collision meshes are the available kneeling surfaces. Keep
+    # left/right contacts separate so a one-leg flop is not a stable kneel.
+    left_kneel_ground_cfg = ContactSensorCfg(
+        name="left_kneel_ground_contact",
+        primary=ContactMatch(mode="body", pattern=r"^leg$", entity="robot"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),
+        fields=("found", "force"),
+        reduce="maxforce",
+        num_slots=1,
+        secondary_policy="first",
+    )
+    right_kneel_ground_cfg = ContactSensorCfg(
+        name="right_kneel_ground_contact",
+        primary=ContactMatch(mode="body", pattern=r"^leg_2$", entity="robot"),
+        secondary=ContactMatch(mode="body", pattern="terrain"),
+        fields=("found", "force"),
+        reduce="maxforce",
+        num_slots=1,
+        secondary_policy="first",
+    )
+
     # A near mouth-to-grape distance is not a grasp.  Keep the two pad contacts
     # separate so the task can require the grape to remain in the closed jaw.
     upper_grape_contact_cfg = ContactSensorCfg(
@@ -188,6 +209,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     }
     cfg.scene.sensors  = (
         feet_ground_cfg, self_collision_cfg, head_impact_cfg,
+        left_kneel_ground_cfg, right_kneel_ground_cfg,
         upper_grape_contact_cfg, lower_grape_contact_cfg,
     )
     cfg.viewer.body_name = "trunk_base"
@@ -404,13 +426,42 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 
     cfg.rewards["soft_landing"].weight = -1e-5
 
-    # Keep BOTH feet in contact throughout the pick (les pieds ne décollent pas).
-    # NB: c'est le CONTACT seulement ; la bascule du pied sur la cheville est gérée
-    # par feet_flat ci-dessous (pas par ce terme).
+    # During descent the policy may transfer support onto both lower legs. The
+    # score is mostly conditioned on reaching the grape, preventing a
+    # kneel-and-park solution from replacing the pickup.
+    kneel_support_params = {
+        "left_sensor_name": left_kneel_ground_cfg.name,
+        "right_sensor_name": right_kneel_ground_cfg.name,
+        "asset_cfg": SceneEntityCfg("robot", site_names=["mouth_tip"]),
+        "grape_name": "grape",
+        "grasp_distance": GRAPE_HALF_HEIGHT,
+        "reach_std": 0.08,
+        "command_name": "twist",
+        "descent_end": DESCENT_END,
+        "hold_end": HOLD_END,
+        "rise_end": RISE_END,
+    }
+    cfg.rewards["kneel_support_with_reach"] = RewardTermCfg(
+        func=microduck_mdp.kneel_support_with_reach_phased,
+        weight=6.0,
+        params=kneel_support_params,
+    )
+    cfg.metrics["kneel_support_with_reach"] = MetricsTermCfg(
+        func=microduck_mdp.kneel_support_with_reach_phased,
+        params=kneel_support_params,
+    )
+
+    # Restore both-foot support during the rise and final standing rest. This
+    # no longer blocks the descent into a kneel.
     cfg.rewards["feet_grounded"] = RewardTermCfg(
-        func=microduck_mdp.feet_grounded_reward,
+        func=microduck_mdp.feet_grounded_return_phased,
         weight=3.0,
-        params={"sensor_name": feet_ground_cfg.name},
+        params={
+            "sensor_name": feet_ground_cfg.name,
+            "command_name": "twist",
+            "hold_end": HOLD_END,
+            "rise_end": RISE_END,
+        },
     )
 
     # Pieds À PLAT. feet_grounded ne voit que le CONTACT (found par pied) : un pied
@@ -420,10 +471,13 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     # vertical (xy²≈0) ; toute bascule -> xy²>0. Interdit donc le retournement du
     # pied sur l'axe cheville.
     cfg.rewards["feet_flat"] = RewardTermCfg(
-        func=microduck_mdp.feet_flat_penalty,
+        func=microduck_mdp.feet_flat_return_phased,
         weight=-2.0,
         params={
             "asset_cfg": SceneEntityCfg("robot", site_names=["left_foot", "right_foot"]),
+            "command_name": "twist",
+            "hold_end": HOLD_END,
+            "rise_end": RISE_END,
         },
     )
 
