@@ -69,6 +69,9 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
             "--video-length", str(args.video_length),
             "--video-width", str(args.video_width),
             "--video-height", str(args.video_height),
+            "--video-distance", str(args.video_distance),
+            "--video-azimuth", str(args.video_azimuth),
+            "--video-elevation", str(args.video_elevation),
             "--num-envs", "1",
             "--device", args.device,
             "--seed", str(args.seed),
@@ -92,6 +95,11 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
         "iteration": iteration,
         "seed": args.seed,
         "video_length": args.video_length,
+        "camera": {
+            "distance": args.video_distance,
+            "azimuth": args.video_azimuth,
+            "elevation": args.video_elevation,
+        },
         "recorded_at_unix_s": time.time(),
     }, indent=2) + "\n")
     print(f"[record] completed checkpoint {iteration}: {destination}", flush=True)
@@ -109,6 +117,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--video-length", type=int, default=200)
     parser.add_argument("--video-width", type=int, default=640)
     parser.add_argument("--video-height", type=int, default=480)
+    parser.add_argument("--video-distance", type=float, default=0.55,
+                        help="Camera distance from the duck in metres.")
+    parser.add_argument("--video-azimuth", type=float, default=90.0,
+                        help="Camera orbit angle in degrees; 90 gives the grape side view.")
+    parser.add_argument("--video-elevation", type=float, default=-15.0,
+                        help="Camera elevation in degrees.")
     parser.add_argument("--seed", type=int, default=0,
                         help="Fixed evaluation seed, shared by every checkpoint video.")
     parser.add_argument("--device", default="cpu",

@@ -46,6 +46,9 @@ class ExportConfig:
     video_height: int | None = None
     video_width: int | None = None
     video_folder: str | None = None
+    video_distance: float | None = None
+    video_azimuth: float | None = None
+    video_elevation: float | None = None
     seed: int | None = None
     camera: int | str | None = None
     viewer: Literal["auto", "native", "viser"] = "auto"
@@ -214,6 +217,12 @@ def run_export(task_id: str, cfg: ExportConfig) -> ExportResult:
         env_cfg.viewer.height = cfg.video_height
     if cfg.video_width is not None:
         env_cfg.viewer.width = cfg.video_width
+    if cfg.video_distance is not None:
+        env_cfg.viewer.distance = cfg.video_distance
+    if cfg.video_azimuth is not None:
+        env_cfg.viewer.azimuth = cfg.video_azimuth
+    if cfg.video_elevation is not None:
+        env_cfg.viewer.elevation = cfg.video_elevation
 
     render_mode = "rgb_array" if (TRAINED_MODE and cfg.video) else None
     if cfg.video and DUMMY_MODE:
