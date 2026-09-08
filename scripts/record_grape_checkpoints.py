@@ -145,7 +145,7 @@ def main() -> int:
                 continue
             try:
                 record_checkpoint(args, checkpoint, iteration)
-            except subprocess.CalledProcessError as error:
+            except (subprocess.CalledProcessError, RuntimeError) as error:
                 # Do not write a completion marker: a transient render failure
                 # is retried at the next poll, without losing the checkpoint.
                 print(f"[record] checkpoint {iteration} failed ({error}); will retry", file=sys.stderr)

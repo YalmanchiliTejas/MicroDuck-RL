@@ -263,6 +263,16 @@ def run_export(task_id: str, cfg: ExportConfig) -> ExportResult:
         runner.load(str(resume_path), map_location=device)
         policy = runner.get_inference_policy(device=device)
 
+    # VideoRecorder only receives frames when the environment is stepped.
+    # Export used to create the recorder and immediately close it after ONNX
+    # conversion, which logged "Recording videos" but produced no MP4.
+    if TRAINED_MODE and cfg.video:
+        observations = env.get_observations()
+        for _ in range(cfg.video_length):
+            with torch.inference_mode():
+                actions = policy(observations)
+            observations, _, _, _ = env.step(actions)
+
     # mjlab 1.3.0: ONNX export + metadata moved to mjlab.rl.exporter_utils and
     # the runner's built-in export_policy_to_onnx. Observation normalization is
     # baked into the exported graph automatically — EmpiricalNormalization is a
