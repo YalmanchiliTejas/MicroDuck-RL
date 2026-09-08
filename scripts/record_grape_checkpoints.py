@@ -61,7 +61,9 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
             TASK_ID,
             "--checkpoint-file", str(checkpoint.resolve()),
             "--onnx-file", str(Path(temp_dir) / "policy.onnx"),
-            "--video",
+            # ExportConfig uses tyro with FlagConversionOff, so Boolean
+            # options require an explicit value (not argparse-style presence).
+            "--video", "True",
             "--video-folder", str(destination.resolve()),
             "--video-length", str(args.video_length),
             "--video-width", str(args.video_width),
