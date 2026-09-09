@@ -170,6 +170,29 @@ def test_grape_pick_robot_has_separate_moving_mouth():
     assert math.isclose(model.jnt_range[mouth_joint, 1], math.radians(30.0))
 
 
+def test_grape_grip_contacts_approximate_compliant_silicone():
+    import mujoco
+
+    model = get_grape_pick_robot_spec().compile()
+    for name in ("upper_mouth_grip", "lower_mouth_grip"):
+        geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
+        assert geom >= 0
+        assert model.geom_condim[geom] == 6
+        assert math.isclose(model.geom_margin[geom], 0.0015)
+        assert torch.allclose(
+            torch.as_tensor(model.geom_friction[geom]),
+            torch.tensor([2.0, 0.02, 0.005], dtype=torch.float64),
+        )
+        assert torch.allclose(
+            torch.as_tensor(model.geom_solref[geom]),
+            torch.tensor([0.02, 1.0], dtype=torch.float64),
+        )
+        assert torch.allclose(
+            torch.as_tensor(model.geom_solimp[geom, :3]),
+            torch.tensor([0.8, 0.95, 0.003], dtype=torch.float64),
+        )
+
+
 def test_scripted_mouth_opens_descends_closes_and_stays_closed():
     close_midpoint = 0.5 * (DESCENT_END + JAW_CLOSE_END)
     phases = torch.tensor(
