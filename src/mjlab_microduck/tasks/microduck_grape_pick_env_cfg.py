@@ -254,7 +254,11 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         weight=4.0,
         params={
             "asset_cfg": SceneEntityCfg(
-                "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+                "robot",
+                site_names=[
+                    "upper_mouth_grip_center",
+                    "lower_mouth_grip_center",
+                ],
             ),
             "grape_name": "grape",
             # Keep the approach axis broad enough to bootstrap from standing,
@@ -269,15 +273,16 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         },
     )
 
-    # High-value precision objective. The 3.5 cm Gaussian is deliberately much
-    # narrower than the bootstrap alignment above, so a shallow knee bend earns
-    # little and placing the actual jaw pocket on the grape dominates the stack.
+    # High-value precision objective at the physical pad centers. The 1.8 cm
+    # Gaussian makes lip-level near misses worth little while the broader term
+    # above continues to bootstrap descent toward the actual grip pocket.
     grip_pocket_precision_params = {
         "asset_cfg": SceneEntityCfg(
-            "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+            "robot",
+            site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
         ),
         "grape_name": "grape",
-        "std": 0.035,
+        "std": 0.018,
         "command_name": "twist",
         "descent_end": DESCENT_END,
         "hold_end": HOLD_END,
@@ -307,15 +312,15 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         },
     )
 
-    # During return, track a linearly rising object-height target AND require
-    # the grape to remain at the mouth.  Multiplication rules out reward from
-    # batting/throwing the grape, while the moving target removes any incentive
-    # to complete the lift violently ahead of schedule.
+    # During return, track a linearly rising object-height target while the
+    # grape remains centered at, and physically held by, both silicone pads.
+    # The moving target removes any incentive to lift violently ahead of time.
     grape_lift_params = {
-        # The midpoint between the fixed upper and moving lower tips is the
-        # physical jaw pocket; the upper tip alone rewarded near misses.
+        # The midpoint between fixed-upper and moving-lower pad centers is the
+        # physical grip pocket. Distal tip sites previously rewarded the lip.
         "asset_cfg": SceneEntityCfg(
-            "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+            "robot",
+            site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
         ),
         "grape_name": "grape",
         "ground_height": GRAPE_HALF_HEIGHT,
@@ -330,7 +335,11 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     cfg.rewards["grape_lift_tracking"] = RewardTermCfg(
         func=microduck_mdp.grape_lift_tracking_phased,
         weight=8.0,
-        params=grape_lift_params,
+        params={
+            **grape_lift_params,
+            "upper_sensor_name": upper_grape_contact_cfg.name,
+            "lower_sensor_name": lower_grape_contact_cfg.name,
+        },
     )
 
     # Dense grip-center tracking gets the policy into the pocket; this term
@@ -474,7 +483,8 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         "left_sensor_name": left_kneel_ground_cfg.name,
         "right_sensor_name": right_kneel_ground_cfg.name,
         "asset_cfg": SceneEntityCfg(
-            "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+            "robot",
+            site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
         ),
         "grape_name": "grape",
         "forward_std": 0.12,

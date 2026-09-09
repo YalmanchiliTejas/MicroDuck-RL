@@ -243,6 +243,9 @@
               <!-- The upper silicone pad must collide with the grape.  It remains on
                    the fixed head while the matching lower pad moves with the jaw. -->
               <geom name="upper_mouth_grip" type="mesh" pos="-0.00420071 1.7776e-08 -0.0180814" quat="0.5 0.5 0.5 0.5" mesh="soft_mouth_top" material="soft_mouth_top_material" contype="1" conaffinity="1" condim="4" friction="2.0 0.01 0.001" solref="0.01 1" solimp="0.9 0.95 0.001"/>
+              <!-- Physical center of the upper silicone contact surface.  Keep this
+                   separate from mouth_tip, which is the distal lip reference. -->
+              <site group="3" name="upper_mouth_grip_center" pos="-0.00753371 0 -0.0598649" quat="0.704015 0 0.710185 0"/>
               <!-- Part noenoeil -->
               <geom type="mesh" class="visual" pos="-0.0045 -9.13778e-05 -0.0178" quat="0.5 0.5 0.5 0.5" mesh="noenoeil" material="noenoeil_material"/>
               <!-- Scripted physical mouth servo.  The pivot is the centreline of the
@@ -255,6 +258,8 @@
                 <!-- Lower silicone grip pad. -->
                 <geom type="mesh" class="visual" pos="-0.0076 0 0.0000004" quat="0.5 0.5 0.5 0.5" mesh="jaw_soft" material="jaw_soft_material"/>
                 <geom name="lower_mouth_grip" type="mesh" pos="-0.0076 0 0.0000004" quat="0.5 0.5 0.5 0.5" mesh="jaw_soft" material="jaw_soft_material" contype="1" conaffinity="1" condim="4" friction="2.0 0.01 0.001" solref="0.01 1" solimp="0.9 0.95 0.001"/>
+                <!-- Physical center of the moving lower silicone contact surface. -->
+                <site group="3" name="lower_mouth_grip_center" pos="-0.014529 0 -0.0416176" quat="0.704015 0 0.710185 0"/>
                 <!-- Printed lower-jaw carrier. -->
                 <geom type="mesh" class="visual" pos="-0.0075 0 0" quat="0.5 0.5 0.5 0.5" mesh="jaw" material="jaw_material"/>
                 <geom type="mesh" class="collision" pos="-0.0075 0 0" quat="0.5 0.5 0.5 0.5" mesh="jaw" material="jaw_material"/>

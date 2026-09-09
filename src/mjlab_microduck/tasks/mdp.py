@@ -3315,7 +3315,7 @@ def _grip_pocket_alignment_score(
     lateral_std: float,
     opening_std: float,
 ) -> torch.Tensor:
-    """Score a grape at the live midpoint of the upper and lower jaw tips.
+    """Score a grape at the live midpoint of the two silicone grip centers.
 
     Errors are resolved in the upper-mouth site frame so a small spherical
     distance cannot hide a large error across the jaw opening or laterally.
@@ -3342,7 +3342,8 @@ def _grip_pocket_alignment_score(
 def grip_pocket_grape_alignment_phased(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg(
-        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        "robot",
+        site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
     ),
     grape_name: str = "grape",
     forward_std: float = 0.12,
@@ -3371,10 +3372,11 @@ def grip_pocket_grape_alignment_phased(
 def grip_pocket_grape_distance_phased(
     env: ManagerBasedRlEnv,
     asset_cfg: SceneEntityCfg = SceneEntityCfg(
-        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        "robot",
+        site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
     ),
     grape_name: str = "grape",
-    std: float = 0.035,
+    std: float = 0.018,
     command_name: str = "twist",
     descent_end: float = 0.375,
     hold_end: float = 0.425,
@@ -3382,11 +3384,10 @@ def grip_pocket_grape_distance_phased(
 ) -> torch.Tensor:
     """Strong precision reward for moving the jaw pocket onto the grape.
 
-    Unlike the old upper-tip/head proxy, the target is the live midpoint of
-    the fixed upper and moving lower jaw tips. The narrow Gaussian is paired
-    with the broader axis-wise alignment term: the broad term bootstraps the
-    descent, while this term makes actually reaching the grape much more
-    valuable than merely pitching the face downward.
+    The target is the live midpoint of sites at the physical silicone-pad
+    centers, not the distal jaw lips. The narrow Gaussian is paired with the
+    broader axis-wise alignment term: the broad term bootstraps the descent,
+    while this term makes seating the grape inside the grip valuable.
     """
     if len(asset_cfg.site_ids) != 2:
         raise ValueError("grip-pocket distance requires upper and lower mouth sites")
@@ -3404,9 +3405,29 @@ def grip_pocket_grape_distance_phased(
     return torch.nan_to_num(gate * score, nan=0.0)
 
 
+def _grape_dual_contact(
+    env: ManagerBasedRlEnv,
+    upper_sensor_name: str,
+    lower_sensor_name: str,
+) -> torch.Tensor:
+    """Return one only while both physical silicone pads contact the grape."""
+    upper = env.scene.sensors[upper_sensor_name].data.found
+    lower = env.scene.sensors[lower_sensor_name].data.found
+    # Sensor reducers have differed between mjlab versions: flatten all
+    # non-batch dimensions so this remains one contact bit per environment.
+    upper = upper.reshape(env.num_envs, -1).any(dim=1)
+    lower = lower.reshape(env.num_envs, -1).any(dim=1)
+    return (upper.bool() & lower.bool()).float()
+
+
 def grape_lift_tracking_phased(
     env: ManagerBasedRlEnv,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    upper_sensor_name: str,
+    lower_sensor_name: str,
+    asset_cfg: SceneEntityCfg = SceneEntityCfg(
+        "robot",
+        site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
+    ),
     grape_name: str = "grape",
     ground_height: float = 0.01,
     target_height: float = 0.12,
@@ -3421,8 +3442,9 @@ def grape_lift_tracking_phased(
 
     The target rises from ground level to ``target_height`` over the commanded
     return segment.  A grape lifted early is therefore not a jackpot.  The
-    height and mouth-proximity Gaussians are multiplied so throwing or merely
-    nudging the grape upward cannot satisfy the objective.
+    height and mouth-proximity Gaussians are multiplied and then hard-gated by
+    real dual-pad contact, so throwing, nudging, or hovering near the grape
+    cannot satisfy the objective.
     """
     components = _grape_lift_components(
         env,
@@ -3437,10 +3459,16 @@ def grape_lift_tracking_phased(
         hold_end=hold_end,
         rise_end=rise_end,
     )
+    dual_contact = _grape_dual_contact(
+        env,
+        upper_sensor_name=upper_sensor_name,
+        lower_sensor_name=lower_sensor_name,
+    )
     return (
         components["phase_gate"]
         * components["height_score"]
         * components["grasp_score"]
+        * dual_contact
     )
 
 
@@ -3471,8 +3499,8 @@ def _grape_lift_components(
     )
 
     mouth_sites = robot.data.site_pos_w[:, asset_cfg.site_ids, :]
-    # The grape must be centered in the pocket between the fixed upper and
-    # moving lower jaw, rather than merely close to the upper-mouth tip.
+    # The grape must be centered between the physical upper and lower grip
+    # surfaces, rather than merely close to either distal mouth lip.
     mouth = mouth_sites.mean(dim=1)
     mouth_grape_distance = torch.linalg.vector_norm(
         mouth - grape.data.root_link_pos_w, dim=-1
@@ -3506,13 +3534,7 @@ def grape_dual_contact_phased(
     standing rest.  It cannot reward touching the grape with an open mouth,
     and it turns a post-capture slip into a clear loss of reward.
     """
-    upper = env.scene.sensors[upper_sensor_name].data.found
-    lower = env.scene.sensors[lower_sensor_name].data.found
-    # Sensor reducers have differed between mjlab versions: flatten all
-    # non-batch dimensions so this remains one contact bit per environment.
-    upper = upper.reshape(env.num_envs, -1).any(dim=1)
-    lower = lower.reshape(env.num_envs, -1).any(dim=1)
-    held = upper.bool() & lower.bool()
+    held = _grape_dual_contact(env, upper_sensor_name, lower_sensor_name)
     gate = phase_rise_gate(_gp_phase(env, command_name), hold_end, rise_end)
     return gate * held.to(dtype=gate.dtype)
 
@@ -3544,7 +3566,8 @@ def kneel_support_with_reach_phased(
     left_sensor_name: str,
     right_sensor_name: str,
     asset_cfg: SceneEntityCfg = SceneEntityCfg(
-        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        "robot",
+        site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
     ),
     grape_name: str = "grape",
     forward_std: float = 0.12,
@@ -3588,7 +3611,10 @@ def kneel_support_with_reach_phased(
 def grape_lift_diagnostic(
     env: ManagerBasedRlEnv,
     metric: str,
-    asset_cfg: SceneEntityCfg = SceneEntityCfg("robot", site_names=["mouth_tip"]),
+    asset_cfg: SceneEntityCfg = SceneEntityCfg(
+        "robot",
+        site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
+    ),
     grape_name: str = "grape",
     ground_height: float = 0.01,
     target_height: float = 0.12,

@@ -35,21 +35,23 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert approach.func is microduck_mdp.grip_pocket_grape_alignment_phased
     assert approach.params["forward_std"] == 0.12
     assert approach.params["asset_cfg"].site_names == [
-        "mouth_tip", "lower_mouth_tip"
+        "upper_mouth_grip_center", "lower_mouth_grip_center"
     ]
     assert cfg.rewards["mouth_perpendicular_to_ground"].weight == 0.0
     precision = cfg.rewards["grip_pocket_precision"]
     assert precision.func is microduck_mdp.grip_pocket_grape_distance_phased
     assert precision.weight == 10.0
-    assert precision.params["std"] == 0.035
+    assert precision.params["std"] == 0.018
     assert lift.weight > 0.0
     assert lift.func is microduck_mdp.grape_lift_tracking_phased
     assert lift.params["target_height"] == GRAPE_LIFT_HEIGHT
     assert lift.params["grasp_std"] == 0.018
     assert lift.params["grasp_distance"] == 0.0
     assert lift.params["asset_cfg"].site_names == [
-        "mouth_tip", "lower_mouth_tip"
+        "upper_mouth_grip_center", "lower_mouth_grip_center"
     ]
+    assert lift.params["upper_sensor_name"] == "upper_grape_contact"
+    assert lift.params["lower_sensor_name"] == "lower_grape_contact"
     assert "grape_dual_contact" in cfg.rewards
     assert cfg.rewards["grape_dual_contact"].weight > lift.weight
     assert cfg.rewards["grape_dual_contact"].func is microduck_mdp.grape_dual_contact_phased
@@ -141,10 +143,25 @@ def test_grape_pick_robot_has_separate_moving_mouth():
     lower_tip = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_SITE, "lower_mouth_tip"
     )
+    upper_grip = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_SITE, "upper_mouth_grip_center"
+    )
+    lower_grip = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_SITE, "lower_mouth_grip_center"
+    )
     assert mouth_joint >= 0
     assert mouth_body >= 0
     assert model.site_bodyid[tip] != mouth_body
     assert model.site_bodyid[lower_tip] == mouth_body
+    assert model.site_bodyid[upper_grip] != mouth_body
+    assert model.site_bodyid[lower_grip] == mouth_body
+    # The reward sites are about 18 mm inward from the old distal-lip sites.
+    assert 0.015 < math.dist(model.site_pos[tip], model.site_pos[upper_grip]) < 0.022
+    assert (
+        0.015
+        < math.dist(model.site_pos[lower_tip], model.site_pos[lower_grip])
+        < 0.022
+    )
     assert math.isclose(model.jnt_range[mouth_joint, 0], math.radians(-5.0))
     assert math.isclose(model.jnt_range[mouth_joint, 1], math.radians(30.0))
 
@@ -251,7 +268,7 @@ def _mouth_cfg():
 
 def _grip_cfg():
     cfg = SceneEntityCfg(
-        "robot", site_names=["mouth_tip", "lower_mouth_tip"]
+        "robot", site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"]
     )
     cfg.site_ids = [0, 1]
     return cfg
@@ -263,13 +280,42 @@ def test_lift_reward_tracks_slewed_target_and_rejects_throwing():
     phase = torch.tensor([0.6125, 0.6125, 0.6125])
     grape = torch.tensor([[0.0, 0.0, 0.065], [0.0, 0.0, 0.12], [0.0, 0.0, 0.065]])
     mouth = torch.tensor([[0.01, 0.0, 0.065], [0.01, 0.0, 0.12], [0.20, 0.0, 0.065]])
+    env = _Env(grape, mouth, phase)
+    env.scene.sensors = {
+        "upper": _Sensor(torch.ones(3, 1, dtype=torch.bool)),
+        "lower": _Sensor(torch.ones(3, 1, dtype=torch.bool)),
+    }
     out = microduck_mdp.grape_lift_tracking_phased(
-        _Env(grape, mouth, phase), asset_cfg=_mouth_cfg()
+        env,
+        upper_sensor_name="upper",
+        lower_sensor_name="lower",
+        asset_cfg=_mouth_cfg(),
     )
 
     assert out[0] > out[1]
     assert out[0] > 0.49
     assert out[2] < 1e-6
+
+
+def test_lift_reward_requires_simultaneous_physical_pad_contact():
+    phase = torch.tensor([0.6125, 0.6125])
+    grape = torch.tensor([[0.0, 0.0, 0.065], [0.0, 0.0, 0.065]])
+    mouth = torch.tensor([[0.01, 0.0, 0.065], [0.01, 0.0, 0.065]])
+    env = _Env(grape, mouth, phase)
+    env.scene.sensors = {
+        "upper": _Sensor(torch.tensor([[True], [True]])),
+        "lower": _Sensor(torch.tensor([[True], [False]])),
+    }
+
+    reward = microduck_mdp.grape_lift_tracking_phased(
+        env,
+        upper_sensor_name="upper",
+        lower_sensor_name="lower",
+        asset_cfg=_mouth_cfg(),
+    )
+
+    assert reward[0] > 0.49
+    assert reward[1] == 0.0
 
 
 def test_lift_diagnostics_expose_reward_components():
@@ -304,7 +350,13 @@ def test_lift_diagnostics_expose_reward_components():
     assert torch.allclose(values["phase"], phase)
     assert torch.allclose(values["phase_gate"], torch.tensor([0.5]))
 
-    reward = microduck_mdp.grape_lift_tracking_phased(env, **params)
+    env.scene.sensors = {
+        "upper": _Sensor(torch.ones(1, 1, dtype=torch.bool)),
+        "lower": _Sensor(torch.ones(1, 1, dtype=torch.bool)),
+    }
+    reward = microduck_mdp.grape_lift_tracking_phased(
+        env, upper_sensor_name="upper", lower_sensor_name="lower", **params
+    )
     reconstructed = (
         values["phase_gate"] * values["height_score"] * values["grasp_score"]
     )
@@ -333,7 +385,7 @@ def test_precision_reward_strongly_prefers_grape_inside_jaw_pocket():
     mouth = torch.stack((centered_upper, lower), dim=1)
 
     score = microduck_mdp.grip_pocket_grape_distance_phased(
-        _Env(grape, mouth, phase), asset_cfg=_grip_cfg(), std=0.035
+        _Env(grape, mouth, phase), asset_cfg=_grip_cfg(), std=0.018
     )
 
     assert score[0] > 0.99
