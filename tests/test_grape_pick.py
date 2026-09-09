@@ -13,7 +13,10 @@ from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
     MicroduckGrapePickRlCfg,
     make_microduck_grape_pick_env_cfg,
 )
-from mjlab_microduck.robot.microduck_constants import get_grape_pick_robot_spec
+from mjlab_microduck.robot.microduck_constants import (
+    get_grape_pick_robot_spec,
+    get_grape_spec,
+)
 
 
 def test_grape_pick_cfg_wires_physical_object_objectives():
@@ -112,6 +115,18 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert isinstance(scripted, microduck_mdp.GroundPickMouthActionCfg)
     assert scripted.close_start == DESCENT_END
     assert scripted.close_end == HOLD_END
+
+
+def test_enlarged_grape_asset_matches_ground_height_constant():
+    import mujoco
+
+    model = get_grape_spec().compile()
+    grape_geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, "grape_geom")
+
+    assert torch.allclose(
+        torch.as_tensor(model.geom_size[grape_geom]),
+        torch.tensor([0.0144, 0.012, GRAPE_HALF_HEIGHT], dtype=torch.float64),
+    )
 
 
 def test_grape_pick_robot_has_separate_moving_mouth():

@@ -2,19 +2,21 @@
     <compiler angle="radian" autolimits="true"/>
 
     <worldbody>
-        <!-- Standard red grape: ~24mm long, ~20mm wide, ~5.5 grams (0.0055 kg).
+        <!-- Enlarged training grape: ~28.8mm long, ~24mm wide, ~5.5 grams
+             (0.0055 kg). The 1.2x geometry gives the jaw a wider capture basin
+             without increasing the payload seen by the mouth servo.
              Modeled as an ellipsoid geom. 
              Inertia calculated for a solid ellipsoid: 
-             I_xx = 1/5 * m * (b^2 + c^2) = 1/5 * 0.0055 * (0.01^2 + 0.01^2) = 2.2e-7
-             I_yy = 1/5 * m * (a^2 + c^2) = 1/5 * 0.0055 * (0.012^2 + 0.01^2) = 2.684e-7
-             I_zz = 1/5 * m * (a^2 + b^2) = 1/5 * 0.0055 * (0.012^2 + 0.01^2) = 2.684e-7
+             I_xx = 1/5 * m * (b^2 + c^2) = 3.168e-7
+             I_yy = 1/5 * m * (a^2 + c^2) = 3.86496e-7
+             I_zz = 1/5 * m * (a^2 + b^2) = 3.86496e-7
              Friction values set high enough to prevent endless ice-skating, 
              but smooth enough to roll like a fresh grape. -->
-        <body name="grape" pos="0 0 0.01">
+        <body name="grape" pos="0 0 0.012">
             <freejoint name="grape_free"/>
-            <inertial pos="0 0 0" mass="0.0055" diaginertia="2.2e-7 2.684e-7 2.684e-7"/>
+            <inertial pos="0 0 0" mass="0.0055" diaginertia="3.168e-7 3.86496e-7 3.86496e-7"/>
             <!-- Size represents radii along X, Y, and Z axes (ellipsoid) -->
-            <geom type="ellipsoid" name="grape_geom" size="0.012 0.01 0.01" rgba="0.5 0.1 0.3 1" friction="0.6 0.005 0.0002"/>
+            <geom type="ellipsoid" name="grape_geom" size="0.0144 0.012 0.012" rgba="0.5 0.1 0.3 1" friction="0.6 0.005 0.0002"/>
         </body>
     </worldbody>
 </mujoco>

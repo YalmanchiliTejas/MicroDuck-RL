@@ -29,7 +29,7 @@ MICRODUCK_GRAPE_PICK_XML: Path = _ROBOT_DIR / "robot_grape_pick.xml"
 MICRODUCK_ALLCOLLISIONS_XML: Path = _ROBOT_DIR / "robot_allcollisions.xml"
 # 70mm / 15g ball prop for the BallKick task.
 MICRODUCK_BALL_XML: Path = _ROBOT_DIR / "ball.xml"
-# 24mm / 5.5g grape prop for the GrapePick task.
+# Enlarged 28.8 x 24mm / 5.5g grape prop for the GrapePick task.
 MICRODUCK_GRAPE_XML: Path = _ROBOT_DIR / "grape.xml"
 # Roller-skate model: 14 actuated joints + passive wheel hinges (passive_*wheel).
 MICRODUCK_GROUNDCONTACT_ROLLERS_XML: Path = _ROBOT_DIR / "robot_groundcontact_rollers.xml"
@@ -286,7 +286,7 @@ MICRODUCK_BALL_CFG = EntityCfg(
 # Free grape prop; reset_grape_in_front_of_robot supplies the episode pose.
 MICRODUCK_GRAPE_CFG = EntityCfg(
     spec_fn=get_grape_spec,
-    init_state=EntityCfg.InitialStateCfg(pos=(0.09, 0.0, 0.01)),
+    init_state=EntityCfg.InitialStateCfg(pos=(0.09, 0.0, 0.012)),
 )
 
 # Roller skate robot: the 4 passive wheel joints (passive_*wheel) have no XML
