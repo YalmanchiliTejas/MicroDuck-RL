@@ -101,7 +101,9 @@ from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
 # palier bas COURT, repos debout long.
 # Durées à GP_PERIOD = 4 s :
 #   descente   [0, DESCENT_END)        1.5 s  transition STAND->bas
-#   palier bas [DESCENT_END, HOLD_END) 0.2 s  effleure (court)
+#   palier bas [DESCENT_END, HOLD_END) 0.8 s  capture puis maintien fermé
+#     fermeture [DESCENT_END, JAW_CLOSE_END) 0.2 s
+#     serrage    [JAW_CLOSE_END, HOLD_END)    0.6 s
 #   remontée   [HOLD_END, RISE_END)    1.5 s  transition bas->STAND
 #   repos      [RISE_END, 1)           0.8 s  debout
 # ⚠️ RISE_END=0.80 > coupure φ=0.7 du script infer_policy : la remontée n'est
@@ -109,6 +111,7 @@ from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
 # fenêtre réelle du runtime.  ⚠️ --ground-pick-period au déploiement = 4.0.
 GP_PERIOD    = 4.0
 DESCENT_END  = 0.375
+JAW_CLOSE_END = 0.425
 HOLD_END     = 0.575
 RISE_END     = 0.80
 
@@ -227,7 +230,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         entity_name="robot",
         command_name="twist",
         close_start=DESCENT_END,
-        close_end=HOLD_END,
+        close_end=JAW_CLOSE_END,
     )
     # No NeckOffsetJointPositionAction — head joints are part of the task motion
 
@@ -351,8 +354,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "upper_sensor_name": upper_grape_contact_cfg.name,
             "lower_sensor_name": lower_grape_contact_cfg.name,
             "command_name": "twist",
-            "hold_end": HOLD_END,
-            "rise_end": RISE_END,
+            "close_end": JAW_CLOSE_END,
         },
     )
     # Dense contact bridge: one pad earns half-credit after closing starts.
@@ -378,8 +380,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "upper_sensor_name": upper_grape_contact_cfg.name,
             "lower_sensor_name": lower_grape_contact_cfg.name,
             "command_name": "twist",
-            "hold_end": HOLD_END,
-            "rise_end": RISE_END,
+            "close_end": JAW_CLOSE_END,
         },
     )
 

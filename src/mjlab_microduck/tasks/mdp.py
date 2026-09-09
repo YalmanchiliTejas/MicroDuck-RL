@@ -3525,17 +3525,18 @@ def grape_dual_contact_phased(
     upper_sensor_name: str,
     lower_sensor_name: str,
     command_name: str = "twist",
-    hold_end: float = 0.425,
-    rise_end: float = 0.80,
+    close_end: float = 0.425,
 ) -> torch.Tensor:
     """Return one only when both physical mouth pads hold the grape.
 
-    This is deliberately gated from the end of the capture hold through the
-    standing rest.  It cannot reward touching the grape with an open mouth,
-    and it turns a post-capture slip into a clear loss of reward.
+    Reward begins as soon as scripted closure completes and remains active
+    through the clamped hold, lift, and standing rest.  This gives PPO a direct
+    signal for securing the grape before rising, while contact with the open or
+    still-closing mouth earns no dual-contact reward.
     """
     held = _grape_dual_contact(env, upper_sensor_name, lower_sensor_name)
-    gate = phase_rise_gate(_gp_phase(env, command_name), hold_end, rise_end)
+    phase = _gp_phase(env, command_name)
+    gate = (phase >= close_end).to(dtype=phase.dtype)
     return gate * held.to(dtype=gate.dtype)
 
 

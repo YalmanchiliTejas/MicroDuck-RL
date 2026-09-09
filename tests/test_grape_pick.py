@@ -10,6 +10,7 @@ from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
     GRAPE_LIFT_HEIGHT,
     GRAPE_POSITION_NOISE,
     HOLD_END,
+    JAW_CLOSE_END,
     MicroduckGrapePickRlCfg,
     make_microduck_grape_pick_env_cfg,
 )
@@ -55,6 +56,8 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert "grape_dual_contact" in cfg.rewards
     assert cfg.rewards["grape_dual_contact"].weight > lift.weight
     assert cfg.rewards["grape_dual_contact"].func is microduck_mdp.grape_dual_contact_phased
+    assert cfg.rewards["grape_dual_contact"].params["close_end"] == JAW_CLOSE_END
+    assert lift.params["hold_end"] == HOLD_END
     assert (
         cfg.rewards["grape_pad_contacts"].weight
         < cfg.rewards["grape_dual_contact"].weight
@@ -116,7 +119,8 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert learned.actuator_names == (r"^(?!passive_).*",)
     assert isinstance(scripted, microduck_mdp.GroundPickMouthActionCfg)
     assert scripted.close_start == DESCENT_END
-    assert scripted.close_end == HOLD_END
+    assert scripted.close_end == JAW_CLOSE_END
+    assert JAW_CLOSE_END < HOLD_END
 
 
 def test_enlarged_grape_asset_matches_ground_height_constant():
@@ -167,12 +171,12 @@ def test_grape_pick_robot_has_separate_moving_mouth():
 
 
 def test_scripted_mouth_opens_descends_closes_and_stays_closed():
-    close_midpoint = 0.5 * (DESCENT_END + HOLD_END)
+    close_midpoint = 0.5 * (DESCENT_END + JAW_CLOSE_END)
     phases = torch.tensor(
-        [0.0, DESCENT_END, close_midpoint, HOLD_END, 0.8, 0.99]
+        [0.0, DESCENT_END, close_midpoint, JAW_CLOSE_END, HOLD_END, 0.99]
     )
     opening = microduck_mdp.ground_pick_mouth_opening(
-        phases, DESCENT_END, HOLD_END
+        phases, DESCENT_END, JAW_CLOSE_END
     )
     assert torch.allclose(
         opening, torch.tensor([1.0, 1.0, 0.5, 0.0, 0.0, 0.0]), atol=1e-6
@@ -393,7 +397,7 @@ def test_precision_reward_strongly_prefers_grape_inside_jaw_pocket():
 
 
 def test_dual_contact_requires_both_pads_after_mouth_closes():
-    phase = torch.tensor([0.7, 0.7, 0.3])
+    phase = torch.tensor([0.5, 0.5, 0.4])
     env = _Env(
         torch.zeros(3, 3), torch.zeros(3, 3), phase
     )
@@ -403,7 +407,10 @@ def test_dual_contact_requires_both_pads_after_mouth_closes():
     }
 
     score = microduck_mdp.grape_dual_contact_phased(
-        env, upper_sensor_name="upper", lower_sensor_name="lower"
+        env,
+        upper_sensor_name="upper",
+        lower_sensor_name="lower",
+        close_end=JAW_CLOSE_END,
     )
 
     assert score[0] > 0.0
