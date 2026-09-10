@@ -9,8 +9,10 @@ from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
     GRAPE_HALF_HEIGHT,
     GRAPE_LIFT_HEIGHT,
     GRAPE_POSITION_NOISE,
+    GP_PERIOD,
     HOLD_END,
     JAW_CLOSE_END,
+    RISE_END,
     MicroduckGrapePickRlCfg,
     make_microduck_grape_pick_env_cfg,
 )
@@ -124,6 +126,14 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert scripted.close_start == DESCENT_END
     assert scripted.close_end == JAW_CLOSE_END
     assert JAW_CLOSE_END < HOLD_END
+
+
+def test_grape_pick_uses_six_second_capture_and_lift_cycle():
+    assert GP_PERIOD == 6.0
+    assert math.isclose(DESCENT_END * GP_PERIOD, 2.0)
+    assert math.isclose(JAW_CLOSE_END * GP_PERIOD, 2.2)
+    assert math.isclose(HOLD_END * GP_PERIOD, 3.0)
+    assert math.isclose(RISE_END * GP_PERIOD, 5.0)
 
 
 def test_enlarged_grape_asset_matches_ground_height_constant():
@@ -428,7 +438,7 @@ def test_precision_reward_strongly_prefers_grape_inside_jaw_pocket():
 
 
 def test_dual_contact_requires_both_pads_after_mouth_closes():
-    phase = torch.tensor([0.5, 0.5, 0.4, 0.7])
+    phase = torch.tensor([0.4, 0.4, 0.35, 0.6])
     env = _Env(
         torch.zeros(4, 3), torch.zeros(4, 3), phase
     )

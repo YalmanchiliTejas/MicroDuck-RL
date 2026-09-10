@@ -114,7 +114,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-seconds", type=float, default=30.0)
     parser.add_argument("--min-age-seconds", type=float, default=20.0,
                         help="Do not load a checkpoint until this long after its last write.")
-    parser.add_argument("--video-length", type=int, default=200)
+    # The policy cycle is 6 s at 50 Hz. Record the entire cycle by default.
+    parser.add_argument("--video-length", type=int, default=300)
     parser.add_argument("--video-width", type=int, default=640)
     parser.add_argument("--video-height", type=int, default=480)
     parser.add_argument("--video-distance", type=float, default=0.55,

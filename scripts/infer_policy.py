@@ -133,7 +133,7 @@ class PolicyInference:
     def __init__(self, model, data, walking_onnx_path=None, action_scale=1.0,
                  delay_min_lag=0, delay_max_lag=0,
                  standing_onnx_path=None, switch_threshold=0.05,
-                 use_projected_gravity=False, ground_pick_onnx_path=None, ground_pick_period=4.0,
+                 use_projected_gravity=False, ground_pick_onnx_path=None, ground_pick_period=6.0,
                  sit_onnx_path=None, new_cmd_obs=False, slope_onnx_path=None,
                  sitstand_onnx_path=None,
                  kick_left_onnx_path=None, kick_right_onnx_path=None,
@@ -638,7 +638,7 @@ class PolicyInference:
         if not self.ground_pick_mode:
             return
         new_phase = self.ground_pick_phase + dt / self.ground_pick_period
-        if new_phase >= 0.7:
+        if new_phase >= 1.0:
             self._end_ground_pick()
             return
         self.ground_pick_phase = new_phase
@@ -826,7 +826,7 @@ def main():
     parser.add_argument("--save-csv", type=str, default=None, help="Save observations and actions to CSV file")
     parser.add_argument("--record", type=str, default=None, help="Enable recording mode: save observations to pickle file on Ctrl+C")
     parser.add_argument("--switch-threshold", type=float, default=0.05, help="Vel command magnitude threshold for walking/standing switch (default: 0.05)")
-    parser.add_argument("--ground-pick-period", type=float, default=4.0, help="Ground pick phase period in seconds (default: 4.0)")
+    parser.add_argument("--ground-pick-period", type=float, default=6.0, help="Ground pick phase period in seconds (default: 6.0)")
     parser.add_argument("--new-cmd-obs", action="store_true",
                         help="Use the unified 13D command obs layout (twist+head_pose+body_pose). "
                              "Required for policies trained with the new pose-command-tracking setup. "

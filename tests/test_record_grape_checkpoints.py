@@ -1,6 +1,7 @@
 """Unit tests for checkpoint-video watcher bookkeeping (no simulator needed)."""
 
 import importlib.util
+import sys
 from pathlib import Path
 
 
@@ -37,3 +38,12 @@ def test_completion_marker_is_isolated_per_iteration(tmp_path):
     assert watcher.completion_marker(tmp_path, 250) == (
         tmp_path / "model_250" / "complete.json"
     )
+
+
+def test_default_video_covers_full_six_second_cycle(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["record_grape_checkpoints.py", "--checkpoint-dir", str(tmp_path)],
+    )
+    assert watcher.parse_args().video_length == 300

@@ -99,21 +99,20 @@ from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
 # Au lieu de la pondération sinusoïdale (qui couple descente/palier/remontée),
 # on gate les rewards par un profil à 4 segments : descente et remontée LENTES,
 # palier bas COURT, repos debout long.
-# Durées à GP_PERIOD = 4 s :
-#   descente   [0, DESCENT_END)        1.5 s  transition STAND->bas
-#   palier bas [DESCENT_END, HOLD_END) 0.8 s  capture puis maintien fermé
+# Durées à GP_PERIOD = 6 s :
+#   descente   [0, DESCENT_END)        2.0 s  transition STAND->bas
+#   palier bas [DESCENT_END, HOLD_END) 1.0 s  capture puis maintien fermé
 #     fermeture [DESCENT_END, JAW_CLOSE_END) 0.2 s
-#     serrage    [JAW_CLOSE_END, HOLD_END)    0.6 s
-#   remontée   [HOLD_END, RISE_END)    0.9 s  transition bas->STAND
-#   repos      [RISE_END, 1)           0.8 s  debout
-# ⚠️ RISE_END=0.80 > coupure φ=0.7 du script infer_policy : la remontée n'est
-# complète que si le slot joue jusqu'à φ~1.0 (toute la période). Vérifier la
-# fenêtre réelle du runtime.  ⚠️ --ground-pick-period au déploiement = 4.0.
-GP_PERIOD    = 4.0
-DESCENT_END  = 0.375
-JAW_CLOSE_END = 0.425
-HOLD_END     = 0.575
-RISE_END     = 0.80
+#     serrage    [JAW_CLOSE_END, HOLD_END)    0.8 s
+#   remontée   [HOLD_END, RISE_END)    2.0 s  transition bas->STAND
+#   repos      [RISE_END, 1)           1.0 s  debout
+# The runtime must play the complete phase through 1.0 before handing control
+# back to the standing/walking policy.
+GP_PERIOD = 6.0
+DESCENT_END = 2.0 / GP_PERIOD
+JAW_CLOSE_END = 2.2 / GP_PERIOD
+HOLD_END = 3.0 / GP_PERIOD
+RISE_END = 5.0 / GP_PERIOD
 
 GRAPE_HALF_HEIGHT = 0.012
 GRAPE_OFFSET = (0.09, 0.0)
@@ -678,8 +677,8 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     command: UniformVelocityCommandCfg = cfg.commands["twist"]
     command.rel_standing_envs = 0.0
     command.rel_heading_envs  = 0.0
-    # Période = GP_PERIOD (4 s). The segmented profile gives 1.5 s down,
-    # 0.8 s capture hold, 0.9 s lift, and 0.8 s standing hold.
+    # Période = GP_PERIOD (6 s): 2.0 s down, 1.0 s capture hold,
+    # 2.0 s lift, and 1.0 s standing hold.
     cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(
         **{**vars(command), "class_type": microduck_mdp.GroundPickPhaseCommand, "period": GP_PERIOD}
     )
