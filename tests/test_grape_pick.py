@@ -15,6 +15,7 @@ from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
     make_microduck_grape_pick_env_cfg,
 )
 from mjlab_microduck.robot.microduck_constants import (
+    MICRODUCK_GRAPE_PICK_ROBOT_CFG,
     get_grape_pick_robot_spec,
     get_grape_spec,
 )
@@ -173,10 +174,15 @@ def test_grape_pick_robot_has_separate_moving_mouth():
 def test_grape_grip_contacts_approximate_compliant_silicone():
     import mujoco
 
-    model = get_grape_pick_robot_spec().compile()
+    spec = get_grape_pick_robot_spec()
+    for collision_cfg in MICRODUCK_GRAPE_PICK_ROBOT_CFG.collisions:
+        collision_cfg.edit_spec(spec)
+    model = spec.compile()
     for name in ("upper_mouth_grip", "lower_mouth_grip"):
         geom = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
         assert geom >= 0
+        assert model.geom_contype[geom] != 0
+        assert model.geom_conaffinity[geom] != 0
         assert model.geom_condim[geom] == 6
         assert math.isclose(model.geom_margin[geom], 0.0015)
         assert torch.allclose(

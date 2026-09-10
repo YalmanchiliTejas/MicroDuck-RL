@@ -131,6 +131,30 @@ FULL_COLLISION = CollisionCfg(
     friction={r"^(left|right)_foot_collision$": (1.0,)},
 )
 
+# The grape-pick model adds two silicone pad geoms whose names deliberately do
+# not end in ``_collision`` because contact sensors address them directly.
+# FULL_COLLISION disables every unmatched geom, so using it here would silently
+# turn both pads into visual-only meshes and make all grape-contact rewards zero.
+GRAPE_PICK_COLLISION = CollisionCfg(
+    geom_names_expr=[
+        ".*_collision",
+        r"^(upper|lower)_mouth_grip$",
+    ],
+    condim={
+        r"^(left|right)_foot_collision$": 3,
+        r"^(upper|lower)_mouth_grip$": 6,
+        ".*_collision": 1,
+    },
+    priority={r"^(left|right)_foot_collision$": 1},
+    friction={
+        r"^(left|right)_foot_collision$": (1.0,),
+        r"^(upper|lower)_mouth_grip$": (2.0, 0.02, 0.005),
+    },
+    solref={r"^(upper|lower)_mouth_grip$": (0.02, 1.0)},
+    solimp={r"^(upper|lower)_mouth_grip$": (0.8, 0.95, 0.003)},
+    margin={r"^(upper|lower)_mouth_grip$": 0.0015},
+)
+
 # -- Old actuator (XML position, MuJoCo built-in PD + friction) --
 # actuators = DelayedActuatorCfg(
     # delay_min_lag=0,
@@ -229,7 +253,7 @@ MICRODUCK_GROUND_PICK_ROBOT_CFG = EntityCfg(
 MICRODUCK_GRAPE_PICK_ROBOT_CFG = EntityCfg(
     spec_fn=get_grape_pick_robot_spec,
     init_state=HOME_FRAME,
-    collisions=(FULL_COLLISION,),
+    collisions=(GRAPE_PICK_COLLISION,),
     articulation=EntityArticulationInfoCfg(
         actuators=(actuators, mouth_actuator),
         soft_joint_pos_limit_factor=0.9,
