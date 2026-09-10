@@ -242,11 +242,10 @@
               <geom type="mesh" class="visual" pos="-0.00420071 1.7776e-08 -0.0180814" quat="0.5 0.5 0.5 0.5" mesh="soft_mouth_top" material="soft_mouth_top_material"/>
               <!-- The upper silicone pad must collide with the grape.  It remains on
                    the fixed head while the matching lower pad moves with the jaw. -->
-              <!-- A rigid mesh has only a tiny, unstable contact patch against the
-                   grape.  The 1.5 mm margin and soft impedance approximate silicone
-                   compression, while condim=6 supplies the rolling resistance of a
-                   deformed pad without changing the visible or physical grape size. -->
-              <geom name="upper_mouth_grip" type="mesh" pos="-0.00420071 1.7776e-08 -0.0180814" quat="0.5 0.5 0.5 0.5" mesh="soft_mouth_top" material="soft_mouth_top_material" contype="1" conaffinity="1" condim="6" friction="2.0 0.02 0.005" margin="0.0015" solref="0.02 1" solimp="0.8 0.95 0.003"/>
+              <!-- Soft impedance approximates silicone compliance, while condim=6
+                   supplies the rolling resistance of a deformed pad.  Collision
+                   margin remains zero because MuJoCo Warp MULTICCD requires it. -->
+              <geom name="upper_mouth_grip" type="mesh" pos="-0.00420071 1.7776e-08 -0.0180814" quat="0.5 0.5 0.5 0.5" mesh="soft_mouth_top" material="soft_mouth_top_material" contype="1" conaffinity="1" condim="6" friction="2.0 0.02 0.005" solref="0.02 1" solimp="0.8 0.95 0.003"/>
               <!-- Physical center of the upper silicone contact surface.  Keep this
                    separate from mouth_tip, which is the distal lip reference. -->
               <site group="3" name="upper_mouth_grip_center" pos="-0.00753371 0 -0.0598649" quat="0.704015 0 0.710185 0"/>
@@ -261,7 +260,7 @@
                 <inertial pos="-0.01425362 -0.00052843 -0.03931109" mass="0.0298214371" fullinertia="3.02209173e-05 7.20109905e-06 2.43380608e-05 2.25492951e-07 -1.15804016e-06 6.19327469e-07"/>
                 <!-- Lower silicone grip pad. -->
                 <geom type="mesh" class="visual" pos="-0.0076 0 0.0000004" quat="0.5 0.5 0.5 0.5" mesh="jaw_soft" material="jaw_soft_material"/>
-                <geom name="lower_mouth_grip" type="mesh" pos="-0.0076 0 0.0000004" quat="0.5 0.5 0.5 0.5" mesh="jaw_soft" material="jaw_soft_material" contype="1" conaffinity="1" condim="6" friction="2.0 0.02 0.005" margin="0.0015" solref="0.02 1" solimp="0.8 0.95 0.003"/>
+                <geom name="lower_mouth_grip" type="mesh" pos="-0.0076 0 0.0000004" quat="0.5 0.5 0.5 0.5" mesh="jaw_soft" material="jaw_soft_material" contype="1" conaffinity="1" condim="6" friction="2.0 0.02 0.005" solref="0.02 1" solimp="0.8 0.95 0.003"/>
                 <!-- Physical center of the moving lower silicone contact surface. -->
                 <site group="3" name="lower_mouth_grip_center" pos="-0.014529 0 -0.0416176" quat="0.704015 0 0.710185 0"/>
                 <!-- Printed lower-jaw carrier. -->

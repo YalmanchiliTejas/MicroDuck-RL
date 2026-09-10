@@ -184,7 +184,7 @@ def test_grape_grip_contacts_approximate_compliant_silicone():
         assert model.geom_contype[geom] != 0
         assert model.geom_conaffinity[geom] != 0
         assert model.geom_condim[geom] == 6
-        assert math.isclose(model.geom_margin[geom], 0.0015)
+        assert math.isclose(model.geom_margin[geom], 0.0)
         assert torch.allclose(
             torch.as_tensor(model.geom_friction[geom]),
             torch.tensor([2.0, 0.02, 0.005], dtype=torch.float64),

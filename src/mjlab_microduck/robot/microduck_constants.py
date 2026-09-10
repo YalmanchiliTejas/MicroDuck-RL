@@ -136,10 +136,10 @@ FULL_COLLISION = CollisionCfg(
 # FULL_COLLISION disables every unmatched geom, so using it here would silently
 # turn both pads into visual-only meshes and make all grape-contact rewards zero.
 GRAPE_PICK_COLLISION = CollisionCfg(
-    geom_names_expr=[
+    geom_names_expr=(
         ".*_collision",
         r"^(upper|lower)_mouth_grip$",
-    ],
+    ),
     condim={
         r"^(left|right)_foot_collision$": 3,
         r"^(upper|lower)_mouth_grip$": 6,
@@ -152,7 +152,6 @@ GRAPE_PICK_COLLISION = CollisionCfg(
     },
     solref={r"^(upper|lower)_mouth_grip$": (0.02, 1.0)},
     solimp={r"^(upper|lower)_mouth_grip$": (0.8, 0.95, 0.003)},
-    margin={r"^(upper|lower)_mouth_grip$": 0.0015},
 )
 
 # -- Old actuator (XML position, MuJoCo built-in PD + friction) --
