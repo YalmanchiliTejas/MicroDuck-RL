@@ -58,6 +58,8 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert cfg.rewards["grape_dual_contact"].weight > lift.weight
     assert cfg.rewards["grape_dual_contact"].func is microduck_mdp.grape_dual_contact_phased
     assert cfg.rewards["grape_dual_contact"].params["close_end"] == JAW_CLOSE_END
+    assert cfg.rewards["grape_dual_contact"].params["hold_end"] == HOLD_END
+    assert cfg.rewards["grape_pad_contacts"].params["hold_end"] == HOLD_END
     assert lift.params["hold_end"] == HOLD_END
     assert (
         cfg.rewards["grape_pad_contacts"].weight
@@ -426,13 +428,13 @@ def test_precision_reward_strongly_prefers_grape_inside_jaw_pocket():
 
 
 def test_dual_contact_requires_both_pads_after_mouth_closes():
-    phase = torch.tensor([0.5, 0.5, 0.4])
+    phase = torch.tensor([0.5, 0.5, 0.4, 0.7])
     env = _Env(
-        torch.zeros(3, 3), torch.zeros(3, 3), phase
+        torch.zeros(4, 3), torch.zeros(4, 3), phase
     )
     env.scene.sensors = {
-        "upper": _Sensor(torch.tensor([[True], [True], [True]])),
-        "lower": _Sensor(torch.tensor([[True], [False], [True]])),
+        "upper": _Sensor(torch.tensor([[True], [True], [True], [True]])),
+        "lower": _Sensor(torch.tensor([[True], [False], [True], [True]])),
     }
 
     score = microduck_mdp.grape_dual_contact_phased(
@@ -440,28 +442,34 @@ def test_dual_contact_requires_both_pads_after_mouth_closes():
         upper_sensor_name="upper",
         lower_sensor_name="lower",
         close_end=JAW_CLOSE_END,
+        hold_end=HOLD_END,
     )
 
     assert score[0] > 0.0
     assert score[1] == 0.0
     assert score[2] == 0.0
+    assert score[3] == 0.0
 
 
 def test_single_pad_contact_provides_partial_capture_shaping():
-    phase = torch.tensor([0.4, 0.4, 0.2])
-    env = _Env(torch.zeros(3, 3), torch.zeros(3, 3), phase)
+    phase = torch.tensor([0.4, 0.4, 0.2, 0.7])
+    env = _Env(torch.zeros(4, 3), torch.zeros(4, 3), phase)
     env.scene.sensors = {
-        "upper": _Sensor(torch.tensor([[True], [True], [True]])),
-        "lower": _Sensor(torch.tensor([[True], [False], [True]])),
+        "upper": _Sensor(torch.tensor([[True], [True], [True], [True]])),
+        "lower": _Sensor(torch.tensor([[True], [False], [True], [True]])),
     }
 
     score = microduck_mdp.grape_pad_contact_shaping_phased(
-        env, upper_sensor_name="upper", lower_sensor_name="lower"
+        env,
+        upper_sensor_name="upper",
+        lower_sensor_name="lower",
+        hold_end=HOLD_END,
     )
 
     assert score[0] == 1.0
     assert score[1] == 0.5
     assert score[2] == 0.0
+    assert score[3] == 0.0
 
 
 def test_kneel_support_requires_both_legs_and_only_pays_in_down_phase():

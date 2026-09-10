@@ -3526,17 +3526,18 @@ def grape_dual_contact_phased(
     lower_sensor_name: str,
     command_name: str = "twist",
     close_end: float = 0.425,
+    hold_end: float = 0.575,
 ) -> torch.Tensor:
     """Return one only when both physical mouth pads hold the grape.
 
-    Reward begins as soon as scripted closure completes and remains active
-    through the clamped hold, lift, and standing rest.  This gives PPO a direct
-    signal for securing the grape before rising, while contact with the open or
-    still-closing mouth earns no dual-contact reward.
+    Reward is confined to the capture hold after scripted closure and ends when
+    the rise begins. During the rise, dual contact is valuable only through the
+    contact-gated grape-lift objective; this prevents crouching with a grape on
+    the floor from becoming a profitable terminal behavior.
     """
     held = _grape_dual_contact(env, upper_sensor_name, lower_sensor_name)
     phase = _gp_phase(env, command_name)
-    gate = (phase >= close_end).to(dtype=phase.dtype)
+    gate = ((phase >= close_end) & (phase < hold_end)).to(dtype=phase.dtype)
     return gate * held.to(dtype=gate.dtype)
 
 
@@ -3546,19 +3547,20 @@ def grape_pad_contact_shaping_phased(
     lower_sensor_name: str,
     command_name: str = "twist",
     close_start: float = 0.375,
+    hold_end: float = 0.575,
 ) -> torch.Tensor:
     """Give partial capture credit for each mouth pad touching the grape.
 
-    One pad yields 0.5 and both yield 1.0 after jaw closure begins. The larger
-    dual-contact reward remains the actual grasp criterion, while this term
-    tells PPO which direction a near miss improved.
+    One pad yields 0.5 and both yield 1.0 during the finite capture window.
+    After the rise begins this standalone shaping ends, so retaining the grape
+    pays only when it also follows the rising height target.
     """
     upper = env.scene.sensors[upper_sensor_name].data.found
     lower = env.scene.sensors[lower_sensor_name].data.found
     upper = upper.reshape(env.num_envs, -1).any(dim=1).float()
     lower = lower.reshape(env.num_envs, -1).any(dim=1).float()
     phase = _gp_phase(env, command_name)
-    gate = (phase >= close_start).to(dtype=phase.dtype)
+    gate = ((phase >= close_start) & (phase < hold_end)).to(dtype=phase.dtype)
     return gate * 0.5 * (upper + lower)
 
 

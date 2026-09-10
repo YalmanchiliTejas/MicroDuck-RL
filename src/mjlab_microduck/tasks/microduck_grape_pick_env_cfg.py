@@ -104,7 +104,7 @@ from mjlab_microduck.tasks.symmetry import PpoWithSymmetryCfg, SYMMETRY_CFG
 #   palier bas [DESCENT_END, HOLD_END) 0.8 s  capture puis maintien fermé
 #     fermeture [DESCENT_END, JAW_CLOSE_END) 0.2 s
 #     serrage    [JAW_CLOSE_END, HOLD_END)    0.6 s
-#   remontée   [HOLD_END, RISE_END)    1.5 s  transition bas->STAND
+#   remontée   [HOLD_END, RISE_END)    0.9 s  transition bas->STAND
 #   repos      [RISE_END, 1)           0.8 s  debout
 # ⚠️ RISE_END=0.80 > coupure φ=0.7 du script infer_policy : la remontée n'est
 # complète que si le slot joue jusqu'à φ~1.0 (toute la période). Vérifier la
@@ -346,7 +346,8 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     )
 
     # Dense grip-center tracking gets the policy into the pocket; this term
-    # makes retention after mouth closure a first-class objective.
+    # rewards securing it during the finite capture hold. Once rising starts,
+    # retention is paid only by the contact-gated lift objective above.
     cfg.rewards["grape_dual_contact"] = RewardTermCfg(
         func=microduck_mdp.grape_dual_contact_phased,
         weight=12.0,
@@ -355,15 +356,17 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "lower_sensor_name": lower_grape_contact_cfg.name,
             "command_name": "twist",
             "close_end": JAW_CLOSE_END,
+            "hold_end": HOLD_END,
         },
     )
-    # Dense contact bridge: one pad earns half-credit after closing starts.
-    # Dual contact remains much more valuable and is required during the lift.
+    # Dense contact bridge: one pad earns half-credit during capture. Both
+    # standalone contact terms end when rising starts to prevent crouch parking.
     pad_contact_params = {
         "upper_sensor_name": upper_grape_contact_cfg.name,
         "lower_sensor_name": lower_grape_contact_cfg.name,
         "command_name": "twist",
         "close_start": DESCENT_END,
+        "hold_end": HOLD_END,
     }
     cfg.rewards["grape_pad_contacts"] = RewardTermCfg(
         func=microduck_mdp.grape_pad_contact_shaping_phased,
@@ -381,6 +384,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "lower_sensor_name": lower_grape_contact_cfg.name,
             "command_name": "twist",
             "close_end": JAW_CLOSE_END,
+            "hold_end": HOLD_END,
         },
     )
 
@@ -675,7 +679,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     command.rel_standing_envs = 0.0
     command.rel_heading_envs  = 0.0
     # Période = GP_PERIOD (4 s). The segmented profile gives 1.5 s down,
-    # 0.2 s capture hold, 1.5 s lift, and 0.8 s standing hold.
+    # 0.8 s capture hold, 0.9 s lift, and 0.8 s standing hold.
     cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(
         **{**vars(command), "class_type": microduck_mdp.GroundPickPhaseCommand, "period": GP_PERIOD}
     )
