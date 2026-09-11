@@ -119,6 +119,12 @@ GRAPE_OFFSET = (0.09, 0.0)
 GRAPE_POSITION_NOISE = 0.01
 GRAPE_LIFT_HEIGHT = 0.12
 
+# Pinching a 5.5 g object needs substantially stiffer tangential constraints
+# than the walking template's pyramidal cone / impratio=1. Otherwise both
+# pads can report contact while the grape slides out during ascent.
+GRASP_FRICTION_IMPEDANCE_RATIO = 100.0
+GRASP_SOLVER_ITERATIONS = 50
+
 
 def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCfg:
     """Create the flat-ground Microduck grape-pick environment."""
@@ -216,6 +222,9 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     )
     cfg.viewer.body_name = "trunk_base"
     cfg.sim.nconmax=50
+    cfg.sim.mujoco.cone = "elliptic"
+    cfg.sim.mujoco.impratio = GRASP_FRICTION_IMPEDANCE_RATIO
+    cfg.sim.mujoco.iterations = GRASP_SOLVER_ITERATIONS
 
     # ── Actions ───────────────────────────────────────────────────────────────
     joint_pos_action = cfg.actions["joint_pos"]
@@ -402,6 +411,25 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         cfg.metrics[metric_name] = MetricsTermCfg(
             func=microduck_mdp.grape_lift_diagnostic,
             params={**grape_lift_params, "metric": metric_name},
+        )
+
+    # Existing pad/dual-contact metrics stop at HOLD_END. Keep independent
+    # contact and clearance signals through ascent so floor pinching cannot
+    # be mistaken for successful retention. rise_active is the denominator
+    # when interpreting the episode-averaged rise_dual_contact signal.
+    for metric_name in (
+        "dual_contact_raw", "rise_active", "rise_dual_contact",
+        "grape_clearance", "grape_lifted_and_held",
+    ):
+        cfg.metrics[metric_name] = MetricsTermCfg(
+            func=microduck_mdp.grape_retention_diagnostic,
+            params={
+                "metric": metric_name,
+                "upper_sensor_name": upper_grape_contact_cfg.name,
+                "lower_sensor_name": lower_grape_contact_cfg.name,
+                "ground_height": GRAPE_HALF_HEIGHT,
+                "hold_end": HOLD_END,
+            },
         )
 
     # Return phase — legs. Under mjlab 1.3.0 + canonical BAM the passive jaw

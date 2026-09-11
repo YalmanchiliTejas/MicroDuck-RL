@@ -245,6 +245,45 @@ def test_grape_pick_has_distinct_runner_and_flat_terrain():
     assert MicroduckGrapePickRlCfg.actor.obs_normalization is True
 
 
+def test_retention_metrics_distinguish_floor_pinching_from_lift():
+    phase = torch.tensor([0.4, 0.7, 0.7, 0.7])
+    grape = torch.tensor([[0., 0., 0.012], [0., 0., 0.012],
+                          [0., 0., 0.08], [0., 0., 0.08]])
+    env = _Env(grape, grape.clone(), phase)
+    env.scene.sensors = {
+        "upper": _Sensor(torch.ones(4, 1, dtype=torch.bool)),
+        "lower": _Sensor(torch.tensor([[True], [True], [True], [False]])),
+    }
+    params = dict(upper_sensor_name="upper", lower_sensor_name="lower")
+    metric = microduck_mdp.grape_retention_diagnostic
+    assert metric(env, "dual_contact_raw", **params).tolist() == [1, 1, 1, 0]
+    assert metric(env, "rise_active", **params).tolist() == [0, 1, 1, 1]
+    assert metric(env, "rise_dual_contact", **params).tolist() == [0, 1, 1, 0]
+    assert metric(env, "grape_lifted_and_held", **params).tolist() == [0, 0, 1, 0]
+    assert torch.allclose(metric(env, "grape_clearance", **params),
+                          torch.tensor([0., 0., .068, .068]))
+
+
+def test_configured_contact_solver_retains_grape_during_lift():
+    import importlib.util
+    from pathlib import Path
+
+    path = Path(__file__).parents[1] / "scripts" / "check_grape_contact_physics.py"
+    spec = importlib.util.spec_from_file_location("grape_contact_bench", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    retention_trial = module.retention_trial
+
+    # Same mesh, mass, jaw command and imposed ascent: the walking contact
+    # solver registers a pinch but loses it. The grasp solver retains it.
+    old = retention_trial(90, baseline=True)
+    new = retention_trial(90)
+    assert old["capture_dual_contact_fraction"] > .5
+    assert not old["retained"]
+    assert new["retained"]
+    assert new["min_hold_height_m"] > old["min_hold_height_m"] + .06
+
+
 class _Data:
     pass
 

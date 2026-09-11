@@ -3647,6 +3647,43 @@ def grape_lift_diagnostic(
     return components[metric]
 
 
+def grape_retention_diagnostic(
+    env: ManagerBasedRlEnv,
+    metric: str,
+    upper_sensor_name: str,
+    lower_sensor_name: str,
+    grape_name: str = "grape",
+    command_name: str = "twist",
+    ground_height: float = 0.012,
+    hold_end: float = 0.5,
+    min_lift: float = 0.03,
+) -> torch.Tensor:
+    """Unweighted retention signals; touching a grounded grape is not a lift.
+
+    rise_dual_contact and rise_active are both averaged across all steps.
+    Their ratio estimates contact occupancy during ascent and standing hold.
+    Neither is an episode success rate.
+    """
+    contact = _grape_dual_contact(env, upper_sensor_name, lower_sensor_name)
+    rise = (_gp_phase(env, command_name) >= hold_end).to(contact.dtype)
+    grape: Entity = env.scene[grape_name]
+    clearance = torch.nan_to_num(
+        grape.data.root_link_pos_w[:, 2]
+        - env.scene.terrain.env_origins[:, 2] - ground_height,
+        nan=0.0, posinf=0.0, neginf=0.0,
+    ).clamp_min(0.0)
+    values = {
+        "dual_contact_raw": contact,
+        "rise_active": rise,
+        "rise_dual_contact": rise * contact,
+        "grape_clearance": clearance,
+        "grape_lifted_and_held": rise * contact * (clearance >= min_lift),
+    }
+    if metric not in values:
+        raise ValueError(f"Unknown grape retention diagnostic: {metric}")
+    return values[metric]
+
+
 def grape_pos_in_base(
     env: ManagerBasedRlEnv, asset_name: str = "grape"
 ) -> torch.Tensor:
