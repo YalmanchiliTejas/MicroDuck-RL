@@ -6,12 +6,15 @@ from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
     DESCENT_END,
+    DESCENT_SPEED_WEIGHT,
+    GENTLE_MOTION_WEIGHT,
     GRAPE_HALF_HEIGHT,
     GRAPE_LIFT_HEIGHT,
     GRAPE_POSITION_NOISE,
     GP_PERIOD,
     HOLD_END,
     JAW_CLOSE_END,
+    MAX_DESCENT_SPEED,
     RISE_END,
     MicroduckGrapePickRlCfg,
     make_microduck_grape_pick_env_cfg,
@@ -127,6 +130,36 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert scripted.close_end == JAW_CLOSE_END
     assert JAW_CLOSE_END < HOLD_END
 
+
+def test_grape_pick_penalizes_fast_and_hard_descent():
+    cfg = make_microduck_grape_pick_env_cfg()
+
+    descent_speed = cfg.rewards["descent_speed"]
+    assert descent_speed.func is microduck_mdp.trunk_downward_velocity_penalty
+    assert descent_speed.weight == DESCENT_SPEED_WEIGHT > 0.0
+    assert descent_speed.params["max_down_vel"] == MAX_DESCENT_SPEED
+    assert descent_speed.params["asset_cfg"].body_names == ("trunk_base",)
+
+    gentle_motion = cfg.rewards["gentle_motion"]
+    assert gentle_motion.func is microduck_mdp.trunk_vertical_accel_penalty
+    assert gentle_motion.weight == GENTLE_MOTION_WEIGHT > 0.0
+    assert gentle_motion.params["asset_cfg"].body_names == ("trunk_base",)
+
+    neck_speed = cfg.rewards["neck_vel_descent"]
+    assert neck_speed.func is microduck_mdp.neck_vel_descent_penalty
+    assert neck_speed.weight == -0.3
+
+    head_impact = cfg.rewards["head_impact_penalty"]
+    assert head_impact.func is microduck_mdp.body_impact_cost
+    assert head_impact.weight == -10.0
+    assert head_impact.params == {
+        "sensor_name": "head_impact_contact",
+        "threshold": 1.0,
+    }
+
+    # The velocity base deliberately removes this stock term; grape-pick uses
+    # explicit trunk-speed, trunk-acceleration, and protected-head penalties.
+    assert "soft_landing" not in cfg.rewards
 
 def test_grape_pick_uses_six_second_capture_and_lift_cycle():
     assert GP_PERIOD == 6.0
