@@ -7,7 +7,6 @@ from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.microduck_grape_pick_env_cfg import (
     DESCENT_END,
     DESCENT_SPEED_WEIGHT,
-    GENTLE_MOTION_WEIGHT,
     GRAPE_HALF_HEIGHT,
     GRAPE_LIFT_HEIGHT,
     GRAPE_POSITION_NOISE,
@@ -131,35 +130,37 @@ def test_grape_pick_cfg_wires_physical_object_objectives():
     assert JAW_CLOSE_END < HOLD_END
 
 
-def test_grape_pick_penalizes_fast_and_hard_descent():
+def test_grape_pick_only_adds_a_phase_gated_descent_speed_cap():
     cfg = make_microduck_grape_pick_env_cfg()
 
     descent_speed = cfg.rewards["descent_speed"]
-    assert descent_speed.func is microduck_mdp.trunk_downward_velocity_penalty
+    assert (
+        descent_speed.func
+        is microduck_mdp.trunk_downward_velocity_penalty_phased
+    )
     assert descent_speed.weight == DESCENT_SPEED_WEIGHT > 0.0
     assert descent_speed.params["max_down_vel"] == MAX_DESCENT_SPEED
+    assert descent_speed.params["command_name"] == "twist"
+    assert descent_speed.params["descent_end"] == DESCENT_END
     assert descent_speed.params["asset_cfg"].body_names == ("trunk_base",)
 
-    gentle_motion = cfg.rewards["gentle_motion"]
-    assert gentle_motion.func is microduck_mdp.trunk_vertical_accel_penalty
-    assert gentle_motion.weight == GENTLE_MOTION_WEIGHT > 0.0
-    assert gentle_motion.params["asset_cfg"].body_names == ("trunk_base",)
+    assert "gentle_motion" not in cfg.rewards
 
     neck_speed = cfg.rewards["neck_vel_descent"]
     assert neck_speed.func is microduck_mdp.neck_vel_descent_penalty
-    assert neck_speed.weight == -0.3
+    assert neck_speed.weight == -0.1
 
     head_impact = cfg.rewards["head_impact_penalty"]
     assert head_impact.func is microduck_mdp.body_impact_cost
-    assert head_impact.weight == -10.0
+    assert head_impact.weight == -2.0
     assert head_impact.params == {
         "sensor_name": "head_impact_contact",
         "threshold": 1.0,
     }
 
-    # The velocity base deliberately removes this stock term; grape-pick uses
-    # explicit trunk-speed, trunk-acceleration, and protected-head penalties.
+    # Keep cluster/source variations from retaining the ineffective stock term.
     assert "soft_landing" not in cfg.rewards
+
 
 def test_grape_pick_uses_six_second_capture_and_lift_cycle():
     assert GP_PERIOD == 6.0
@@ -389,6 +390,26 @@ def _grip_cfg():
     )
     cfg.site_ids = [0, 1]
     return cfg
+
+
+def test_descent_speed_cap_is_zero_during_hold_and_ascent():
+    phase = torch.tensor(
+        [0.10, DESCENT_END - 0.01, DESCENT_END + 0.01, 0.70]
+    )
+    zeros = torch.zeros(4, 3)
+    env = _Env(zeros, zeros, phase)
+    env.scene["robot"].data.root_link_lin_vel_w = torch.tensor(
+        [[0.0, 0.0, -0.20]] * 4
+    )
+
+    penalty = microduck_mdp.trunk_downward_velocity_penalty_phased(
+        env,
+        max_down_vel=0.05,
+        descent_end=DESCENT_END,
+    )
+
+    assert torch.allclose(penalty[:2], torch.tensor([-0.15, -0.15]))
+    assert torch.equal(penalty[2:], torch.zeros(2))
 
 
 def test_lift_reward_tracks_slewed_target_and_rejects_throwing():

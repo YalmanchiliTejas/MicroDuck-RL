@@ -3016,6 +3016,28 @@ def _gp_phase(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     return (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
 
 
+def trunk_downward_velocity_penalty_phased(
+    env: ManagerBasedRlEnv,
+    max_down_vel: float = 0.05,
+    command_name: str = "twist",
+    descent_end: float = 0.25,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Cap downward trunk speed only during the ground-pick descent.
+
+    Downward balance corrections during the lift and final standing hold are
+    deliberately free. Penalizing those corrections produced an asymmetric
+    stop-start ascent: downward corrections cost reward while upward ones did
+    not.
+    """
+    cost = trunk_downward_velocity_penalty(
+        env, max_down_vel=max_down_vel, asset_cfg=asset_cfg
+    )
+    phase = _gp_phase(env, command_name)
+    gate = (phase < descent_end).to(dtype=cost.dtype)
+    return gate * cost
+
+
 def ground_pick_mouth_opening(
     phase: torch.Tensor,
     close_start: float = 0.375,
