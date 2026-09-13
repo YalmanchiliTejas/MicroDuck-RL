@@ -723,6 +723,10 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     command: UniformVelocityCommandCfg = cfg.commands["twist"]
     command.rel_standing_envs = 0.0
     command.rel_heading_envs  = 0.0
+    # Ground-pick uses the velocity-command slot only to encode phase. The
+    # inherited debug visualizer draws large command/velocity arrows that hide
+    # the robot in recorded rollouts.
+    command.debug_vis = False
     # Période = GP_PERIOD (6 s): 2.0 s down, 1.0 s capture hold,
     # 2.0 s lift, and 1.0 s standing hold.
     cfg.commands["twist"] = microduck_mdp.GroundPickPhaseCommandCfg(

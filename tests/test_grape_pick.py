@@ -163,11 +163,14 @@ def test_grape_pick_only_adds_a_phase_gated_descent_speed_cap():
 
 
 def test_grape_pick_uses_six_second_capture_and_lift_cycle():
+    cfg = make_microduck_grape_pick_env_cfg()
+
     assert GP_PERIOD == 6.0
     assert math.isclose(DESCENT_END * GP_PERIOD, 2.0)
     assert math.isclose(JAW_CLOSE_END * GP_PERIOD, 2.2)
     assert math.isclose(HOLD_END * GP_PERIOD, 3.0)
     assert math.isclose(RISE_END * GP_PERIOD, 5.0)
+    assert cfg.commands["twist"].debug_vis is False
 
 
 def test_enlarged_grape_asset_matches_ground_height_constant():
