@@ -3016,61 +3016,20 @@ def _gp_phase(env: ManagerBasedRlEnv, command_name: str) -> torch.Tensor:
     return (torch.atan2(cmd[:, 1], cmd[:, 0]) / (2 * torch.pi)) % 1.0
 
 
-def trunk_downward_velocity_penalty_phased(
-    env: ManagerBasedRlEnv,
-    max_down_vel: float = 0.05,
-    command_name: str = "twist",
-    descent_end: float = 0.25,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+def _contact_free_gate(
+    env: ManagerBasedRlEnv, sensor_name: Optional[str]
 ) -> torch.Tensor:
-    """Cap downward trunk speed only during the ground-pick descent.
+    """Return one unless the protected body is touching terrain.
 
-    Downward balance corrections during the lift and final standing hold are
-    deliberately free. Penalizing those corrections produced an asymmetric
-    stop-start ascent: downward corrections cost reward while upward ones did
-    not.
+    This binary state gate prevents a brief impact from being amortised against
+    many timesteps of task reward: while contact persists, the associated
+    positive objective pays exactly zero.
     """
-    cost = trunk_downward_velocity_penalty(
-        env, max_down_vel=max_down_vel, asset_cfg=asset_cfg
-    )
-    phase = _gp_phase(env, command_name)
-    gate = (phase < descent_end).to(dtype=cost.dtype)
-    return gate * cost
-
-
-def site_downward_velocity_penalty_phased(
-    env: ManagerBasedRlEnv,
-    max_down_vel: float = 0.10,
-    command_name: str = "twist",
-    descent_end: float = 0.25,
-    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
-) -> torch.Tensor:
-    """Quadratic soft cap on a site's downward speed during descent.
-
-    The visible ground-pick dive happens at the mouth, whose speed includes
-    both trunk translation and neck rotation.  A trunk-only term therefore
-    misses the fastest part of the motion.  Normalizing the excess by the cap
-    and squaring it makes a short, fast dive more expensive than spreading the
-    same displacement over the full descent window.
-
-    When multiple sites are selected, their mean vertical velocity represents
-    the center of the selected feature (the two-pad grip pocket in this task).
-    This self-negating penalty must use a positive reward weight.
-    """
-    asset = env.scene[asset_cfg.name]
-    vz = torch.nan_to_num(
-        asset.data.site_lin_vel_w[:, asset_cfg.site_ids, 2],
-        nan=0.0,
-        posinf=0.0,
-        neginf=0.0,
-    ).mean(dim=1)
-    excess_ratio = torch.clamp(
-        (-vz - max_down_vel) / max(max_down_vel, 1e-6), min=0.0
-    )
-    penalty = -(excess_ratio ** 2)
-    phase = _gp_phase(env, command_name)
-    gate = (phase < descent_end).to(dtype=penalty.dtype)
-    return gate * penalty
+    if sensor_name is None:
+        return torch.ones(env.num_envs, device=env.device)
+    found = env.scene.sensors[sensor_name].data.found
+    touching = found.reshape(env.num_envs, -1).any(dim=1)
+    return (~touching).float()
 
 
 def ground_pick_mouth_opening(
@@ -3410,8 +3369,9 @@ def grip_pocket_grape_alignment_phased(
     descent_end: float = 0.375,
     hold_end: float = 0.425,
     rise_end: float = 0.80,
+    protected_sensor_name: Optional[str] = None,
 ) -> torch.Tensor:
-    """Dense approach reward for placing the grape inside the jaw pocket."""
+    """Dense approach reward, invalidated by protected-body ground contact."""
     score = _grip_pocket_alignment_score(
         env,
         asset_cfg=asset_cfg,
@@ -3423,7 +3383,8 @@ def grip_pocket_grape_alignment_phased(
     gate = phase_pose_blend(
         _gp_phase(env, command_name), descent_end, hold_end, rise_end
     )
-    return torch.nan_to_num(gate * score, nan=0.0)
+    contact_free = _contact_free_gate(env, protected_sensor_name)
+    return torch.nan_to_num(gate * score * contact_free, nan=0.0)
 
 
 def grip_pocket_grape_distance_phased(
@@ -3438,6 +3399,7 @@ def grip_pocket_grape_distance_phased(
     descent_end: float = 0.375,
     hold_end: float = 0.425,
     rise_end: float = 0.80,
+    protected_sensor_name: Optional[str] = None,
 ) -> torch.Tensor:
     """Strong precision reward for moving the jaw pocket onto the grape.
 
@@ -3459,7 +3421,8 @@ def grip_pocket_grape_distance_phased(
     gate = phase_pose_blend(
         _gp_phase(env, command_name), descent_end, hold_end, rise_end
     )
-    return torch.nan_to_num(gate * score, nan=0.0)
+    contact_free = _contact_free_gate(env, protected_sensor_name)
+    return torch.nan_to_num(gate * score * contact_free, nan=0.0)
 
 
 def _grape_dual_contact(
@@ -3494,6 +3457,7 @@ def grape_lift_tracking_phased(
     command_name: str = "twist",
     hold_end: float = 0.425,
     rise_end: float = 0.80,
+    protected_sensor_name: Optional[str] = None,
 ) -> torch.Tensor:
     """Track a slewed grape lift target while keeping it at the mouth.
 
@@ -3521,11 +3485,13 @@ def grape_lift_tracking_phased(
         upper_sensor_name=upper_sensor_name,
         lower_sensor_name=lower_sensor_name,
     )
+    contact_free = _contact_free_gate(env, protected_sensor_name)
     return (
         components["phase_gate"]
         * components["height_score"]
         * components["grasp_score"]
         * dual_contact
+        * contact_free
     )
 
 
@@ -3584,6 +3550,7 @@ def grape_dual_contact_phased(
     command_name: str = "twist",
     close_end: float = 0.425,
     hold_end: float = 0.575,
+    protected_sensor_name: Optional[str] = None,
 ) -> torch.Tensor:
     """Return one only when both physical mouth pads hold the grape.
 
@@ -3595,7 +3562,8 @@ def grape_dual_contact_phased(
     held = _grape_dual_contact(env, upper_sensor_name, lower_sensor_name)
     phase = _gp_phase(env, command_name)
     gate = ((phase >= close_end) & (phase < hold_end)).to(dtype=phase.dtype)
-    return gate * held.to(dtype=gate.dtype)
+    contact_free = _contact_free_gate(env, protected_sensor_name)
+    return gate * held.to(dtype=gate.dtype) * contact_free
 
 
 def grape_pad_contact_shaping_phased(
@@ -3605,6 +3573,7 @@ def grape_pad_contact_shaping_phased(
     command_name: str = "twist",
     close_start: float = 0.375,
     hold_end: float = 0.575,
+    protected_sensor_name: Optional[str] = None,
 ) -> torch.Tensor:
     """Give partial capture credit for each mouth pad touching the grape.
 
@@ -3618,7 +3587,8 @@ def grape_pad_contact_shaping_phased(
     lower = lower.reshape(env.num_envs, -1).any(dim=1).float()
     phase = _gp_phase(env, command_name)
     gate = ((phase >= close_start) & (phase < hold_end)).to(dtype=phase.dtype)
-    return gate * 0.5 * (upper + lower)
+    contact_free = _contact_free_gate(env, protected_sensor_name)
+    return gate * 0.5 * (upper + lower) * contact_free
 
 
 def kneel_support_with_reach_phased(
@@ -3637,6 +3607,7 @@ def kneel_support_with_reach_phased(
     descent_end: float = 0.375,
     hold_end: float = 0.425,
     rise_end: float = 0.80,
+    protected_sensor_name: Optional[str] = None,
 ) -> torch.Tensor:
     """Reward bilateral lower-leg support during the pickup approach.
 
@@ -3665,7 +3636,8 @@ def kneel_support_with_reach_phased(
         _gp_phase(env, command_name), descent_end, hold_end, rise_end
     )
     score = bilateral_support.to(dtype=gate.dtype) * (0.25 + 0.75 * reach_score)
-    return torch.nan_to_num(gate * score, nan=0.0)
+    contact_free = _contact_free_gate(env, protected_sensor_name)
+    return torch.nan_to_num(gate * score * contact_free, nan=0.0)
 
 
 def grape_lift_diagnostic(

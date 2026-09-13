@@ -119,12 +119,6 @@ GRAPE_OFFSET = (0.09, 0.0)
 GRAPE_POSITION_NOISE = 0.01
 GRAPE_LIFT_HEIGHT = 0.12
 
-# The grip pocket travels much farther than the trunk because neck rotation is
-# most of the pickup motion.  A 0.10 m/s mouth cap allows that travel over the
-# two-second descent while still rejecting the sub-second dive seen in videos.
-MAX_DESCENT_SPEED = 0.10
-DESCENT_SPEED_WEIGHT = 2.0
-
 # Pinching a 5.5 g object needs substantially stiffer tangential constraints
 # than the walking template's pyramidal cone / impratio=1. Otherwise both
 # pads can report contact while the grape slides out during ascent.
@@ -165,7 +159,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
         name="head_impact_contact",
         primary=ContactMatch(mode="subtree", pattern="neck", entity="robot"),
         secondary=ContactMatch(mode="body", pattern="terrain"),
-        fields=("force",),
+        fields=("found", "force"),
         reduce="netforce",
         num_slots=1,
     )
@@ -287,6 +281,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "descent_end": DESCENT_END,
             "hold_end": HOLD_END,
             "rise_end": RISE_END,
+            "protected_sensor_name": head_impact_cfg.name,
         },
     )
 
@@ -308,7 +303,10 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     cfg.rewards["grip_pocket_precision"] = RewardTermCfg(
         func=microduck_mdp.grip_pocket_grape_distance_phased,
         weight=10.0,
-        params=grip_pocket_precision_params,
+        params={
+            **grip_pocket_precision_params,
+            "protected_sensor_name": head_impact_cfg.name,
+        },
     )
     cfg.metrics["grip_pocket_precision"] = MetricsTermCfg(
         func=microduck_mdp.grip_pocket_grape_distance_phased,
@@ -356,6 +354,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             **grape_lift_params,
             "upper_sensor_name": upper_grape_contact_cfg.name,
             "lower_sensor_name": lower_grape_contact_cfg.name,
+            "protected_sensor_name": head_impact_cfg.name,
         },
     )
 
@@ -371,6 +370,7 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
             "command_name": "twist",
             "close_end": JAW_CLOSE_END,
             "hold_end": HOLD_END,
+            "protected_sensor_name": head_impact_cfg.name,
         },
     )
     # Dense contact bridge: one pad earns half-credit during capture. Both
@@ -385,7 +385,10 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     cfg.rewards["grape_pad_contacts"] = RewardTermCfg(
         func=microduck_mdp.grape_pad_contact_shaping_phased,
         weight=3.0,
-        params=pad_contact_params,
+        params={
+            **pad_contact_params,
+            "protected_sensor_name": head_impact_cfg.name,
+        },
     )
     cfg.metrics["pad_contacts"] = MetricsTermCfg(
         func=microduck_mdp.grape_pad_contact_shaping_phased,
@@ -512,26 +515,9 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 
     cfg.rewards["angular_momentum"].weight = -0.02
 
-    # Watch the actual grip pocket rather than trunk_base: neck rotation can
-    # make the mouth dive while the trunk remains under its speed threshold.
-    # The normalized quadratic excess makes a brief fast plunge much more
-    # expensive than distributing the motion across the two-second descent.
-    cfg.rewards["descent_speed"] = RewardTermCfg(
-        func=microduck_mdp.site_downward_velocity_penalty_phased,
-        weight=DESCENT_SPEED_WEIGHT,
-        params={
-            "max_down_vel": MAX_DESCENT_SPEED,
-            "command_name": "twist",
-            "descent_end": DESCENT_END,
-            "asset_cfg": SceneEntityCfg(
-                "robot",
-                site_names=(
-                    "upper_mouth_grip_center",
-                    "lower_mouth_grip_center",
-                ),
-            ),
-        },
-    )
+    # The mouth-speed tax did not change the dive and indirectly degraded the
+    # recovery pose. The task rewards are instead hard-gated by head contact,
+    # so crashing cannot purchase a profitable pickup state.
     cfg.rewards.pop("soft_landing", None)
 
     # During descent the policy may transfer support onto both lower legs. The
@@ -556,7 +542,10 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
     cfg.rewards["kneel_support_with_reach"] = RewardTermCfg(
         func=microduck_mdp.kneel_support_with_reach_phased,
         weight=6.0,
-        params=kneel_support_params,
+        params={
+            **kneel_support_params,
+            "protected_sensor_name": head_impact_cfg.name,
+        },
     )
     cfg.metrics["kneel_support_with_reach"] = MetricsTermCfg(
         func=microduck_mdp.kneel_support_with_reach_phased,
