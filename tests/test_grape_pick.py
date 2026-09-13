@@ -136,13 +136,16 @@ def test_grape_pick_only_adds_a_phase_gated_descent_speed_cap():
     descent_speed = cfg.rewards["descent_speed"]
     assert (
         descent_speed.func
-        is microduck_mdp.trunk_downward_velocity_penalty_phased
+        is microduck_mdp.site_downward_velocity_penalty_phased
     )
     assert descent_speed.weight == DESCENT_SPEED_WEIGHT > 0.0
     assert descent_speed.params["max_down_vel"] == MAX_DESCENT_SPEED
     assert descent_speed.params["command_name"] == "twist"
     assert descent_speed.params["descent_end"] == DESCENT_END
-    assert descent_speed.params["asset_cfg"].body_names == ("trunk_base",)
+    assert descent_speed.params["asset_cfg"].site_names == (
+        "upper_mouth_grip_center",
+        "lower_mouth_grip_center",
+    )
 
     assert "gentle_motion" not in cfg.rewards
 
@@ -401,18 +404,48 @@ def test_descent_speed_cap_is_zero_during_hold_and_ascent():
     )
     zeros = torch.zeros(4, 3)
     env = _Env(zeros, zeros, phase)
-    env.scene["robot"].data.root_link_lin_vel_w = torch.tensor(
-        [[0.0, 0.0, -0.20]] * 4
+    env.scene["robot"].data.site_lin_vel_w = torch.tensor(
+        [[[0.0, 0.0, -0.30], [0.0, 0.0, -0.30]]] * 4
     )
+    site_cfg = SceneEntityCfg(
+        "robot",
+        site_names=["upper_mouth_grip_center", "lower_mouth_grip_center"],
+    )
+    site_cfg.site_ids = [0, 1]
 
-    penalty = microduck_mdp.trunk_downward_velocity_penalty_phased(
+    penalty = microduck_mdp.site_downward_velocity_penalty_phased(
         env,
-        max_down_vel=0.05,
+        max_down_vel=0.10,
         descent_end=DESCENT_END,
+        asset_cfg=site_cfg,
     )
 
-    assert torch.allclose(penalty[:2], torch.tensor([-0.15, -0.15]))
+    assert torch.allclose(penalty[:2], torch.tensor([-4.0, -4.0]))
     assert torch.equal(penalty[2:], torch.zeros(2))
+
+
+def test_descent_speed_cap_tracks_grip_center_and_is_quadratic():
+    phase = torch.tensor([0.10, 0.10, 0.10])
+    zeros = torch.zeros(3, 3)
+    env = _Env(zeros, zeros, phase)
+    env.scene["robot"].data.site_lin_vel_w = torch.tensor(
+        [
+            [[0.0, 0.0, -0.05], [0.0, 0.0, -0.05]],
+            [[0.0, 0.0, -0.10], [0.0, 0.0, -0.10]],
+            [[0.0, 0.0, -0.30], [0.0, 0.0, -0.30]],
+        ]
+    )
+    site_cfg = SceneEntityCfg("robot", site_names=["upper", "lower"])
+    site_cfg.site_ids = [0, 1]
+
+    penalty = microduck_mdp.site_downward_velocity_penalty_phased(
+        env,
+        max_down_vel=0.10,
+        descent_end=DESCENT_END,
+        asset_cfg=site_cfg,
+    )
+
+    assert torch.allclose(penalty, torch.tensor([0.0, 0.0, -4.0]))
 
 
 def test_lift_reward_tracks_slewed_target_and_rejects_throwing():

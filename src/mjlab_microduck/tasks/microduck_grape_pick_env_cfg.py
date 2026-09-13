@@ -119,10 +119,11 @@ GRAPE_OFFSET = (0.09, 0.0)
 GRAPE_POSITION_NOISE = 0.01
 GRAPE_LIFT_HEIGHT = 0.12
 
-# Descent-speed limit. The phase gate keeps this intervention out of the lift
-# and final standing hold.
-MAX_DESCENT_SPEED = 0.05
-DESCENT_SPEED_WEIGHT = 10.0
+# The grip pocket travels much farther than the trunk because neck rotation is
+# most of the pickup motion.  A 0.10 m/s mouth cap allows that travel over the
+# two-second descent while still rejecting the sub-second dive seen in videos.
+MAX_DESCENT_SPEED = 0.10
+DESCENT_SPEED_WEIGHT = 2.0
 
 # Pinching a 5.5 g object needs substantially stiffer tangential constraints
 # than the walking template's pyramidal cone / impratio=1. Otherwise both
@@ -511,17 +512,24 @@ def make_microduck_grape_pick_env_cfg(play: bool = False) -> ManagerBasedRlEnvCf
 
     cfg.rewards["angular_momentum"].weight = -0.02
 
-    # The endpoint approach rewards otherwise allow a fast drop. Charge excess
-    # downward speed on every descent step, but stop the term before the lift so
-    # it cannot tax normal downward balance corrections during the ascent.
+    # Watch the actual grip pocket rather than trunk_base: neck rotation can
+    # make the mouth dive while the trunk remains under its speed threshold.
+    # The normalized quadratic excess makes a brief fast plunge much more
+    # expensive than distributing the motion across the two-second descent.
     cfg.rewards["descent_speed"] = RewardTermCfg(
-        func=microduck_mdp.trunk_downward_velocity_penalty_phased,
+        func=microduck_mdp.site_downward_velocity_penalty_phased,
         weight=DESCENT_SPEED_WEIGHT,
         params={
             "max_down_vel": MAX_DESCENT_SPEED,
             "command_name": "twist",
             "descent_end": DESCENT_END,
-            "asset_cfg": SceneEntityCfg("robot", body_names=("trunk_base",)),
+            "asset_cfg": SceneEntityCfg(
+                "robot",
+                site_names=(
+                    "upper_mouth_grip_center",
+                    "lower_mouth_grip_center",
+                ),
+            ),
         },
     )
     cfg.rewards.pop("soft_landing", None)

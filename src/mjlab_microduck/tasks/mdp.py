@@ -3038,6 +3038,41 @@ def trunk_downward_velocity_penalty_phased(
     return gate * cost
 
 
+def site_downward_velocity_penalty_phased(
+    env: ManagerBasedRlEnv,
+    max_down_vel: float = 0.10,
+    command_name: str = "twist",
+    descent_end: float = 0.25,
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Quadratic soft cap on a site's downward speed during descent.
+
+    The visible ground-pick dive happens at the mouth, whose speed includes
+    both trunk translation and neck rotation.  A trunk-only term therefore
+    misses the fastest part of the motion.  Normalizing the excess by the cap
+    and squaring it makes a short, fast dive more expensive than spreading the
+    same displacement over the full descent window.
+
+    When multiple sites are selected, their mean vertical velocity represents
+    the center of the selected feature (the two-pad grip pocket in this task).
+    This self-negating penalty must use a positive reward weight.
+    """
+    asset = env.scene[asset_cfg.name]
+    vz = torch.nan_to_num(
+        asset.data.site_lin_vel_w[:, asset_cfg.site_ids, 2],
+        nan=0.0,
+        posinf=0.0,
+        neginf=0.0,
+    ).mean(dim=1)
+    excess_ratio = torch.clamp(
+        (-vz - max_down_vel) / max(max_down_vel, 1e-6), min=0.0
+    )
+    penalty = -(excess_ratio ** 2)
+    phase = _gp_phase(env, command_name)
+    gate = (phase < descent_end).to(dtype=penalty.dtype)
+    return gate * penalty
+
+
 def ground_pick_mouth_opening(
     phase: torch.Tensor,
     close_start: float = 0.375,
