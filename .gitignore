@@ -12,6 +12,7 @@ wheels/
 
 # Virtual environments
 .venv
+.super-mario-venv/
 
 # Logs and databases
 wandb

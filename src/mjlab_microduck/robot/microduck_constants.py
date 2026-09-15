@@ -31,6 +31,8 @@ MICRODUCK_ALLCOLLISIONS_XML: Path = _ROBOT_DIR / "robot_allcollisions.xml"
 MICRODUCK_BALL_XML: Path = _ROBOT_DIR / "ball.xml"
 # Enlarged 28.8 x 24mm / 5.5g grape prop for the GrapePick task.
 MICRODUCK_GRAPE_XML: Path = _ROBOT_DIR / "grape.xml"
+# Three spring-loaded floor buttons used by the controller-game prototype.
+MICRODUCK_CONTROLLER_PADS_XML: Path = _ROBOT_DIR / "controller_pads.xml"
 # Roller-skate model: 14 actuated joints + passive wheel hinges (passive_*wheel).
 MICRODUCK_GROUNDCONTACT_ROLLERS_XML: Path = _ROBOT_DIR / "robot_groundcontact_rollers.xml"
 # Backlash models: every servo joint gets an unactuated passive_<joint>_backlash
@@ -50,6 +52,7 @@ assert MICRODUCK_GROUNDCONTACT_BACKLASH_XML.exists(), f"XML not found: {MICRODUC
 assert MICRODUCK_WALK_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_WALK_BACKLASH_XML}"
 assert MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML}"
 assert MICRODUCK_GRAPE_XML.exists(), f"XML not found: {MICRODUCK_GRAPE_XML}"
+assert MICRODUCK_CONTROLLER_PADS_XML.exists(), f"XML not found: {MICRODUCK_CONTROLLER_PADS_XML}"
 
 
 def get_walk_spec() -> mujoco.MjSpec:
@@ -84,6 +87,10 @@ def get_ball_spec() -> mujoco.MjSpec:
 
 def get_grape_spec() -> mujoco.MjSpec:
     return mujoco.MjSpec.from_file(str(MICRODUCK_GRAPE_XML))
+
+
+def get_controller_pads_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(MICRODUCK_CONTROLLER_PADS_XML))
 
 
 def get_backlash_spec() -> mujoco.MjSpec:
@@ -311,6 +318,11 @@ MICRODUCK_GRAPE_CFG = EntityCfg(
     spec_fn=get_grape_spec,
     init_state=EntityCfg.InitialStateCfg(pos=(0.09, 0.0, 0.012)),
 )
+
+# The joints are passive spring-loaded plungers. There is deliberately no
+# articulation/actuator config: policy actions must continue to address only
+# the robot's 14 Dynamixel servos.
+MICRODUCK_CONTROLLER_PADS_CFG = EntityCfg(spec_fn=get_controller_pads_spec)
 
 # Roller skate robot: the 4 passive wheel joints (passive_*wheel) have no XML
 # actuators; the BAM cfg's target regex already excludes them, so the action

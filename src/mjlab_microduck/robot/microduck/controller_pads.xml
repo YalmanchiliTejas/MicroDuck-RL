@@ -1,0 +1,46 @@
+<mujoco model="microduck_controller_pads">
+    <compiler angle="radian" autolimits="true"/>
+
+    <!--
+      Three spring-loaded floor buttons for the Mario-controller task.
+      Each passive_* slide joint has 8 mm of travel.  The controller adapter
+      reads positive travel as -qpos and applies hysteresis (4 mm press,
+      2 mm release).  passive_* naming is mandatory: these joints must never
+      enter the robot's actuator or observation selectors.
+    -->
+    <default>
+        <!-- At 250 N/m the 25 g cap's own weight settles at ~1 mm, safely
+             below the 2 mm release threshold. A 4 mm press needs ~1 N, which
+             is comfortably achievable by one Microduck foot. -->
+        <joint axis="0 0 1" type="slide" limited="true" range="-0.008 0"
+               damping="3.0" stiffness="250" springref="0"/>
+        <geom type="box" size="0.042 0.042 0.006" friction="1.2 0.01 0.001"
+              condim="3"/>
+    </default>
+
+    <worldbody>
+        <!-- Raised non-colliding housings make the button locations readable. -->
+        <geom name="left_pad_housing" type="box" pos="0.09 0.10 0.003"
+              size="0.048 0.048 0.003" rgba="0.18 0.25 0.65 1" contype="0" conaffinity="0"/>
+        <geom name="right_pad_housing" type="box" pos="0.09 -0.10 0.003"
+              size="0.048 0.048 0.003" rgba="0.18 0.25 0.65 1" contype="0" conaffinity="0"/>
+        <geom name="jump_pad_housing" type="box" pos="0.18 0 0.003"
+              size="0.048 0.048 0.003" rgba="0.65 0.18 0.18 1" contype="0" conaffinity="0"/>
+
+        <body name="left_pad" pos="0.09 0.10 0.014">
+            <joint name="passive_left_pad"/>
+            <inertial pos="0 0 0" mass="0.025" diaginertia="3e-5 3e-5 5e-5"/>
+            <geom name="left_pad_surface" rgba="0.2 0.35 1 1"/>
+        </body>
+        <body name="right_pad" pos="0.09 -0.10 0.014">
+            <joint name="passive_right_pad"/>
+            <inertial pos="0 0 0" mass="0.025" diaginertia="3e-5 3e-5 5e-5"/>
+            <geom name="right_pad_surface" rgba="0.2 0.35 1 1"/>
+        </body>
+        <body name="jump_pad" pos="0.18 0 0.014">
+            <joint name="passive_jump_pad"/>
+            <inertial pos="0 0 0" mass="0.025" diaginertia="3e-5 3e-5 5e-5"/>
+            <geom name="jump_pad_surface" rgba="1 0.22 0.18 1"/>
+        </body>
+    </worldbody>
+</mujoco>

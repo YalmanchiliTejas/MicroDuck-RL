@@ -71,6 +71,7 @@ instead of locally (see [scripts/hf/README.md](scripts/hf/README.md)).
 | `Mjlab-SitStand-{Flat,Rough}-MicroDuck` | flat/rough | Commanded sit ↔ stand in one policy, gently, head commandable |
 | `Mjlab-GroundPick-{Flat,Rough}-MicroDuck` | flat/rough | Crouch and touch the ground with the mouth tip, return to stand |
 | `Mjlab-BallKick-Flat-MicroDuck` | flat | Kick a 70 mm / 15 g ball forward (actor is ball-blind) |
+| `Mjlab-MarioController-Flat-MicroDuck` | flat | Press physical LEFT/RIGHT/JUMP pads for a platform game |
 | `Mjlab-Roulade-Flat-MicroDuck` | flat | Forward roll over the head, land back on the feet |
 | `Mjlab-Velocity-Flat-MicroDuck-Rollers` | flat | Roller-skate velocity tracking (passive wheels under the feet) |
 | `Mjlab-Velocity-Swizzle-MicroDuck` | flat | Classic symmetric swizzle skating |
@@ -90,6 +91,79 @@ uv run scripts/infer_policy.py --walking walk.onnx --standing stand.onnx \
 
 Keyboard-driven (velocity commands, `G` ground pick, `Y` sit/stand, `R` roulade,
 `K`/`L` kicks); `--debug`, `--save-csv`, `--record` support sim2real comparisons.
+
+### Controller-game prototype
+
+The first building block for a Microduck-operated platform game lives in
+`controller_game.py`. It defines one shared input contract for three physical
+pads (`left`, `right`, `jump`), hysteresis-based pad decoding, and a small
+deterministic side-scrolling game that consumes those inputs. The matching
+MuJoCo asset is `robot/microduck/controller_pads.xml`: three colored,
+spring-loaded 8 mm plungers whose joints all use the required `passive_*`
+prefix.
+
+Run the current end-to-end, renderer-free wiring demo with:
+
+```bash
+uv run scripts/controller_game_demo.py
+```
+
+Render the combined robot-and-pad MuJoCo scene to a PNG with:
+
+```bash
+uv run scripts/preview_controller_pads.py --output controller_pads_preview.png
+```
+
+Render the platform-game side of the loop with:
+
+```bash
+uv run scripts/preview_mario_game.py --output mario_game_preview.png
+```
+
+The registered task `Mjlab-MarioController-Flat-MicroDuck` places the pads in
+the Mjlab scene and trains the duck to follow `[left, right, jump]` requests in
+the existing 3D twist slot. The actor stays 61D; only the critic receives the
+three pad-travel values. Smoke-test it before any long run:
+
+```bash
+uv run train Mjlab-MarioController-Flat-MicroDuck \
+    --env.scene.num-envs 64 --agent.max_iterations 5
+```
+
+The runtime loop is intentionally one-way:
+
+```text
+game planner -> requested buttons -> 61D duck policy -> robot motion
+     -> measured passive-pad travel -> hysteresis -> actual buttons -> game
+```
+
+The request never moves the game directly. For the real NES game, the emulator
+runs as a separate Python 3.13 process because current `gym-super-mario-bros`
+and `nes-py` require Python 3.13+, while BAM keeps this project on Python 3.12.
+Set it up and launch a scripted visual smoke test with:
+
+```bash
+python3.13 -m venv .super-mario-venv
+.super-mario-venv/bin/pip install ./integrations/super_mario
+.super-mario-venv/bin/microduck-super-mario --demo
+```
+
+For physical control, omit `--demo`. The emulator listens for measured pad
+levels on UDP `127.0.0.1:55355`; `SuperMarioUdpClient` sends those frames from
+the Microduck process. Direction pads hold NES `B` for running, JUMP maps to
+NES `A`, and simultaneous direction+jump is supported. A 250 ms deadman timer
+releases all buttons if controller packets stop.
+
+To verify the complete UDP path before connecting a trained policy, run these
+in two terminals:
+
+```bash
+# Terminal 1: real NES environment
+.super-mario-venv/bin/microduck-super-mario
+
+# Terminal 2: scripted simulated pad travel at the duck's 50 Hz control rate
+PYTHONPATH=src .venv/bin/python scripts/controller_game_demo.py --super-mario
+```
 
 ### Backlash variants
 

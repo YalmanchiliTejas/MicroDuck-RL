@@ -5714,6 +5714,154 @@ def zero_command_padding(
     return torch.zeros(env.num_envs, dim, device=env.device)
 
 
+# --------------------------------------------------------------------------- #
+# Controller-pad task                                                          #
+# --------------------------------------------------------------------------- #
+
+
+class MarioButtonCommand(CommandTerm):
+    """Sample controller requests in ``[left, right, jump]`` order.
+
+    The command is deliberately a button request, not game state. A high-level
+    planner or a human decides what Mario should do; this low-level policy
+    learns the physical skill of pressing the requested spring-loaded pads.
+    """
+
+    cfg: "MarioButtonCommandCfg"
+
+    def __init__(self, cfg: "MarioButtonCommandCfg", env: ManagerBasedRlEnv):
+        super().__init__(cfg, env)
+        self._command = torch.zeros(self.num_envs, 3, device=self.device)
+
+    @property
+    def command(self) -> torch.Tensor:
+        return self._command
+
+    def _resample_command(self, env_ids: torch.Tensor) -> None:
+        n = len(env_ids)
+        if n == 0:
+            return
+        # Categories: idle, left, right, jump, and right+jump. The combination
+        # is important: platform games need direction to remain held on takeoff.
+        probabilities = torch.tensor(
+            [
+                self.cfg.idle_prob,
+                self.cfg.left_prob,
+                self.cfg.right_prob,
+                self.cfg.jump_prob,
+                self.cfg.right_jump_prob,
+            ],
+            device=self.device,
+        )
+        if torch.any(probabilities < 0.0) or probabilities.sum() <= 0.0:
+            raise ValueError("Mario button probabilities must be non-negative and non-zero")
+        category = torch.multinomial(probabilities, n, replacement=True)
+        command = torch.zeros(n, 3, device=self.device)
+        command[category == 1, 0] = 1.0
+        command[category == 2, 1] = 1.0
+        command[category == 3, 2] = 1.0
+        command[category == 4, 1] = 1.0
+        command[category == 4, 2] = 1.0
+        self._command[env_ids] = command
+
+    def _update_command(self) -> None:
+        pass
+
+    def _update_metrics(self) -> None:
+        pass
+
+
+@_dataclass(kw_only=True)
+class MarioButtonCommandCfg(CommandTermCfg):
+    class_type: type = MarioButtonCommand
+    idle_prob: float = 0.15
+    left_prob: float = 0.20
+    right_prob: float = 0.25
+    jump_prob: float = 0.20
+    right_jump_prob: float = 0.20
+
+    def build(self, env: ManagerBasedRlEnv) -> "MarioButtonCommand":
+        return MarioButtonCommand(self, env)
+
+
+_MARIO_PAD_JOINTS = (
+    "passive_left_pad",
+    "passive_right_pad",
+    "passive_jump_pad",
+)
+
+
+def mario_pad_travel(
+    env: ManagerBasedRlEnv,
+    asset_name: str = "controller_pads",
+) -> torch.Tensor:
+    """Return positive plunger travel in ``[left, right, jump]`` order."""
+
+    asset: Entity = env.scene[asset_name]
+    cache_name = f"_mario_pad_joint_ids_{asset_name}"
+    if not hasattr(env, cache_name):
+        ids = []
+        for joint_name in _MARIO_PAD_JOINTS:
+            matched, _ = asset.find_joints((f"^{joint_name}$",))
+            if len(matched) != 1:
+                raise RuntimeError(f"expected one controller joint named {joint_name}")
+            ids.append(matched[0])
+        setattr(env, cache_name, torch.tensor(ids, device=env.device, dtype=torch.long))
+    joint_ids = getattr(env, cache_name)
+    # The MJCF slide range is [-8 mm, 0], so depression is negative qpos.
+    return torch.clamp(-asset.data.joint_pos[:, joint_ids], min=0.0, max=0.008)
+
+
+def mario_pad_activation(
+    env: ManagerBasedRlEnv,
+    asset_name: str = "controller_pads",
+    press_travel: float = 0.004,
+    release_travel: float = 0.002,
+) -> torch.Tensor:
+    """Continuous pad activation with a deadband for unloaded cap sag."""
+
+    if release_travel < 0.0 or press_travel <= release_travel:
+        raise ValueError("press_travel must be greater than non-negative release_travel")
+    travel = mario_pad_travel(env, asset_name)
+    return torch.clamp(
+        (travel - release_travel) / (press_travel - release_travel), 0.0, 1.0
+    )
+
+
+def mario_requested_pad_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    asset_name: str = "controller_pads",
+    press_travel: float = 0.004,
+    release_travel: float = 0.002,
+) -> torch.Tensor:
+    """Reward requested pad travel; idle requests intentionally pay zero."""
+
+    requested = env.command_manager.get_command(command_name)
+    activation = mario_pad_activation(
+        env, asset_name, press_travel, release_travel
+    )
+    requested_count = requested.sum(dim=-1)
+    score = (activation * requested).sum(dim=-1) / torch.clamp(requested_count, min=1.0)
+    return torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+
+
+def mario_unrequested_pad_cost(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    asset_name: str = "controller_pads",
+    press_travel: float = 0.004,
+    release_travel: float = 0.002,
+) -> torch.Tensor:
+    """Non-negative cost for pressing pads absent from the request."""
+
+    requested = env.command_manager.get_command(command_name)
+    activation = mario_pad_activation(
+        env, asset_name, press_travel, release_travel
+    )
+    return (activation * (1.0 - requested)).sum(dim=-1)
+
+
 def head_pose_tracking(
     env: ManagerBasedRlEnv,
     command_name: str = "head_pose",

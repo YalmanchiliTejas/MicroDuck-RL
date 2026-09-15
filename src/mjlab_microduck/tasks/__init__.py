@@ -47,6 +47,10 @@ from .microduck_ball_kick_env_cfg import (
     make_microduck_ball_kick_env_cfg,
     MicroduckBallKickRlCfg,
 )
+from .microduck_mario_env_cfg import (
+    make_microduck_mario_env_cfg,
+    MicroduckMarioRlCfg,
+)
 from .microduck_sitstand_env_cfg import (
     make_microduck_sitstand_env_cfg,
     MicroduckSitStandRlCfg,
@@ -174,6 +178,15 @@ register_mjlab_task(
     env_cfg=make_microduck_ball_kick_env_cfg(),
     play_env_cfg=make_microduck_ball_kick_env_cfg(play=True),
     rl_cfg=MicroduckBallKickRlCfg,
+    runner_cls=MicroduckOnPolicyRunner,
+)
+
+# Physical LEFT/RIGHT/JUMP controller for a Mario-style platform game.
+register_mjlab_task(
+    task_id="Mjlab-MarioController-Flat-MicroDuck",
+    env_cfg=make_microduck_mario_env_cfg(),
+    play_env_cfg=make_microduck_mario_env_cfg(play=True),
+    rl_cfg=MicroduckMarioRlCfg,
     runner_cls=MicroduckOnPolicyRunner,
 )
 

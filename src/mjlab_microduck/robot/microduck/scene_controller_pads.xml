@@ -1,0 +1,26 @@
+<mujoco model="microduck_controller_scene">
+    <include file="robot_groundcontact.xml"/>
+    <include file="controller_pads.xml"/>
+
+    <visual>
+        <headlight diffuse="0.75 0.75 0.75" ambient="0.35 0.35 0.35" specular="0.1 0.1 0.1"/>
+        <rgba haze="0.12 0.18 0.25 1"/>
+        <global azimuth="135" elevation="-28" offwidth="1200" offheight="800"/>
+    </visual>
+
+    <asset>
+        <texture type="skybox" builtin="gradient" rgb1="0.28 0.45 0.7" rgb2="0.03 0.04 0.08"
+                 width="512" height="3072"/>
+        <texture type="2d" name="controller_ground" builtin="checker" mark="edge"
+                 rgb1="0.19 0.22 0.27" rgb2="0.11 0.13 0.16"
+                 markrgb="0.65 0.68 0.72" width="300" height="300"/>
+        <material name="controller_ground" texture="controller_ground" texuniform="true"
+                  texrepeat="8 8" reflectance="0.12"/>
+    </asset>
+
+    <worldbody>
+        <light pos="0 0 2.5" dir="0 0 -1" directional="true"/>
+        <geom name="floor" type="plane" pos="0 0 0" size="0 0 0.05"
+              material="controller_ground"/>
+    </worldbody>
+</mujoco>
