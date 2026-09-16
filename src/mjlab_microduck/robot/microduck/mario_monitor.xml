@@ -1,0 +1,35 @@
+<mujoco model="microduck_mario_monitor">
+    <compiler angle="radian" autolimits="true"/>
+
+    <!--
+      A world-fixed display for the Mario-controller environment.  The screen
+      faces -X toward Microduck, whose head camera looks along +X.  Its centre
+      is close to head height so head motion changes the observed image.
+
+      mario_screen_texture is deliberately a fixed 256x240 RGB texture: that
+      is the native NES frame size and lets the renderer update tex_data
+      without reallocating or recompiling the MuJoCo model.
+    -->
+    <asset>
+        <texture name="mario_screen_texture" type="2d" builtin="flat"
+                 rgb1="0.025 0.035 0.055" width="256" height="240"/>
+        <material name="mario_screen_material" texture="mario_screen_texture"
+                  texuniform="false" emission="0.35" specular="0" shininess="0"/>
+    </asset>
+
+    <worldbody>
+        <body name="mario_monitor" pos="0.45 0 0.205">
+            <!-- Dark enclosure behind the image plane. -->
+            <geom name="mario_monitor_case" type="box" pos="0.006 0 0"
+                  size="0.010 0.174 0.134" rgba="0.015 0.018 0.024 1"
+                  contype="0" conaffinity="0"/>
+
+            <!-- A plane's local normal is +Z.  This rotation points it toward
+                 -X while mapping texture U to world Y and texture V to world
+                 Z, so the landscape NES framebuffer stays upright. -->
+            <geom name="mario_monitor_screen" type="plane" pos="-0.005 0 0"
+                  size="0.160 0.120 0.001" quat="0.5 0.5 -0.5 -0.5"
+                  material="mario_screen_material" contype="0" conaffinity="0"/>
+        </body>
+    </worldbody>
+</mujoco>

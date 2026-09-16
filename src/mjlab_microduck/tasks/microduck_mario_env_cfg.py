@@ -14,7 +14,10 @@ from copy import deepcopy
 from mjlab.managers import ObservationTermCfg, RewardTermCfg
 from mjlab.tasks.velocity import mdp
 
-from mjlab_microduck.robot.microduck_constants import MICRODUCK_CONTROLLER_PADS_CFG
+from mjlab_microduck.robot.microduck_constants import (
+    MICRODUCK_CONTROLLER_PADS_CFG,
+    MICRODUCK_MARIO_MONITOR_CFG,
+)
 from mjlab_microduck.tasks import mdp as microduck_mdp
 from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
     MicroduckRlCfg,
@@ -36,6 +39,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     cfg.scene.entities = {
         "robot": cfg.scene.entities["robot"],
         "controller_pads": MICRODUCK_CONTROLLER_PADS_CFG,
+        "mario_monitor": MICRODUCK_MARIO_MONITOR_CFG,
     }
     cfg.episode_length_s = EPISODE_LENGTH_S
     cfg.sim.nconmax = 80

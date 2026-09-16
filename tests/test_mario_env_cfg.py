@@ -12,7 +12,7 @@ from mjlab_microduck.tasks.microduck_mario_env_cfg import (
 
 def test_mario_scene_keeps_robot_first_and_adds_controller():
     cfg = make_microduck_mario_env_cfg()
-    assert list(cfg.scene.entities) == ["robot", "controller_pads"]
+    assert list(cfg.scene.entities) == ["robot", "controller_pads", "mario_monitor"]
 
 
 def test_mario_command_uses_existing_three_dimensional_twist_slot():

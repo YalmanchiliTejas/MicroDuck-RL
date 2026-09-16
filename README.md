@@ -154,6 +154,21 @@ the Microduck process. Direction pads hold NES `B` for running, JUMP maps to
 NES `A`, and simultaneous direction+jump is supported. A 250 ms deadman timer
 releases all buttons if controller packets stop.
 
+The Mario sidecar also publishes its native 256×240 RGB framebuffer through
+shared memory (`microduck_mario_rgb` by default). The Mario-controller MuJoCo
+scene contains a world-fixed monitor at Microduck head height, and
+`MarioHeadCameraRenderer` uploads the newest framebuffer to that monitor before
+rendering the robot's named `head_camera`. To capture exactly what Microduck
+sees, leave the sidecar running and use:
+
+```bash
+uv run scripts/preview_mario_monitor.py --output mario_head_camera.png
+```
+
+Use matching `--frame-shm NAME` arguments on the sidecar and preview tool when
+running more than one stream. Pass `--no-frame-stream` to the sidecar only when
+the in-world display is not needed.
+
 To verify the complete UDP path before connecting a trained policy, run these
 in two terminals:
 

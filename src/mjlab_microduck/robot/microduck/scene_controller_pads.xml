@@ -1,6 +1,7 @@
 <mujoco model="microduck_controller_scene">
     <include file="robot_groundcontact.xml"/>
     <include file="controller_pads.xml"/>
+    <include file="mario_monitor.xml"/>
 
     <visual>
         <headlight diffuse="0.75 0.75 0.75" ambient="0.35 0.35 0.35" specular="0.1 0.1 0.1"/>

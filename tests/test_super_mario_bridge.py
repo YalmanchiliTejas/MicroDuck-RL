@@ -1,7 +1,9 @@
 import importlib.util
 from pathlib import Path
 import sys
+import uuid
 
+import numpy as np
 import pytest
 
 from mjlab_microduck.controller_game import ControllerFrame
@@ -9,6 +11,7 @@ from mjlab_microduck.super_mario_bridge import (
     decode_controller_packet,
     encode_controller_packet,
 )
+from mjlab_microduck.mario_monitor import MarioFrameSubscriber
 
 
 def _load_sidecar():
@@ -47,3 +50,27 @@ def test_sidecar_maps_direction_and_jump_combinations():
     assert sidecar.action_index(sidecar.PadLevels(left=True, jump=True)) == 4
     assert sidecar.action_index(sidecar.PadLevels(right=True, jump=True)) == 5
     assert sidecar.nes_actions(always_run=True)[5] == ["right", "A", "B"]
+
+
+def test_sidecar_publishes_complete_rgb_frames():
+    sidecar = _load_sidecar()
+    # macOS limits POSIX shared-memory names to 31 characters.
+    name = f"mdm_{uuid.uuid4().hex[:20]}"
+    first = np.zeros((4, 5, 3), dtype=np.uint8)
+    second = np.arange(4 * 5 * 3, dtype=np.uint8).reshape(4, 5, 3)
+
+    publisher = sidecar.FramePublisher(first, name=name)
+    subscriber = MarioFrameSubscriber(name=name)
+    try:
+        initial = subscriber.read()
+        assert initial is not None
+        assert np.array_equal(initial.rgb, first)
+
+        sequence = publisher.publish(second)
+        updated = subscriber.read()
+        assert updated is not None
+        assert updated.sequence == sequence
+        assert np.array_equal(updated.rgb, second)
+    finally:
+        subscriber.close()
+        publisher.close()
