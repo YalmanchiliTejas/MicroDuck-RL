@@ -14,25 +14,28 @@
              is comfortably achievable by one Microduck foot. -->
         <joint axis="0 0 1" type="slide" limited="true" range="-0.008 0"
                damping="3.0" stiffness="250" springref="0"/>
-        <geom type="box" size="0.042 0.042 0.006" friction="1.2 0.01 0.001"
+        <!-- 70 mm caps in a tight triangle: every neighboring edge is within
+             20 mm, so changing requests does not require crossing the old
+             10-14 cm empty spaces. -->
+        <geom type="box" size="0.035 0.035 0.006" friction="1.2 0.01 0.001"
               condim="3"/>
     </default>
 
     <worldbody>
         <!-- Raised non-colliding housings make the button locations readable. -->
-        <geom name="left_pad_housing" type="box" pos="0.09 0.10 0.003"
-              size="0.048 0.048 0.003" rgba="0.18 0.25 0.65 1" contype="0" conaffinity="0"/>
-        <geom name="right_pad_housing" type="box" pos="0.09 -0.10 0.003"
-              size="0.048 0.048 0.003" rgba="0.18 0.25 0.65 1" contype="0" conaffinity="0"/>
+        <geom name="left_pad_housing" type="box" pos="0.105 0.045 0.003"
+              size="0.037 0.037 0.003" rgba="0.18 0.25 0.65 1" contype="0" conaffinity="0"/>
+        <geom name="right_pad_housing" type="box" pos="0.105 -0.045 0.003"
+              size="0.037 0.037 0.003" rgba="0.18 0.25 0.65 1" contype="0" conaffinity="0"/>
         <geom name="jump_pad_housing" type="box" pos="0.18 0 0.003"
-              size="0.048 0.048 0.003" rgba="0.65 0.18 0.18 1" contype="0" conaffinity="0"/>
+              size="0.037 0.037 0.003" rgba="0.65 0.18 0.18 1" contype="0" conaffinity="0"/>
 
-        <body name="left_pad" pos="0.09 0.10 0.014">
+        <body name="left_pad" pos="0.105 0.045 0.014">
             <joint name="passive_left_pad"/>
             <inertial pos="0 0 0" mass="0.025" diaginertia="3e-5 3e-5 5e-5"/>
             <geom name="left_pad_surface" rgba="0.2 0.35 1 1"/>
         </body>
-        <body name="right_pad" pos="0.09 -0.10 0.014">
+        <body name="right_pad" pos="0.105 -0.045 0.014">
             <joint name="passive_right_pad"/>
             <inertial pos="0 0 0" mass="0.025" diaginertia="3e-5 3e-5 5e-5"/>
             <geom name="right_pad_surface" rgba="0.2 0.35 1 1"/>

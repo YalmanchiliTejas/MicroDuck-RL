@@ -10,12 +10,14 @@ from pathlib import Path
 import socket
 import struct
 import time
+import uuid
 
 import numpy as np
 
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 55355
+DEFAULT_REQUEST_PORT = 55356
 PROTOCOL_VERSION = 1
 DEFAULT_FRAME_SHM = "microduck_mario_rgb"
 FRAME_MAGIC = b"MDMRGB1\0"
@@ -27,6 +29,38 @@ class PadLevels:
     left: bool = False
     right: bool = False
     jump: bool = False
+
+
+def encode_request_packet(levels: PadLevels, sequence: int) -> bytes:
+    if sequence < 0:
+        raise ValueError("sequence must be non-negative")
+    return json.dumps(
+        {
+            "v": PROTOCOL_VERSION,
+            "seq": sequence,
+            "left": levels.left,
+            "right": levels.right,
+            "jump": levels.jump,
+        },
+        separators=(",", ":"),
+    ).encode("ascii")
+
+
+class RequestSender:
+    """Send flybrain action requests to the robot-side PPO coordinator."""
+
+    def __init__(self, host: str, port: int) -> None:
+        self._target = (host, port)
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._sequence = 0
+
+    def send(self, levels: PadLevels) -> None:
+        payload = encode_request_packet(levels, self._sequence)
+        self._socket.sendto(payload, self._target)
+        self._sequence += 1
+
+    def close(self) -> None:
+        self._socket.close()
 
 
 class FramePublisher:
@@ -191,6 +225,41 @@ def run(args: argparse.Namespace) -> None:
     env = JoypadSpace(env, nes_actions(always_run=not args.walk))
     receiver = None if args.demo else PadReceiver(args.host, args.port, args.timeout)
     observation, info = env.reset(seed=args.seed)
+    flybrain = None
+    flybrain_stack = None
+    request_sender = None
+    requested = PadLevels()
+    next_flybrain_decision = 0
+    reward_sender = None
+    rollout_recorder = None
+    run_id = f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
+    active_state = None
+    active_action = 0
+    active_action_sequence = -1
+    interval_reward = 0.0
+    interval_components: dict[str, float] = {}
+    interval_steps = 0
+    rollout_episode = 0
+    rollout_transition = 0
+    flybrain_mtime_ns = None
+    if args.flybrain:
+        from flybrain import FlybrainAgent, FrameStack, action_levels, preprocess_frame
+        from rollouts import RewardSender, RolloutRecorder
+
+        flybrain = FlybrainAgent.load(args.flybrain, device=args.flybrain_device)
+        flybrain_mtime_ns = args.flybrain.stat().st_mtime_ns
+        flybrain_stack = FrameStack(flybrain.config.stack_depth)
+        flybrain_stack.reset(preprocess_frame(observation, flybrain.config.frame_size))
+        request_sender = RequestSender(args.request_host, args.request_port)
+        if not args.no_reward_telemetry:
+            reward_sender = RewardSender(args.reward_host, args.reward_port)
+        if args.rollout_dir is not None:
+            rollout_recorder = RolloutRecorder(
+                args.rollout_dir,
+                flybrain.config.stack_depth,
+                flybrain.config.frame_size,
+                run_id=run_id,
+            )
     publisher = (
         None
         if args.no_frame_stream
@@ -201,15 +270,125 @@ def run(args: argparse.Namespace) -> None:
         step = 0
         next_frame_time = time.monotonic()
         while args.max_steps <= 0 or step < args.max_steps:
+            if flybrain is not None and step >= next_flybrain_decision:
+                if active_state is not None:
+                    next_state = flybrain_stack.append(
+                        preprocess_frame(observation, flybrain.config.frame_size)
+                    )
+                    if rollout_recorder is not None:
+                        event = rollout_recorder.add(
+                            state=active_state,
+                            action=active_action,
+                            reward=interval_reward,
+                            next_state=next_state,
+                            terminated=False,
+                            truncated=False,
+                            reward_components=interval_components,
+                            action_sequence=active_action_sequence,
+                            emulator_steps=interval_steps,
+                        )
+                    else:
+                        event = {
+                            "run_id": run_id,
+                            "episode": rollout_episode,
+                            "transition": rollout_transition,
+                            "action_sequence": active_action_sequence,
+                            "action": active_action,
+                            "reward": interval_reward,
+                            "training_reward": float(np.sign(interval_reward)),
+                            "terminated": False,
+                            "truncated": False,
+                            "reward_components": interval_components,
+                            "emulator_steps": interval_steps,
+                        }
+                    if reward_sender is not None:
+                        reward_sender.send(event)
+                    rollout_transition += 1
+                else:
+                    next_state = flybrain_stack.state
+                if args.flybrain_reload:
+                    current_mtime_ns = args.flybrain.stat().st_mtime_ns
+                    if current_mtime_ns != flybrain_mtime_ns:
+                        flybrain = FlybrainAgent.load(
+                            args.flybrain, device=args.flybrain_device
+                        )
+                        flybrain_mtime_ns = current_mtime_ns
+                        print(f"reloaded flybrain checkpoint: {args.flybrain}")
+                epsilon = (
+                    None
+                    if args.flybrain_use_scheduled_epsilon
+                    else args.flybrain_epsilon
+                )
+                action = flybrain.act(next_state, epsilon=epsilon)
+                requested = PadLevels(*action_levels(action))
+                active_state = next_state.copy()
+                active_action = action
+                active_action_sequence += 1
+                interval_reward = 0.0
+                interval_components = {}
+                interval_steps = 0
+                next_flybrain_decision = step + args.flybrain_decision_frames
+            if request_sender is not None:
+                # Refresh every frame so the robot-side deadman releases safely
+                # if this process stalls or exits.
+                request_sender.send(requested)
             levels = demo_levels(step) if args.demo else receiver.poll()
             observation, reward, terminated, truncated, info = env.step(action_index(levels))
+            if active_state is not None:
+                interval_reward += float(reward)
+                interval_steps += 1
+                for key, value in info.get("reward_components", {}).items():
+                    interval_components[key] = interval_components.get(key, 0.0) + float(value)
             if publisher is not None:
                 publisher.publish(observation)
             if not args.headless:
                 env.render()
             step += 1
             if terminated or truncated:
+                if active_state is not None:
+                    terminal_state = flybrain_stack.append(
+                        preprocess_frame(observation, flybrain.config.frame_size)
+                    )
+                    if rollout_recorder is not None:
+                        event = rollout_recorder.add(
+                            state=active_state,
+                            action=active_action,
+                            reward=interval_reward,
+                            next_state=terminal_state,
+                            terminated=bool(terminated),
+                            truncated=bool(truncated),
+                            reward_components=interval_components,
+                            action_sequence=active_action_sequence,
+                            emulator_steps=interval_steps,
+                        )
+                    else:
+                        event = {
+                            "run_id": run_id,
+                            "episode": rollout_episode,
+                            "transition": rollout_transition,
+                            "action_sequence": active_action_sequence,
+                            "action": active_action,
+                            "reward": interval_reward,
+                            "training_reward": float(np.sign(interval_reward)),
+                            "terminated": bool(terminated),
+                            "truncated": bool(truncated),
+                            "reward_components": interval_components,
+                            "emulator_steps": interval_steps,
+                        }
+                    if reward_sender is not None:
+                        reward_sender.send(event)
+                    active_state = None
+                    interval_reward = 0.0
+                    interval_components = {}
+                    interval_steps = 0
+                    rollout_episode += 1
+                    rollout_transition = 0
                 observation, info = env.reset()
+                if flybrain_stack is not None:
+                    flybrain_stack.reset(
+                        preprocess_frame(observation, flybrain.config.frame_size)
+                    )
+                    next_flybrain_decision = step
             if not args.unthrottled:
                 next_frame_time += 1.0 / args.fps
                 delay = next_frame_time - time.monotonic()
@@ -230,6 +409,12 @@ def run(args: argparse.Namespace) -> None:
     finally:
         if receiver is not None:
             receiver.close()
+        if request_sender is not None:
+            request_sender.close()
+        if reward_sender is not None:
+            reward_sender.close()
+        if rollout_recorder is not None:
+            rollout_recorder.close()
         if publisher is not None:
             publisher.close()
         env.close()
@@ -243,11 +428,46 @@ def main() -> None:
     parser.add_argument("--timeout", type=float, default=0.25)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--walk", action="store_true", help="do not hold NES B with direction")
-    parser.add_argument("--demo", action="store_true", help="use scripted controls instead of UDP pads")
+    parser.add_argument(
+        "--demo", action="store_true", help="use scripted controls instead of UDP pads"
+    )
     parser.add_argument("--headless", action="store_true")
     parser.add_argument("--fps", type=float, default=60.0)
     parser.add_argument("--unthrottled", action="store_true")
     parser.add_argument("--max-steps", type=int, default=0, help="0 runs until interrupted")
+    parser.add_argument("--flybrain", type=Path, help="DQN checkpoint; requests actions over UDP")
+    parser.add_argument("--flybrain-device", default="cpu")
+    parser.add_argument("--flybrain-epsilon", type=float, default=0.0)
+    parser.add_argument(
+        "--flybrain-use-scheduled-epsilon",
+        action="store_true",
+        help="use the checkpoint's decaying exploration schedule during online training",
+    )
+    parser.add_argument(
+        "--flybrain-decision-frames",
+        type=int,
+        default=30,
+        help="hold each physical request this many emulator frames",
+    )
+    parser.add_argument("--request-host", default=DEFAULT_HOST)
+    parser.add_argument("--request-port", type=int, default=DEFAULT_REQUEST_PORT)
+    parser.add_argument("--reward-host", default=DEFAULT_HOST)
+    parser.add_argument("--reward-port", type=int, default=55357)
+    parser.add_argument(
+        "--no-reward-telemetry",
+        action="store_true",
+        help="do not transmit completed action rewards to the rollout trainer",
+    )
+    parser.add_argument(
+        "--rollout-dir",
+        type=Path,
+        help="atomically record replay-ready NPZ episodes in this directory",
+    )
+    parser.add_argument(
+        "--flybrain-reload",
+        action="store_true",
+        help="atomically reload the checkpoint when the rollout trainer updates it",
+    )
     parser.add_argument("--screenshot")
     parser.add_argument(
         "--frame-shm",
@@ -264,6 +484,22 @@ def main() -> None:
         parser.error("--timeout must be positive")
     if args.fps <= 0.0:
         parser.error("--fps must be positive")
+    if args.flybrain_decision_frames <= 0:
+        parser.error("--flybrain-decision-frames must be positive")
+    if not 0.0 <= args.flybrain_epsilon <= 1.0:
+        parser.error("--flybrain-epsilon must be in [0, 1]")
+    if not 1 <= args.reward_port <= 65535:
+        parser.error("--reward-port must be in [1, 65535]")
+    if args.demo and args.flybrain:
+        parser.error("--demo and --flybrain are mutually exclusive")
+    if (
+        args.rollout_dir is not None
+        or args.flybrain_reload
+        or args.flybrain_use_scheduled_epsilon
+    ) and not args.flybrain:
+        parser.error(
+            "--rollout-dir, --flybrain-reload, and scheduled epsilon require --flybrain"
+        )
     run(args)
 
 

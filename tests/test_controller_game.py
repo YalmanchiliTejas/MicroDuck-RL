@@ -1,4 +1,5 @@
 from pathlib import Path
+from math import dist
 from xml.etree import ElementTree
 
 import pytest
@@ -103,6 +104,26 @@ def test_controller_pad_asset_has_three_passive_travel_joints():
         "passive_jump_pad",
     }
     assert all(joint.attrib["name"].startswith("passive_") for joint in joints)
+
+
+def test_controller_pads_are_a_tight_non_overlapping_cluster():
+    path = (
+        Path(__file__).parents[1]
+        / "src/mjlab_microduck/robot/microduck/controller_pads.xml"
+    )
+    root = ElementTree.parse(path).getroot()
+    positions = {
+        body.attrib["name"]: tuple(float(v) for v in body.attrib["pos"].split()[:2])
+        for body in root.findall("./worldbody/body")
+    }
+    pairs = (
+        ("left_pad", "right_pad"),
+        ("left_pad", "jump_pad"),
+        ("right_pad", "jump_pad"),
+    )
+    distances = [dist(positions[first], positions[second]) for first, second in pairs]
+    assert min(distances) >= 0.07  # 70 mm caps do not overlap.
+    assert max(distances) <= 0.10  # No large travel gap between actions.
 
 
 def test_high_level_request_cannot_move_game_without_a_real_pad_press():

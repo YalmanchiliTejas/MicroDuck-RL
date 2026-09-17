@@ -7,14 +7,18 @@ dependencies = [
     "gym-super-mario-bros==9.1.0",
     "numpy>=2.0",
     "pillow>=11.0",
+    "torch>=2.7",
 ]
 
 [project.scripts]
 microduck-super-mario = "mario_sidecar:main"
+microduck-train-flybrain = "train_flybrain:main"
+microduck-train-flybrain-rollouts = "train_rollouts:main"
+microduck-visualize-flybrain = "visualize_flybrain:main"
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-include = ["mario_sidecar.py"]
+include = ["mario_sidecar.py", "flybrain.py", "rollouts.py", "train_flybrain.py", "train_rollouts.py", "visualize_flybrain.py"]

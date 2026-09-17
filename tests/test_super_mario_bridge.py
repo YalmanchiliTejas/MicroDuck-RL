@@ -52,6 +52,16 @@ def test_sidecar_maps_direction_and_jump_combinations():
     assert sidecar.nes_actions(always_run=True)[5] == ["right", "A", "B"]
 
 
+def test_flybrain_request_packet_uses_controller_protocol():
+    sidecar = _load_sidecar()
+    payload = sidecar.encode_request_packet(
+        sidecar.PadLevels(right=True, jump=True), sequence=7
+    )
+    sequence, frame = decode_controller_packet(payload)
+    assert sequence == 7
+    assert frame == ControllerFrame(right=True, jump=True)
+
+
 def test_sidecar_publishes_complete_rgb_frames():
     sidecar = _load_sidecar()
     # macOS limits POSIX shared-memory names to 31 characters.

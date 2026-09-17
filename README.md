@@ -154,18 +154,126 @@ the Microduck process. Direction pads hold NES `B` for running, JUMP maps to
 NES `A`, and simultaneous direction+jump is supported. A 250 ms deadman timer
 releases all buttons if controller packets stop.
 
+#### Flybrain (high-level DQN)
+
+The flybrain is deliberately separate from the 50 Hz PPO motor controller. It
+sees four stacked 84×84 grayscale game frames and chooses one of six actions:
+`idle`, `left`, `right`, `jump`, `left+jump`, or `right+jump`. A dueling Double
+DQN learns those actions with prioritized replay. PER priorities belong to
+whole transitions `(frame stack, action, reward, next frame stack, done)`, not
+to individual raw frames. Every replay item is self-contained: it stores its
+uint8 pre-action stack plus the post-action frame, so random PER sampling and
+circular-buffer overwrites cannot detach an action from its resulting state.
+
+The physical pads are now a tight, non-overlapping triangle (5–20 mm edge gaps)
+so a request change does not require crossing the original large empty spaces.
+Changing this layout changes the controller task: retrain the Mario PPO before
+using a checkpoint trained against the old geometry.
+
+Install the Python 3.13 sidecar, then train the visual flybrain directly in the
+emulator:
+
+```bash
+python3.13 -m venv .super-mario-venv
+.super-mario-venv/bin/pip install ./integrations/super_mario
+
+# Fast emulator baseline. Use --action-repeat 30 for a first latency-matched
+# physical experiment; tune it from measured request-to-pad latency.
+.super-mario-venv/bin/microduck-train-flybrain \
+    --steps 1000000 --action-repeat 30 --output flybrain.pt
+```
+
+For an end-to-end MuJoCo rehearsal, first export the trained
+`Mjlab-MarioController-Flat-MicroDuck` PPO through the normal normalized ONNX
+export path. Then run these in separate terminals:
+
+```bash
+# Terminal 1: game + flybrain. It sends requests on 55356 and accepts only
+# measured physical/simulated pad states on 55355.
+.super-mario-venv/bin/microduck-super-mario \
+    --flybrain flybrain.pt --flybrain-decision-frames 30
+
+# Terminal 2: existing 61D PPO translates each request into robot motion.
+uv run scripts/infer_policy.py \
+    --scene src/mjlab_microduck/robot/microduck/scene_controller_pads.xml \
+    --walking mario_controller.onnx --new-cmd-obs --flybrain-requests
+```
+
+The two frame/decision settings should match. Start with 30 frames (0.5 s at
+60 Hz), measure how long the PPO actually takes to register each pad, and tune
+both together. The UDP request receiver has a deadman: if the flybrain stops,
+the PPO command becomes all-zero. The existing measured-pad deadman likewise
+releases the NES buttons if robot telemetry stops.
+
+The processes above are separate only because the NES sidecar requires Python
+3.13 while mjlab/BAM is pinned to Python 3.12. They are one experiment and do
+not require separate terminals. The combined supervisor starts the learner,
+waits for its initial checkpoint, starts the game and robot controller, serves
+the dashboard, stops the entire process group on failure, and writes one log
+per component:
+
+```bash
+python scripts/run_mario_flybrain.py \
+    --policy mario_controller.onnx \
+    --run-dir runs/mario-flybrain
+```
+
+Open `http://127.0.0.1:8765` for live action-interval rewards, reward
+components, episode summaries, and the connectome spike raster. This is an
+auxiliary diagnostics page. The primary local view is one combined MuJoCo
+environment containing MicroDuck, the three close physical pads, and the live
+Mario game on the in-world monitor. It opens by default; pass `--headless` only
+on a machine without a display.
+
+For Slurm, the wrapper builds the Python 3.12 and 3.13 environments inside the
+same allocation and launches that same supervisor:
+
+```bash
+MARIO_POLICY=/shared/policies/mario_controller.onnx \
+    ./slurm_mario_flybrain.sh
+```
+
+Tunnel the dashboard using the hostname printed in the Slurm log:
+
+```bash
+ssh -L 8765:<compute-host>:8765 <cluster-login>
+```
+
+For every held high-level action, the sidecar sends UDP telemetry on port
+`55357` containing the action sequence, accumulated raw reward, signed training
+reward, emulator reward components, terminal/truncation flags, and the number
+of emulator frames. The corresponding `rollout-*.npz` is authoritative: it
+contains the exact pre-action stacks and post-action frames needed to recreate
+every `(state, action, reward, next_state, done)` transition. A terminal rollout
+is written to a temporary file and renamed only after it is complete; an
+interrupted rollout remains marked incomplete and is never trained. Episode
+summaries are appended to `episodes.jsonl`.
+
+The spike raster accepts real connectome telemetry as JSONL, one time bin per
+line, for example:
+
+```json
+{"time_s":1.25,"population":"KC","neuron_ids":[14,91,203],"action_sequence":8}
+```
+
+Pass the file with `--spike-file` locally or `FLY_SPIKE_FILE` under Slurm. The
+current `flybrain.py` is still the visual Dueling Double-DQN and does **not**
+yet contain a MaleCNS/FlyWire spiking backend. Therefore the dashboard reports
+the connectome as disconnected until that backend writes genuine spike bins;
+it deliberately does not relabel CNN activations as biological neuron firing.
+
 The Mario sidecar also publishes its native 256×240 RGB framebuffer through
 shared memory (`microduck_mario_rgb` by default). The Mario-controller MuJoCo
-scene contains a world-fixed monitor at Microduck head height, and
-`MarioHeadCameraRenderer` uploads the newest framebuffer to that monitor before
-rendering the robot's named `head_camera`. To capture exactly what Microduck
-sees, leave the sidecar running and use:
+scene contains a world-fixed monitor at Microduck head height. During a combined
+run, `infer_policy.py` continuously uploads the newest framebuffer to that
+monitor in the live MuJoCo viewer. To capture exactly what Microduck sees from
+its named `head_camera`, leave the sidecar running and use:
 
 ```bash
 uv run scripts/preview_mario_monitor.py --output mario_head_camera.png
 ```
 
-Use matching `--frame-shm NAME` arguments on the sidecar and preview tool when
+Use a matching `--frame-shm NAME` on the combined launcher and preview tool when
 running more than one stream. Pass `--no-frame-stream` to the sidecar only when
 the in-world display is not needed.
 

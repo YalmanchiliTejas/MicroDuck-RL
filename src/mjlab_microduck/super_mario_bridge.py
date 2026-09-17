@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 import json
 import socket
+import time
 
 from mjlab_microduck.controller_game import ControllerFrame
 
@@ -12,6 +13,7 @@ from mjlab_microduck.controller_game import ControllerFrame
 PROTOCOL_VERSION = 1
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 55355
+DEFAULT_REQUEST_PORT = 55356
 
 
 def encode_controller_packet(frame: ControllerFrame, sequence: int) -> bytes:
@@ -70,6 +72,62 @@ class SuperMarioUdpClient:
         self._socket.close()
 
     def __enter__(self) -> "SuperMarioUdpClient":
+        return self
+
+    def __exit__(self, *_args) -> None:
+        self.close()
+
+
+@dataclass(slots=True)
+class FlybrainUdpReceiver:
+    """Receive high-level flybrain requests with sequence and deadman guards.
+
+    The returned frame belongs in the Mario PPO policy's three twist-command
+    slots. It must never be forwarded directly to the emulator.
+    """
+
+    host: str = DEFAULT_HOST
+    port: int = DEFAULT_REQUEST_PORT
+    timeout_s: float = 0.5
+    _socket: socket.socket = field(init=False)
+    _frame: ControllerFrame = field(default_factory=ControllerFrame, init=False)
+    _last_sequence: int = field(default=-1, init=False)
+    _last_received: float = field(default=0.0, init=False)
+
+    def __post_init__(self) -> None:
+        if self.timeout_s <= 0.0:
+            raise ValueError("timeout_s must be positive")
+        self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self._socket.bind((self.host, self.port))
+        self._socket.setblocking(False)
+
+    def poll(self) -> ControllerFrame:
+        while True:
+            try:
+                payload, _ = self._socket.recvfrom(4096)
+            except BlockingIOError:
+                break
+            try:
+                sequence, frame = decode_controller_packet(payload)
+            except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+                continue
+            if sequence > self._last_sequence:
+                self._last_sequence = sequence
+                self._frame = frame
+                self._last_received = time.monotonic()
+        if time.monotonic() - self._last_received > self.timeout_s:
+            return ControllerFrame()
+        return self._frame
+
+    @property
+    def command_vector(self) -> tuple[float, float, float]:
+        frame = self.poll()
+        return float(frame.left), float(frame.right), float(frame.jump)
+
+    def close(self) -> None:
+        self._socket.close()
+
+    def __enter__(self) -> "FlybrainUdpReceiver":
         return self
 
     def __exit__(self, *_args) -> None:

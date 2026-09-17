@@ -126,7 +126,24 @@ class TerminalInput:
             try:
                 keys.append(self._queue.get_nowait())
             except queue.Empty:
-                return keys
+                break
+        return keys
+
+
+class HeadlessViewer:
+    """Viewer-compatible no-op context for combined/Slurm runs."""
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return None
+
+    def is_running(self):
+        return True
+
+    def sync(self):
+        return None
 
 
 class PolicyInference:
@@ -805,6 +822,17 @@ def main():
     parser = argparse.ArgumentParser(description="Run ONNX policy in MuJoCo")
     parser.add_argument("--roller", action="store_true", help="Use roller skate robot XML (robot_walk_rollers.xml)")
     parser.add_argument("--scene", type=str, default=None, help="Path to a scene XML, overriding the default pick (e.g. src/mjlab_microduck/robot/microduck/scene_allcollisions.xml)")
+    parser.add_argument("--flybrain-requests", action="store_true",
+                        help="receive flybrain button requests and send measured controller-pad levels")
+    parser.add_argument("--flybrain-host", default="127.0.0.1")
+    parser.add_argument("--flybrain-port", type=int, default=55356)
+    parser.add_argument("--mario-host", default="127.0.0.1")
+    parser.add_argument("--mario-port", type=int, default=55355)
+    parser.add_argument(
+        "--mario-frame-shm",
+        default="microduck_mario_rgb",
+        help="shared-memory RGB stream rendered on the in-world Mario monitor",
+    )
     parser.add_argument("--walking", type=str, default=None, help="Path to walking policy ONNX file")
     parser.add_argument("--standing", "-s", type=str, default=None, help="Path to standing policy ONNX file")
     parser.add_argument("--ground-pick", type=str, default=None, help="Path to ground pick policy ONNX file (press G to activate)")
@@ -823,6 +851,10 @@ def main():
     parser.add_argument("--raw-accelerometer", action="store_true", help="Use raw accelerometer instead of projected gravity")
     parser.add_argument("--delay", type=int, nargs='*', default=None, help="Enable actuator delay: --delay MIN MAX or --delay LAG")
     parser.add_argument("--debug", action="store_true", help="Print observations and actions")
+    parser.add_argument("--headless", action="store_true",
+                        help="run without the passive MuJoCo viewer (for Slurm/combined runs)")
+    parser.add_argument("--max-seconds", type=float, default=0.0,
+                        help="stop after this many wall-clock seconds; 0 runs until signalled")
     parser.add_argument("--save-csv", type=str, default=None, help="Save observations and actions to CSV file")
     parser.add_argument("--record", type=str, default=None, help="Enable recording mode: save observations to pickle file on Ctrl+C")
     parser.add_argument("--switch-threshold", type=float, default=0.05, help="Vel command magnitude threshold for walking/standing switch (default: 0.05)")
@@ -853,6 +885,10 @@ def main():
         parser.error("--kick-left/--kick-right/--roulade policies use the unified 13D command obs (61D); add --new-cmd-obs")
     if (args.kick_left or args.kick_right or args.roulade) and args.roller:
         parser.error("kick/roulade policies are trained on the walking robot, not the roller model")
+    if args.flybrain_requests and not args.new_cmd_obs:
+        parser.error("--flybrain-requests requires --new-cmd-obs (the 61D Mario policy)")
+    if args.max_seconds < 0:
+        parser.error("--max-seconds must be non-negative")
 
     # Parse delay arguments
     delay_min_lag = 0
@@ -978,7 +1014,13 @@ def main():
     qpos_adr = model.jnt_qposadr[freejoint_id]
     data.qpos[qpos_adr + 0] = 0.0
     data.qpos[qpos_adr + 1] = 0.0
-    data.qpos[qpos_adr + 2] = 0.1385 if args.roller else 0.125  # rollers add 13.5mm height
+    if args.roller:
+        spawn_height = 0.1385  # rollers add 13.5 mm height
+    elif args.flybrain_requests:
+        spawn_height = 0.12  # matches microduck_mario_env_cfg fixed spawn
+    else:
+        spawn_height = 0.125
+    data.qpos[qpos_adr + 2] = spawn_height
     data.qpos[qpos_adr + 3:qpos_adr + 7] = [1, 0, 0, 0]
     for i, qpos_idx in enumerate(policy.joint_qpos_indices):
         data.qpos[qpos_idx] = policy.default_pose[i]
@@ -1025,7 +1067,7 @@ def main():
         print(f"{_name} policy: loaded  (press {_behavior_keys[_name]}, "
               f"auto-return after {policy.behavior_durations[_name]:.1f}s)")
     print(f"Active policy: {policy.current_policy}")
-    print("Close viewer window to exit")
+    print("Send SIGINT/SIGTERM to exit" if args.headless else "Close viewer window to exit")
     print()
 
     decimation = 4
@@ -1069,6 +1111,52 @@ def main():
     # shortcuts. `key` is a symbolic name: "up"/"down"/"left"/"right", " ", or
     # a lowercase letter.
     quit_requested = False
+
+    flybrain_receiver = None
+    mario_client = None
+    mario_pads = None
+    mario_pad_qpos = None
+    mario_frame_subscriber = None
+    mario_monitor = None
+    mario_frame_sequence = -1
+    mario_frame_wait_reported = False
+    if args.flybrain_requests:
+        from mjlab_microduck.controller_game import Button, PadBank
+        from mjlab_microduck.mario_monitor import (
+            MarioFrameSubscriber,
+            MarioMonitorTexture,
+        )
+        from mjlab_microduck.super_mario_bridge import (
+            FlybrainUdpReceiver,
+            SuperMarioUdpClient,
+        )
+
+        flybrain_receiver = FlybrainUdpReceiver(
+            host=args.flybrain_host,
+            port=args.flybrain_port,
+        )
+        mario_client = SuperMarioUdpClient(host=args.mario_host, port=args.mario_port)
+        mario_pads = PadBank()
+        mario_pad_qpos = {}
+        for button in Button:
+            name = f"passive_{button.value}_pad"
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            if joint_id < 0:
+                parser.error(
+                    "--flybrain-requests requires the controller scene; add "
+                    "--scene src/mjlab_microduck/robot/microduck/scene_controller_pads.xml"
+                )
+            mario_pad_qpos[button] = int(model.jnt_qposadr[joint_id])
+        mario_frame_subscriber = MarioFrameSubscriber(args.mario_frame_shm)
+        mario_monitor = MarioMonitorTexture(model)
+        print(
+            f"Flybrain requests: udp://{args.flybrain_host}:{args.flybrain_port}; "
+            f"measured pads -> udp://{args.mario_host}:{args.mario_port}"
+        )
+        print(
+            f'Mario display: shared memory "{args.mario_frame_shm}" -> '
+            "in-world monitor"
+        )
 
     def handle_key(key):
         nonlocal policy_enabled, quit_requested
@@ -1223,8 +1311,14 @@ def main():
     print("  A / E:            head_roll ±step")
     print("  SPACE:            reset head offset to zero")
 
-    with TerminalInput() as term, \
-         mujoco.viewer.launch_passive(model, data, show_left_ui=False, show_right_ui=False) as viewer:
+    viewer_context = (
+        HeadlessViewer()
+        if args.headless
+        else mujoco.viewer.launch_passive(
+            model, data, show_left_ui=False, show_right_ui=False
+        )
+    )
+    with TerminalInput() as term, viewer_context as viewer:
         viewer.sync()
         start_time = time.time()
 
@@ -1241,6 +1335,8 @@ def main():
 
             while viewer.is_running() and not quit_requested:
                 step_start = time.time()
+                if args.max_seconds and step_start - start_time >= args.max_seconds:
+                    break
 
                 for key in term.get_keys():
                     handle_key(key)
@@ -1261,6 +1357,11 @@ def main():
 
                 policy.update_ground_pick_phase(actual_dt)
                 policy.update_behavior(actual_dt)
+
+                if flybrain_receiver is not None:
+                    request = flybrain_receiver.poll()
+                    policy.vel_cmd[:] = (request.left, request.right, request.jump)
+                    policy._update_command()
 
                 if policy_enabled:
                     action = policy.infer()
@@ -1352,6 +1453,43 @@ def main():
                 for _ in range(decimation):
                     mujoco.mj_step(model, data)
 
+                if mario_client is not None:
+                    travel = {
+                        button: -float(data.qpos[address])
+                        for button, address in mario_pad_qpos.items()
+                    }
+                    mario_client.send(mario_pads.update(travel).controller)
+
+                # The NES emulator lives in the Python 3.13 sidecar while this
+                # MuJoCo/BAM process is Python 3.12. Copy its newest complete
+                # shared-memory frame into the scene texture, then ask the
+                # passive viewer to upload that texture on its GL thread.
+                if mario_frame_subscriber is not None:
+                    try:
+                        mario_frame = mario_frame_subscriber.read()
+                    except FileNotFoundError:
+                        mario_frame = None
+                        if not mario_frame_wait_reported:
+                            print(
+                                "Waiting for Mario framebuffer shared memory: "
+                                f"{args.mario_frame_shm}"
+                            )
+                            mario_frame_wait_reported = True
+                    if (
+                        mario_frame is not None
+                        and mario_frame.sequence != mario_frame_sequence
+                    ):
+                        if args.headless:
+                            mario_monitor.write(mario_frame.rgb)
+                        else:
+                            with viewer.lock():
+                                mario_monitor.write(mario_frame.rgb)
+                            viewer.update_texture(mario_monitor.texture_id)
+                        mario_frame_sequence = mario_frame.sequence
+                        if mario_frame_wait_reported:
+                            print("Mario framebuffer connected")
+                            mario_frame_wait_reported = False
+
                 viewer.sync()
 
                 elapsed = time.time() - step_start
@@ -1363,6 +1501,13 @@ def main():
             print("\n\nKeyboardInterrupt received (Ctrl+C). Saving data...")
 
     print("\nInference stopped.")
+
+    if flybrain_receiver is not None:
+        flybrain_receiver.close()
+    if mario_client is not None:
+        mario_client.close()
+    if mario_frame_subscriber is not None:
+        mario_frame_subscriber.close()
 
     if csv_data is not None and len(csv_data) > 0:
         print(f"\nSaving {len(csv_data)} steps to: {args.save_csv}")
