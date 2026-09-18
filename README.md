@@ -92,26 +92,20 @@ uv run scripts/infer_policy.py --walking walk.onnx --standing stand.onnx \
 Keyboard-driven (velocity commands, `G` ground pick, `Y` sit/stand, `R` roulade,
 `K`/`L` kicks); `--debug`, `--save-csv`, `--record` support sim2real comparisons.
 
-### Controller-game prototype
+### Physical NES controller
 
-The first building block for a Microduck-operated platform game lives in
-`controller_game.py`. It defines one shared input contract for three physical
-pads (`left`, `right`, `jump`), hysteresis-based pad decoding, and a small
-deterministic side-scrolling game that consumes those inputs. The matching
-MuJoCo asset is `robot/microduck/controller_pads.xml`: three colored,
-spring-loaded 8 mm plungers whose joints all use the required `passive_*`
-prefix.
+The Mario controller is a pair of physical, spring-centered surfaces. The
+left foot stays planted on a two-axis D-pad; the right foot stays planted on
+an A/B rocker. A firmer 1.6 mm right-foot press supplies the A+B chord that a
+single fore/aft rocker cannot otherwise represent. Every moving joint uses
+the required `passive_*` prefix. Emulator code remains separate from the
+physical asset and decoder.
 
-Run the current end-to-end, renderer-free wiring demo with:
-
-```bash
-uv run scripts/controller_game_demo.py
-```
-
-Render the combined robot-and-pad MuJoCo scene to a PNG with:
+Render the combined robot-and-controller MuJoCo scene to a PNG with:
 
 ```bash
-uv run scripts/preview_controller_pads.py --output controller_pads_preview.png
+uv run scripts/preview_controller_nes.py \
+    --output artifacts/controller_nes_preview.png
 ```
 
 Render the platform-game side of the loop with:
@@ -120,10 +114,14 @@ Render the platform-game side of the loop with:
 uv run scripts/preview_mario_game.py --output mario_game_preview.png
 ```
 
-The registered task `Mjlab-MarioController-Flat-MicroDuck` places the pads in
-the Mjlab scene and trains the duck to follow `[left, right, jump]` requests in
-the existing 3D twist slot. The actor stays 61D; only the critic receives the
-three pad-travel values. Smoke-test it before any long run:
+The registered task `Mjlab-MarioController-Flat-MicroDuck` trains the duck to
+follow `[dpad_x, dpad_y, ab_mode]` requests in the existing 3D twist slot:
+
+- D-pad axes use `-1`, `0`, `+1`.
+- A/B mode uses `-1=B`, `0=neutral`, `+1=A`, `+2=A+B`.
+
+The actor stays 61D; only the critic receives the four physical controller
+joint values. Smoke-test it before any long run:
 
 ```bash
 uv run train Mjlab-MarioController-Flat-MicroDuck \
@@ -135,8 +133,9 @@ and exports the final normalized ONNX policy to the path printed at submission:
 
 ```bash
 # Required cheap smoke test.
-MARIO_CONTROLLER_RUN_TAG=smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
-    ITERATIONS_PER_JOB=5 MAX_JOBS=1 ./slurm_mario_controller.sh
+MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+    ITERATIONS_PER_JOB=5 CHECKPOINT_INTERVAL=5 MAX_JOBS=1 \
+    ./slurm_mario_controller.sh
 
 # Full 5,000-iteration controller training.
 ./slurm_mario_controller.sh
@@ -150,13 +149,13 @@ MARIO_CONTROLLER_RUN_TAG=default ./slurm_mario_controller_videos.sh
 ```
 
 Videos are written beneath
-`$SCRATCH/microduck-rl/mario-controller-default/videos/checkpoints/`.
+`$SCRATCH/microduck-rl/mario-nes-controller-default/videos/checkpoints/`.
 
 The runtime loop is intentionally one-way:
 
 ```text
-game planner -> requested buttons -> 61D duck policy -> robot motion
-     -> measured passive-pad travel -> hysteresis -> actual buttons -> game
+game planner -> compact 3D request -> 61D duck policy -> robot motion
+     -> measured passive joints -> hysteresis -> six NES buttons -> game
 ```
 
 The request never moves the game directly. For the real NES game, the emulator

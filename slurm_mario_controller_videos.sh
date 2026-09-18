@@ -26,7 +26,7 @@ if ! [[ "${MARIO_CONTROLLER_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
     exit 1
 fi
 
-SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-controller-${MARIO_CONTROLLER_RUN_TAG}"
+SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-nes-controller-${MARIO_CONTROLLER_RUN_TAG}"
 CHECKPOINT_DIR="${SCRATCH_ROOT}/tensorboard"
 VIDEO_DIR="${SCRATCH_ROOT}/videos/checkpoints"
 SLURM_DIR="${SCRATCH_ROOT}/video-slurm"

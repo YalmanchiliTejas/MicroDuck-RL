@@ -181,7 +181,7 @@ register_mjlab_task(
     runner_cls=MicroduckOnPolicyRunner,
 )
 
-# Physical LEFT/RIGHT/JUMP controller for a Mario-style platform game.
+# Physical D-pad + A/B foot controller for a Mario-style platform game.
 register_mjlab_task(
     task_id="Mjlab-MarioController-Flat-MicroDuck",
     env_cfg=make_microduck_mario_env_cfg(),

@@ -1,6 +1,8 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import mujoco
+import torch
 from mjlab.tasks.velocity import mdp
 
 from mjlab_microduck.tasks import mdp as microduck_mdp
@@ -12,12 +14,14 @@ from mjlab_microduck.tasks.microduck_mario_env_cfg import (
 
 def test_mario_scene_keeps_robot_first_and_adds_controller():
     cfg = make_microduck_mario_env_cfg()
-    assert list(cfg.scene.entities) == ["robot", "controller_pads", "mario_monitor"]
+    assert list(cfg.scene.entities) == ["robot", "nes_controller", "mario_monitor"]
 
 
 def test_mario_command_uses_existing_three_dimensional_twist_slot():
     cfg = make_microduck_mario_env_cfg()
-    assert cfg.commands["twist"].class_type is microduck_mdp.MarioButtonCommand
+    assert cfg.commands["twist"].class_type is microduck_mdp.MarioNesCommand
+    assert sum(cfg.commands["twist"].category_weights) == 1.0
+    assert cfg.commands["twist"].resampling_time_range == (0.25, 0.75)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
     for group in ("actor", "critic"):
@@ -28,43 +32,84 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
         assert terms["body_command"].params["dim"] == 6
 
 
-def test_pad_state_is_privileged_and_not_added_to_actor():
+def test_controller_state_is_privileged_and_not_added_to_actor():
     cfg = make_microduck_mario_env_cfg()
-    assert "controller_pad_travel" not in cfg.observations["actor"].terms
-    assert "controller_pad_travel" in cfg.observations["critic"].terms
+    assert "nes_controller_state" not in cfg.observations["actor"].terms
+    assert "nes_controller_state" in cfg.observations["critic"].terms
 
 
-def test_pad_reward_signs_cannot_reward_wrong_button():
+def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     rewards = make_microduck_mario_env_cfg().rewards
-    assert rewards["requested_pad"].weight > 0.0
-    assert rewards["unrequested_pad"].weight < 0.0
+    assert rewards["requested_button"].weight > 0.0
+    assert rewards["unrequested_button"].weight < 0.0
+    assert rewards["foot_contact_loss"].weight < 0.0
     for name in ("track_linear_velocity", "air_time", "foot_clearance"):
         assert name not in rewards
-    assert rewards["requested_pad"].params["release_travel"] == 0.002
-    assert rewards["requested_pad"].params["press_travel"] == 0.004
+    params = rewards["requested_button"].params
+    assert params["release_angle"] < params["activate_angle"]
+    assert params["chord_release_travel"] == 0.001
+    assert params["chord_press_travel"] == 0.0016
 
 
 def test_spawn_is_aligned_with_fixed_pad_layout():
     pose = make_microduck_mario_env_cfg().events["reset_base"].params["pose_range"]
     assert pose["x"] == (0.0, 0.0)
     assert pose["y"] == (0.0, 0.0)
+    assert pose["z"] == (0.135, 0.135)
     assert pose["yaw"] == (0.0, 0.0)
 
 
 def test_mario_runner_has_distinct_experiment_name():
-    assert MicroduckMarioRlCfg.experiment_name == "mario_controller"
+    assert MicroduckMarioRlCfg.experiment_name == "mario_nes_controller"
 
 
-def test_unloaded_pads_settle_below_release_threshold():
+def test_unloaded_controller_settles_inside_all_release_thresholds():
     path = (
         Path(__file__).parents[1]
-        / "src/mjlab_microduck/robot/microduck/controller_pads.xml"
+        / "src/mjlab_microduck/robot/microduck/controller_nes.xml"
     )
     model = mujoco.MjModel.from_xml_path(str(path))
     data = mujoco.MjData(model)
     for _ in range(2_000):
         mujoco.mj_step(model, data)
-    for name in ("passive_left_pad", "passive_right_pad", "passive_jump_pad"):
+    for name in ("passive_dpad_x", "passive_dpad_y", "passive_ab_rocker"):
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-        travel = -float(data.qpos[model.jnt_qposadr[joint_id]])
-        assert travel < 0.002
+        angle = abs(float(data.qpos[model.jnt_qposadr[joint_id]]))
+        assert angle < 0.01396263
+    press_id = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_JOINT, "passive_ab_press"
+    )
+    press_travel = -float(data.qpos[model.jnt_qposadr[press_id]])
+    assert press_travel < 0.001
+
+
+def test_compact_command_decodes_all_six_buttons_and_chords():
+    command = torch.tensor(
+        [
+            [1.0, 0.0, 2.0],
+            [-1.0, 0.0, 1.0],
+            [0.0, 1.0, -1.0],
+            [0.0, -1.0, 0.0],
+        ]
+    )
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_command=lambda _name: command)
+    )
+    requested = microduck_mdp.mario_nes_requested_buttons(env).bool()
+    # Button order: UP, DOWN, LEFT, RIGHT, A, B.
+    assert requested.tolist() == [
+        [False, False, False, True, True, True],
+        [False, False, True, False, True, False],
+        [True, False, False, False, False, True],
+        [False, True, False, False, False, False],
+    ]
+
+
+def test_foot_sensor_targets_controller_surfaces_not_floor():
+    sensor = next(
+        sensor
+        for sensor in make_microduck_mario_env_cfg().scene.sensors
+        if sensor.name == "feet_ground_contact"
+    )
+    assert sensor.secondary.entity == "nes_controller"
+    assert sensor.secondary.pattern == r"^(dpad_surface|ab_surface)$"

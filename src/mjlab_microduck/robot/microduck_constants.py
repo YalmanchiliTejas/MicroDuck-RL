@@ -33,6 +33,9 @@ MICRODUCK_BALL_XML: Path = _ROBOT_DIR / "ball.xml"
 MICRODUCK_GRAPE_XML: Path = _ROBOT_DIR / "grape.xml"
 # Three spring-loaded floor buttons used by the controller-game prototype.
 MICRODUCK_CONTROLLER_PADS_XML: Path = _ROBOT_DIR / "controller_pads.xml"
+# Low-travel NES controller: a two-axis D-pad under the left foot and an A/B
+# rocker under the right foot.
+MICRODUCK_NES_CONTROLLER_XML: Path = _ROBOT_DIR / "controller_nes.xml"
 # World-fixed display whose texture is fed by the Super Mario sidecar.
 MICRODUCK_MARIO_MONITOR_XML: Path = _ROBOT_DIR / "mario_monitor.xml"
 # Roller-skate model: 14 actuated joints + passive wheel hinges (passive_*wheel).
@@ -55,6 +58,7 @@ assert MICRODUCK_WALK_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_WALK_BA
 assert MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML.exists(), f"XML not found: {MICRODUCK_GROUNDCONTACT_ROLLERS_BACKLASH_XML}"
 assert MICRODUCK_GRAPE_XML.exists(), f"XML not found: {MICRODUCK_GRAPE_XML}"
 assert MICRODUCK_CONTROLLER_PADS_XML.exists(), f"XML not found: {MICRODUCK_CONTROLLER_PADS_XML}"
+assert MICRODUCK_NES_CONTROLLER_XML.exists(), f"XML not found: {MICRODUCK_NES_CONTROLLER_XML}"
 assert MICRODUCK_MARIO_MONITOR_XML.exists(), f"XML not found: {MICRODUCK_MARIO_MONITOR_XML}"
 
 
@@ -94,6 +98,10 @@ def get_grape_spec() -> mujoco.MjSpec:
 
 def get_controller_pads_spec() -> mujoco.MjSpec:
     return mujoco.MjSpec.from_file(str(MICRODUCK_CONTROLLER_PADS_XML))
+
+
+def get_nes_controller_spec() -> mujoco.MjSpec:
+    return mujoco.MjSpec.from_file(str(MICRODUCK_NES_CONTROLLER_XML))
 
 
 def get_mario_monitor_spec() -> mujoco.MjSpec:
@@ -330,6 +338,11 @@ MICRODUCK_GRAPE_CFG = EntityCfg(
 # articulation/actuator config: policy actions must continue to address only
 # the robot's 14 Dynamixel servos.
 MICRODUCK_CONTROLLER_PADS_CFG = EntityCfg(spec_fn=get_controller_pads_spec)
+
+# Three passive spring-centered hinges; robot actions still address only the
+# 14 servo joints. Input decoding lives in mjlab_microduck.controller and is
+# deliberately independent of any emulator.
+MICRODUCK_NES_CONTROLLER_CFG = EntityCfg(spec_fn=get_nes_controller_spec)
 
 # Fixed display: no articulation and no collision.  mario_screen_texture is
 # updated at render time by mario_monitor.MarioHeadCameraRenderer.

@@ -1,15 +1,16 @@
 #!/usr/bin/env bash
-# Train the low-level Mario pad-pressing controller on Slurm and export the
+# Train the low-level physical NES foot controller on Slurm and export the
 # final checkpoint to a normalized ONNX policy.
 #
 # Smoke test first:
-#   MARIO_CONTROLLER_RUN_TAG=smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
-#     ITERATIONS_PER_JOB=5 MAX_JOBS=1 ./slurm_mario_controller.sh
+#   MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+#     ITERATIONS_PER_JOB=5 CHECKPOINT_INTERVAL=5 MAX_JOBS=1 \
+#     ./slurm_mario_controller.sh
 #
 # Full training:
 #   ./slurm_mario_controller.sh
 
-#SBATCH --job-name=microduck-mario-controller
+#SBATCH --job-name=microduck-mario-nes
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
@@ -43,11 +44,11 @@ if ! [[ "${MARIO_CONTROLLER_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
     exit 1
 fi
 
-SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-controller-${MARIO_CONTROLLER_RUN_TAG}"
+SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-nes-controller-${MARIO_CONTROLLER_RUN_TAG}"
 OUTPUT_DIR="${SCRATCH_ROOT}/slurm"
 TENSORBOARD_DIR="${SCRATCH_ROOT}/tensorboard"
 POLICY_DIR="${SCRATCH_ROOT}/policy"
-POLICY_PATH="${POLICY_DIR}/mario_controller.onnx"
+POLICY_PATH="${POLICY_DIR}/mario_nes_controller.onnx"
 COMPLETE_MARKER="${SCRATCH_ROOT}/training-complete-${TARGET_ITERATIONS}"
 mkdir -p "${OUTPUT_DIR}" "${TENSORBOARD_DIR}" "${POLICY_DIR}"
 
@@ -205,7 +206,7 @@ train_args=(
     --agent.save-interval "${CHECKPOINT_INTERVAL}"
     --agent.logger tensorboard
     --agent.experiment-name "${TENSORBOARD_DIR}"
-    --agent.run-name "mario-controller-${SLURM_JOB_ID}"
+    --agent.run-name "mario-nes-controller-${SLURM_JOB_ID}"
 )
 train_args+=("${resume_args[@]}")
 train_args+=("$@")

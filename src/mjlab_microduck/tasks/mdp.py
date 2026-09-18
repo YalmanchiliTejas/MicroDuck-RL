@@ -5715,21 +5715,22 @@ def zero_command_padding(
 
 
 # --------------------------------------------------------------------------- #
-# Controller-pad task                                                          #
+# Physical NES-controller task                                                 #
 # --------------------------------------------------------------------------- #
 
 
-class MarioButtonCommand(CommandTerm):
-    """Sample controller requests in ``[left, right, jump]`` order.
+class MarioNesCommand(CommandTerm):
+    """Sample requests in ``[dpad_x, dpad_y, ab_mode]`` order.
 
-    The command is deliberately a button request, not game state. A high-level
-    planner or a human decides what Mario should do; this low-level policy
-    learns the physical skill of pressing the requested spring-loaded pads.
+    ``dpad_x`` and ``dpad_y`` are signed axes. ``ab_mode`` is -1 for B, +1 for
+    A, and +2 for the firm-press A+B chord. This compact encoding fits the
+    shared 3D twist slot while the physical state remains six independent NES
+    button levels.
     """
 
-    cfg: "MarioButtonCommandCfg"
+    cfg: "MarioNesCommandCfg"
 
-    def __init__(self, cfg: "MarioButtonCommandCfg", env: ManagerBasedRlEnv):
+    def __init__(self, cfg: "MarioNesCommandCfg", env: ManagerBasedRlEnv):
         super().__init__(cfg, env)
         self._command = torch.zeros(self.num_envs, 3, device=self.device)
 
@@ -5741,28 +5742,42 @@ class MarioButtonCommand(CommandTerm):
         n = len(env_ids)
         if n == 0:
             return
-        # Categories: idle, left, right, jump, and right+jump. The combination
-        # is important: platform games need direction to remain held on takeoff.
-        probabilities = torch.tensor(
-            [
-                self.cfg.idle_prob,
-                self.cfg.left_prob,
-                self.cfg.right_prob,
-                self.cfg.jump_prob,
-                self.cfg.right_jump_prob,
-            ],
+        # Explicit buckets keep rare-but-essential inputs alive. Independent
+        # random axes would make exact neutral and A+B far too rare.
+        commands = torch.tensor(
+            (
+                (0.0, 0.0, 0.0),  # neutral
+                (-1.0, 0.0, 0.0),  # left
+                (1.0, 0.0, 0.0),  # right
+                (0.0, 1.0, 0.0),  # up
+                (0.0, -1.0, 0.0),  # down
+                (0.0, 0.0, 1.0),  # A
+                (0.0, 0.0, -1.0),  # B
+                (0.0, 0.0, 2.0),  # A+B
+                (-1.0, 0.0, 1.0),  # left+A
+                (-1.0, 0.0, -1.0),  # left+B
+                (-1.0, 0.0, 2.0),  # left+A+B
+                (1.0, 0.0, 1.0),  # right+A
+                (1.0, 0.0, -1.0),  # right+B
+                (1.0, 0.0, 2.0),  # right+A+B
+            ),
             device=self.device,
         )
+        probabilities = torch.tensor(
+            self.cfg.category_weights,
+            device=self.device,
+        )
+        if probabilities.numel() != commands.shape[0]:
+            raise ValueError(
+                f"expected {commands.shape[0]} Mario category weights, "
+                f"got {probabilities.numel()}"
+            )
         if torch.any(probabilities < 0.0) or probabilities.sum() <= 0.0:
-            raise ValueError("Mario button probabilities must be non-negative and non-zero")
+            raise ValueError(
+                "Mario category weights must be non-negative and non-zero"
+            )
         category = torch.multinomial(probabilities, n, replacement=True)
-        command = torch.zeros(n, 3, device=self.device)
-        command[category == 1, 0] = 1.0
-        command[category == 2, 1] = 1.0
-        command[category == 3, 2] = 1.0
-        command[category == 4, 1] = 1.0
-        command[category == 4, 2] = 1.0
-        self._command[env_ids] = command
+        self._command[env_ids] = commands[category]
 
     def _update_command(self) -> None:
         pass
@@ -5772,94 +5787,191 @@ class MarioButtonCommand(CommandTerm):
 
 
 @_dataclass(kw_only=True)
-class MarioButtonCommandCfg(CommandTermCfg):
-    class_type: type = MarioButtonCommand
-    idle_prob: float = 0.15
-    left_prob: float = 0.20
-    right_prob: float = 0.25
-    jump_prob: float = 0.20
-    right_jump_prob: float = 0.20
+class MarioNesCommandCfg(CommandTermCfg):
+    class_type: type = MarioNesCommand
+    # Same order as the explicit command table above. Sums to 1.0 by default.
+    category_weights: tuple[float, ...] = (
+        0.10,  # neutral
+        0.08,  # left
+        0.10,  # right
+        0.04,  # up
+        0.08,  # down
+        0.10,  # A
+        0.08,  # B
+        0.07,  # A+B
+        0.07,  # left+A
+        0.05,  # left+B
+        0.04,  # left+A+B
+        0.08,  # right+A
+        0.06,  # right+B
+        0.05,  # right+A+B
+    )
 
-    def build(self, env: ManagerBasedRlEnv) -> "MarioButtonCommand":
-        return MarioButtonCommand(self, env)
+    def build(self, env: ManagerBasedRlEnv) -> "MarioNesCommand":
+        return MarioNesCommand(self, env)
 
 
-_MARIO_PAD_JOINTS = (
-    "passive_left_pad",
-    "passive_right_pad",
-    "passive_jump_pad",
+_MARIO_NES_JOINTS = (
+    "passive_dpad_x",
+    "passive_dpad_y",
+    "passive_ab_rocker",
+    "passive_ab_press",
 )
 
 
-def mario_pad_travel(
+def mario_nes_joint_state(
     env: ManagerBasedRlEnv,
-    asset_name: str = "controller_pads",
+    asset_name: str = "nes_controller",
 ) -> torch.Tensor:
-    """Return positive plunger travel in ``[left, right, jump]`` order."""
+    """Return ``[dpad_x, dpad_y, ab_angle, positive_press_travel]``."""
 
     asset: Entity = env.scene[asset_name]
-    cache_name = f"_mario_pad_joint_ids_{asset_name}"
+    cache_name = f"_mario_nes_joint_ids_{asset_name}"
     if not hasattr(env, cache_name):
         ids = []
-        for joint_name in _MARIO_PAD_JOINTS:
+        for joint_name in _MARIO_NES_JOINTS:
             matched, _ = asset.find_joints((f"^{joint_name}$",))
             if len(matched) != 1:
                 raise RuntimeError(f"expected one controller joint named {joint_name}")
             ids.append(matched[0])
         setattr(env, cache_name, torch.tensor(ids, device=env.device, dtype=torch.long))
     joint_ids = getattr(env, cache_name)
-    # The MJCF slide range is [-8 mm, 0], so depression is negative qpos.
-    return torch.clamp(-asset.data.joint_pos[:, joint_ids], min=0.0, max=0.008)
+    state = asset.data.joint_pos[:, joint_ids].clone()
+    # The chord slide range is [-2 mm, 0], so depression is negative qpos.
+    state[:, 3] = torch.clamp(-state[:, 3], min=0.0, max=0.002)
+    return state
 
 
-def mario_pad_activation(
+def _signed_axis_activation(
+    value: torch.Tensor,
+    activate_threshold: float,
+    release_threshold: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    if release_threshold < 0.0 or activate_threshold <= release_threshold:
+        raise ValueError(
+            "activate_threshold must be greater than non-negative release_threshold"
+        )
+    scale = activate_threshold - release_threshold
+    positive = torch.clamp((value - release_threshold) / scale, 0.0, 1.0)
+    negative = torch.clamp((-value - release_threshold) / scale, 0.0, 1.0)
+    return positive, negative
+
+
+def mario_nes_activation(
     env: ManagerBasedRlEnv,
-    asset_name: str = "controller_pads",
-    press_travel: float = 0.004,
-    release_travel: float = 0.002,
+    asset_name: str = "nes_controller",
+    activate_angle: float = 0.02443461,
+    release_angle: float = 0.01396263,
+    chord_press_travel: float = 0.0016,
+    chord_release_travel: float = 0.0010,
 ) -> torch.Tensor:
-    """Continuous pad activation with a deadband for unloaded cap sag."""
+    """Continuous ``[up, down, left, right, A, B]`` physical activation."""
 
-    if release_travel < 0.0 or press_travel <= release_travel:
-        raise ValueError("press_travel must be greater than non-negative release_travel")
-    travel = mario_pad_travel(env, asset_name)
-    return torch.clamp(
-        (travel - release_travel) / (press_travel - release_travel), 0.0, 1.0
+    state = mario_nes_joint_state(env, asset_name)
+    right, left = _signed_axis_activation(
+        state[:, 0], activate_angle, release_angle
     )
+    up, down = _signed_axis_activation(
+        state[:, 1], activate_angle, release_angle
+    )
+    a_tilt, b_tilt = _signed_axis_activation(
+        state[:, 2], activate_angle, release_angle
+    )
+    if chord_release_travel < 0.0 or chord_press_travel <= chord_release_travel:
+        raise ValueError(
+            "chord_press_travel must exceed non-negative chord_release_travel"
+        )
+    chord = torch.clamp(
+        (state[:, 3] - chord_release_travel)
+        / (chord_press_travel - chord_release_travel),
+        0.0,
+        1.0,
+    )
+    a = torch.maximum(a_tilt, chord)
+    b = torch.maximum(b_tilt, chord)
+    return torch.stack((up, down, left, right, a, b), dim=-1)
 
 
-def mario_requested_pad_reward(
+def mario_nes_requested_buttons(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
-    asset_name: str = "controller_pads",
-    press_travel: float = 0.004,
-    release_travel: float = 0.002,
 ) -> torch.Tensor:
-    """Reward requested pad travel; idle requests intentionally pay zero."""
+    """Decode the compact 3D command into six requested button levels."""
 
-    requested = env.command_manager.get_command(command_name)
-    activation = mario_pad_activation(
-        env, asset_name, press_travel, release_travel
+    command = env.command_manager.get_command(command_name)
+    x, y, ab = command[:, 0], command[:, 1], command[:, 2]
+    chord = ab > 1.5
+    return torch.stack(
+        (
+            y > 0.5,
+            y < -0.5,
+            x < -0.5,
+            x > 0.5,
+            (ab > 0.5) | chord,
+            (ab < -0.5) | chord,
+        ),
+        dim=-1,
+    ).to(dtype=command.dtype)
+
+
+def mario_requested_button_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    asset_name: str = "nes_controller",
+    activate_angle: float = 0.02443461,
+    release_angle: float = 0.01396263,
+    chord_press_travel: float = 0.0016,
+    chord_release_travel: float = 0.0010,
+) -> torch.Tensor:
+    """Reward requested physical inputs; neutral requests pay zero."""
+
+    requested = mario_nes_requested_buttons(env, command_name)
+    activation = mario_nes_activation(
+        env,
+        asset_name,
+        activate_angle,
+        release_angle,
+        chord_press_travel,
+        chord_release_travel,
     )
     requested_count = requested.sum(dim=-1)
-    score = (activation * requested).sum(dim=-1) / torch.clamp(requested_count, min=1.0)
+    score = (activation * requested).sum(dim=-1) / torch.clamp(
+        requested_count,
+        min=1.0,
+    )
     return torch.where(requested_count > 0.0, score, torch.zeros_like(score))
 
 
-def mario_unrequested_pad_cost(
+def mario_unrequested_button_cost(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
-    asset_name: str = "controller_pads",
-    press_travel: float = 0.004,
-    release_travel: float = 0.002,
+    asset_name: str = "nes_controller",
+    activate_angle: float = 0.02443461,
+    release_angle: float = 0.01396263,
+    chord_press_travel: float = 0.0016,
+    chord_release_travel: float = 0.0010,
 ) -> torch.Tensor:
-    """Non-negative cost for pressing pads absent from the request."""
+    """Non-negative cost for physical inputs absent from the request."""
 
-    requested = env.command_manager.get_command(command_name)
-    activation = mario_pad_activation(
-        env, asset_name, press_travel, release_travel
+    requested = mario_nes_requested_buttons(env, command_name)
+    activation = mario_nes_activation(
+        env,
+        asset_name,
+        activate_angle,
+        release_angle,
+        chord_press_travel,
+        chord_release_travel,
     )
     return (activation * (1.0 - requested)).sum(dim=-1)
+
+
+def feet_contact_loss_cost(
+    env: ManagerBasedRlEnv,
+    sensor_name: str = "feet_ground_contact",
+) -> torch.Tensor:
+    """Non-negative 0/0.5/1 cost when zero/one/two feet lose support."""
+
+    return 1.0 - feet_grounded_reward(env, sensor_name)
 
 
 def head_pose_tracking(
