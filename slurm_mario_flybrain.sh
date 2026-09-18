@@ -21,6 +21,25 @@ REPO_DIR="${MICRODUCK_REPO_DIR:-${SCRIPT_DIR}}"
 : "${SCRATCH:?The cluster must provide SCRATCH (for example /scratch/$USER).}"
 : "${MARIO_POLICY:?Set MARIO_POLICY to the exported 61D Mario-controller ONNX path.}"
 
+# Slurm starts the batch process in a scheduler-selected working directory, so
+# a relative path exported by the submit shell can point somewhere else on the
+# compute node. Resolve it while we still have the submit shell's cwd. The
+# resulting absolute path must live on storage shared by login/compute nodes.
+if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+    if [[ "${MARIO_POLICY}" != /* ]]; then
+        policy_dir="$(cd -- "$(dirname -- "${MARIO_POLICY}")" && pwd)"
+        MARIO_POLICY="${policy_dir}/$(basename -- "${MARIO_POLICY}")"
+    fi
+    if [[ ! -f "${MARIO_POLICY}" ]]; then
+        echo "ERROR: MARIO_POLICY does not exist on the submit node: ${MARIO_POLICY}" >&2
+        exit 1
+    fi
+elif [[ "${MARIO_POLICY}" != /* ]]; then
+    # Also support `sbatch slurm_mario_flybrain.sh` directly. Slurm records the
+    # submit cwd explicitly; use it instead of whichever cwd the job receives.
+    MARIO_POLICY="${SLURM_SUBMIT_DIR:-${REPO_DIR}}/${MARIO_POLICY}"
+fi
+
 MARIO_RUN_TAG="${MARIO_RUN_TAG:-default}"
 if ! [[ "${MARIO_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "ERROR: MARIO_RUN_TAG may contain only letters, digits, '.', '_', and '-'." >&2
@@ -54,6 +73,7 @@ command -v uv >/dev/null 2>&1 || {
 }
 if [[ ! -f "${MARIO_POLICY}" ]]; then
     echo "ERROR: MARIO_POLICY does not exist on the compute node: ${MARIO_POLICY}" >&2
+    echo "Place the ONNX on a filesystem shared by the login and compute nodes." >&2
     exit 1
 fi
 

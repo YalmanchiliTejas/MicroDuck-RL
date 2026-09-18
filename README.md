@@ -130,6 +130,18 @@ uv run train Mjlab-MarioController-Flat-MicroDuck \
     --env.scene.num-envs 64 --agent.max_iterations 5
 ```
 
+On Slurm, use the dedicated launcher. It submits a resumable dependency chain
+and exports the final normalized ONNX policy to the path printed at submission:
+
+```bash
+# Required cheap smoke test.
+MARIO_CONTROLLER_RUN_TAG=smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+    ITERATIONS_PER_JOB=5 MAX_JOBS=1 ./slurm_mario_controller.sh
+
+# Full 5,000-iteration controller training.
+./slurm_mario_controller.sh
+```
+
 The runtime loop is intentionally one-way:
 
 ```text
