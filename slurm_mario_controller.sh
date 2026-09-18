@@ -3,13 +3,15 @@
 # final checkpoint to a normalized ONNX policy.
 #
 # Smoke test first:
-#   MARIO_BALANCE_CHECKPOINT=/path/to/proven/model_N.pt \
-#     MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+#   MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
 #     ITERATIONS_PER_JOB=5 CHECKPOINT_INTERVAL=5 MAX_JOBS=1 \
 #     ./slurm_mario_controller.sh
 #
-# Full training:
+# Full training from scratch:
 #   ./slurm_mario_controller.sh
+#
+# Optional actor-only warm start, when a proven 61D checkpoint exists:
+#   MARIO_BALANCE_CHECKPOINT=/path/to/proven/model_N.pt ./slurm_mario_controller.sh
 
 #SBATCH --job-name=microduck-mario-nes
 #SBATCH --nodes=1
@@ -173,21 +175,22 @@ else
     completed_iterations=0
 fi
 
-# A new NES policy must inherit balance from a compatible 61D MicroDuck actor.
-# Full PPO resume is intentionally not used: the critic observation size,
-# optimizer, normalizer command slots, and command semantics differ.
+# A compatible 61D actor checkpoint is an optional accelerator. Full PPO
+# resume is intentionally not used: the critic observation size, optimizer,
+# normalizer command slots, and command semantics differ. Without a source
+# checkpoint, the balance-heavy Mario reward stack trains the actor directly.
 if (( completed_iterations == 0 )); then
-    if [[ -z "${MARIO_BALANCE_CHECKPOINT}" ]]; then
-        echo "ERROR: a new run requires MARIO_BALANCE_CHECKPOINT=/path/to/model_N.pt" >&2
-        echo "Use a proven 61D standing/velocity checkpoint; only its actor backbone is loaded." >&2
-        exit 1
+    if [[ -n "${MARIO_BALANCE_CHECKPOINT}" ]]; then
+        if [[ ! -f "${MARIO_BALANCE_CHECKPOINT}" ]]; then
+            echo "ERROR: balance checkpoint does not exist: ${MARIO_BALANCE_CHECKPOINT}" >&2
+            exit 1
+        fi
+        export MICRODUCK_ACTOR_WARMSTART="${MARIO_BALANCE_CHECKPOINT}"
+        echo "Actor warm start: ${MICRODUCK_ACTOR_WARMSTART}"
+    else
+        unset MICRODUCK_ACTOR_WARMSTART || true
+        echo "No balance checkpoint supplied; training the Mario balance and button skills from scratch."
     fi
-    if [[ ! -f "${MARIO_BALANCE_CHECKPOINT}" ]]; then
-        echo "ERROR: balance checkpoint does not exist: ${MARIO_BALANCE_CHECKPOINT}" >&2
-        exit 1
-    fi
-    export MICRODUCK_ACTOR_WARMSTART="${MARIO_BALANCE_CHECKPOINT}"
-    echo "Actor warm start: ${MICRODUCK_ACTOR_WARMSTART}"
 else
     unset MICRODUCK_ACTOR_WARMSTART || true
 fi
