@@ -142,6 +142,16 @@ MARIO_CONTROLLER_RUN_TAG=smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
 ./slurm_mario_controller.sh
 ```
 
+After checkpoints exist, render a deterministic six-second rollout from every
+saved Mario-controller checkpoint in a separate GPU job:
+
+```bash
+MARIO_CONTROLLER_RUN_TAG=default ./slurm_mario_controller_videos.sh
+```
+
+Videos are written beneath
+`$SCRATCH/microduck-rl/mario-controller-default/videos/checkpoints/`.
+
 The runtime loop is intentionally one-way:
 
 ```text

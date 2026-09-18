@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Render one deterministic GrapePick rollout for every saved checkpoint.
+"""Render one deterministic rollout for every saved policy checkpoint.
 
 Run this alongside training, not inside the training process.  Rendering one
 environment is intentionally kept separate from the 4,096-environment PPO
@@ -23,7 +23,7 @@ import time
 from pathlib import Path
 
 
-TASK_ID = "Mjlab-GrapePick-Flat-MicroDuck"
+DEFAULT_TASK_ID = "Mjlab-GrapePick-Flat-MicroDuck"
 _CHECKPOINT_RE = re.compile(r"^model_(\d+)\.pt$")
 
 
@@ -54,12 +54,12 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
     # export.py owns the correct policy loading and VideoRecorder wiring.  It
     # also exports an ONNX as part of its normal contract; place that transient
     # file in a temporary directory and discard it afterwards.
-    with tempfile.TemporaryDirectory(prefix="grape-video-onnx-") as temp_dir:
+    with tempfile.TemporaryDirectory(prefix="checkpoint-video-onnx-") as temp_dir:
         command = [
             args.uv_command,
             "run",
             "scripts/export.py",
-            TASK_ID,
+            args.task_id,
             "--checkpoint-file", str(checkpoint.resolve()),
             "--onnx-file", str(Path(temp_dir) / "policy.onnx"),
             # ExportConfig uses tyro with FlagConversionOff, so Boolean
@@ -92,6 +92,7 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
     marker = completion_marker(args.video_dir, iteration)
     marker.write_text(json.dumps({
         "checkpoint": str(checkpoint.resolve()),
+        "task_id": args.task_id,
         "iteration": iteration,
         "seed": args.seed,
         "video_length": args.video_length,
@@ -107,6 +108,8 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--task-id", default=DEFAULT_TASK_ID,
+                        help="Registered task used to load and evaluate each checkpoint.")
     parser.add_argument("--checkpoint-dir", type=Path, required=True,
                         help="Directory containing model_<iteration>.pt files.")
     parser.add_argument("--video-dir", type=Path, default=None,

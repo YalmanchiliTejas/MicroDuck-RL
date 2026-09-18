@@ -46,4 +46,21 @@ def test_default_video_covers_full_six_second_cycle(tmp_path, monkeypatch):
         "argv",
         ["record_grape_checkpoints.py", "--checkpoint-dir", str(tmp_path)],
     )
-    assert watcher.parse_args().video_length == 300
+    args = watcher.parse_args()
+    assert args.video_length == 300
+    assert args.task_id == watcher.DEFAULT_TASK_ID
+
+
+def test_task_id_can_select_another_policy_family(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "record_grape_checkpoints.py",
+            "--checkpoint-dir",
+            str(tmp_path),
+            "--task-id",
+            "Mjlab-MarioController-Flat-MicroDuck",
+        ],
+    )
+    assert watcher.parse_args().task_id == "Mjlab-MarioController-Flat-MicroDuck"

@@ -13,7 +13,7 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=16
-#SBATCH --gres=gpu:2
+#SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #SBATCH --partition=gpu
@@ -200,7 +200,6 @@ fi
 
 train_args=(
     "${TASK_ID}"
-    --gpu-ids all
     --env.scene.num-envs "${NUM_ENVS}"
     --agent.max-iterations "${runner_iterations}"
     --agent.save-interval "${CHECKPOINT_INTERVAL}"
