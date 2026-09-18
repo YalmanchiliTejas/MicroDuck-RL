@@ -5860,10 +5860,10 @@ def _signed_axis_activation(
 def mario_nes_activation(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.02443461,
-    release_angle: float = 0.01396263,
-    chord_press_travel: float = 0.0016,
-    chord_release_travel: float = 0.0010,
+    activate_angle: float = 0.01745329,
+    release_angle: float = 0.00872665,
+    chord_press_travel: float = 0.00135,
+    chord_release_travel: float = 0.0009,
 ) -> torch.Tensor:
     """Continuous ``[up, down, left, right, A, B]`` physical activation."""
 
@@ -5918,10 +5918,10 @@ def mario_requested_button_reward(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.02443461,
-    release_angle: float = 0.01396263,
-    chord_press_travel: float = 0.0016,
-    chord_release_travel: float = 0.0010,
+    activate_angle: float = 0.01745329,
+    release_angle: float = 0.00872665,
+    chord_press_travel: float = 0.00135,
+    chord_release_travel: float = 0.0009,
 ) -> torch.Tensor:
     """Reward requested physical inputs; neutral requests pay zero."""
 
@@ -5946,10 +5946,10 @@ def mario_unrequested_button_cost(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.02443461,
-    release_angle: float = 0.01396263,
-    chord_press_travel: float = 0.0016,
-    chord_release_travel: float = 0.0010,
+    activate_angle: float = 0.01745329,
+    release_angle: float = 0.00872665,
+    chord_press_travel: float = 0.00135,
+    chord_release_travel: float = 0.0009,
 ) -> torch.Tensor:
     """Non-negative cost for physical inputs absent from the request."""
 

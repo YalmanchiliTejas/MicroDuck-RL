@@ -9,14 +9,14 @@ from dataclasses import dataclass
 class DPadCalibration:
     """D-pad limits and thresholds, in radians.
 
-    At the default 2 degree hard stop, the 0.7/0.4 ratios activate at 1.4
-    degrees and release at 0.8 degrees. Across a 53 mm half-length plate this
-    is approximately 1.3 mm and 0.7 mm of edge displacement.
+    At the default 2 degree hard stop, the 0.5/0.25 ratios activate at 1.0
+    degree and release at 0.5 degrees. Across a 53 mm half-length plate this
+    is approximately 0.9 mm and 0.5 mm of edge displacement.
     """
 
     max_tilt: float = 0.034906585  # 2 degrees
-    activate_ratio: float = 0.7
-    release_ratio: float = 0.4
+    activate_ratio: float = 0.5
+    release_ratio: float = 0.25
 
     def __post_init__(self) -> None:
         if self.max_tilt <= 0.0:

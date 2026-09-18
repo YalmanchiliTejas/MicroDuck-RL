@@ -29,10 +29,10 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 
 EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (0.25, 0.75)
-ACTIVATE_ANGLE = math.radians(1.4)
-RELEASE_ANGLE = math.radians(0.8)
-CHORD_PRESS_TRAVEL = 0.0016
-CHORD_RELEASE_TRAVEL = 0.0010
+ACTIVATE_ANGLE = math.radians(1.0)
+RELEASE_ANGLE = math.radians(0.5)
+CHORD_PRESS_TRAVEL = 0.00135
+CHORD_RELEASE_TRAVEL = 0.0009
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -118,6 +118,20 @@ def make_microduck_mario_env_cfg(play: bool = False):
     ):
         cfg.rewards.pop(name, None)
 
+    # A button request is not a walking command. The inherited velocity pose
+    # term normally loosens its leg tolerances whenever twist is non-zero;
+    # here that made the robot abandon its standing pose exactly when it was
+    # asked to press a button. Keep the standing tolerances for every request
+    # and make balance worth more than a perfect button press.
+    pose_params = cfg.rewards["pose"].params
+    pose_params["std_walking"] = deepcopy(pose_params["std_standing"])
+    pose_params["std_running"] = deepcopy(pose_params["std_standing"])
+    cfg.rewards["pose"].weight = 2.0
+    cfg.rewards["upright"].weight = 6.0
+    cfg.rewards["upright"].params["std"] = math.radians(10.0)
+    cfg.rewards["body_ang_vel"].weight = -0.15
+    cfg.rewards["angular_momentum"].weight = -0.05
+
     controller_reward_params = {
         "command_name": "twist",
         "asset_name": "nes_controller",
@@ -128,19 +142,19 @@ def make_microduck_mario_env_cfg(play: bool = False):
     }
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
-        weight=8.0,
+        weight=4.0,
         params=controller_reward_params,
     )
     cfg.rewards["unrequested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_unrequested_button_cost,
-        weight=-5.0,
+        weight=-4.0,
         params=controller_reward_params,
     )
     # Losing support can make a button press easier in simulation but violates
     # the physical design. This is a cost (not a constant positive jackpot).
     cfg.rewards["foot_contact_loss"] = RewardTermCfg(
         func=microduck_mdp.feet_contact_loss_cost,
-        weight=-4.0,
+        weight=-6.0,
         params={
             "sensor_name": controller_feet_contact.name,
         },
@@ -172,3 +186,8 @@ MicroduckMarioRlCfg = deepcopy(MicroduckRlCfg)
 MicroduckMarioRlCfg.experiment_name = "mario_nes_controller"
 MicroduckMarioRlCfg.run_name = "mario_nes_controller"
 MicroduckMarioRlCfg.max_iterations = 5_000
+# A warm-started balance mean should not immediately be destroyed by the
+# velocity recipe's std=1.0 random actions. The source checkpoint's learned
+# std is deliberately not copied; 0.20 leaves task exploration without the
+# catastrophic first-step thrashing seen in the from-scratch run.
+MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] = 0.20

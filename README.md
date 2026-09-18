@@ -96,7 +96,7 @@ Keyboard-driven (velocity commands, `G` ground pick, `Y` sit/stand, `R` roulade,
 
 The Mario controller is a pair of physical, spring-centered surfaces. The
 left foot stays planted on a two-axis D-pad; the right foot stays planted on
-an A/B rocker. A firmer 1.6 mm right-foot press supplies the A+B chord that a
+an A/B rocker. A firmer 1.35 mm right-foot press supplies the A+B chord that a
 single fore/aft rocker cannot otherwise represent. Every moving joint uses
 the required `passive_*` prefix. Emulator code remains separate from the
 physical asset and decoder.
@@ -133,13 +133,20 @@ and exports the final normalized ONNX policy to the path printed at submission:
 
 ```bash
 # Required cheap smoke test.
-MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+MARIO_BALANCE_CHECKPOINT=/path/to/proven/velocity/model_N.pt \
+    MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
     ITERATIONS_PER_JOB=5 CHECKPOINT_INTERVAL=5 MAX_JOBS=1 \
     ./slurm_mario_controller.sh
 
 # Full 5,000-iteration controller training.
-./slurm_mario_controller.sh
+MARIO_BALANCE_CHECKPOINT=/path/to/proven/velocity/model_N.pt \
+    MARIO_CONTROLLER_RUN_TAG=nes-v3 ./slurm_mario_controller.sh
 ```
+
+For a new run, the launcher warm-starts only the proven policy's 61D actor
+backbone and proprioceptive normalizer. It deliberately resets the critic,
+optimizer, exploration standard deviation, and all command-slot semantics;
+full `--resume` from a velocity checkpoint is incompatible with this task.
 
 After checkpoints exist, render a deterministic six-second rollout from every
 saved Mario-controller checkpoint in a separate GPU job:

@@ -85,7 +85,7 @@ def annotate(image: Image.Image, telemetry: str) -> None:
         y += 23
     draw.text(
         (panel[0] + 22, panel[3] - 38),
-        "ON  1.4 deg  |  OFF  0.8 deg",
+        "ON  1.0 deg  |  OFF  0.5 deg",
         font=mono_font,
         fill=(255, 205, 95),
     )

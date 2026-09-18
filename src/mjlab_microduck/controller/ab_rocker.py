@@ -8,10 +8,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class ABRockerCalibration:
     max_tilt: float = 0.034906585  # 2 degrees
-    activate_ratio: float = 0.7
-    release_ratio: float = 0.4
-    chord_press_travel: float = 0.0016
-    chord_release_travel: float = 0.0010
+    activate_ratio: float = 0.5
+    release_ratio: float = 0.25
+    chord_press_travel: float = 0.00135
+    chord_release_travel: float = 0.0009
 
     def __post_init__(self) -> None:
         if self.max_tilt <= 0.0:

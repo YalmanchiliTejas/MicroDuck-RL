@@ -1,3 +1,6 @@
+import os
+
+from mjlab_microduck.actor_warmstart import warmstart_actor_from_checkpoint
 from mjlab_microduck.train_hook import maybe_submit_to_hf_jobs
 
 # `train <task> ... --hf-jobs` submits to HF Jobs and exits here, before any
@@ -13,6 +16,17 @@ from mjlab.tasks.velocity.rl import VelocityOnPolicyRunner
 class MicroduckOnPolicyRunner(VelocityOnPolicyRunner):
     def __init__(self, env, train_cfg: dict, log_dir=None, device="cpu", **kwargs):
         super().__init__(env, train_cfg, log_dir, device, **kwargs)
+        actor_warmstart = os.environ.get("MICRODUCK_ACTOR_WARMSTART")
+        if actor_warmstart:
+            source_iteration = warmstart_actor_from_checkpoint(
+                self.alg.actor,
+                actor_warmstart,
+            )
+            print(
+                "[INFO] Actor-only warm start from "
+                f"{actor_warmstart} (source iteration {source_iteration}); "
+                "critic, optimizer, exploration std, and command semantics reset."
+            )
         # resolve_symmetry_config injects _env into train_cfg["algorithm"]["symmetry_cfg"]
         # in-place, sharing the same dict object with self.alg.symmetry.  Replace the
         # train_cfg reference with a copy that omits _env so dump_yaml can serialize the

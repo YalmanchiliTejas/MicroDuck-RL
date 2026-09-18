@@ -1,7 +1,9 @@
+import math
 from pathlib import Path
 from types import SimpleNamespace
 
 import mujoco
+import pytest
 import torch
 from mjlab.tasks.velocity import mdp
 
@@ -47,8 +49,22 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
         assert name not in rewards
     params = rewards["requested_button"].params
     assert params["release_angle"] < params["activate_angle"]
-    assert params["chord_release_travel"] == 0.001
-    assert params["chord_press_travel"] == 0.0016
+    assert params["activate_angle"] == pytest.approx(math.radians(1.0))
+    assert params["release_angle"] == pytest.approx(math.radians(0.5))
+    assert params["chord_release_travel"] == 0.0009
+    assert params["chord_press_travel"] == 0.00135
+
+
+def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
+    rewards = make_microduck_mario_env_cfg().rewards
+    assert rewards["upright"].weight > rewards["requested_button"].weight
+    assert rewards["foot_contact_loss"].weight < -rewards["requested_button"].weight
+    assert rewards["body_ang_vel"].weight == -0.15
+    assert rewards["angular_momentum"].weight == -0.05
+    assert rewards["pose"].weight == 2.0
+    pose_params = rewards["pose"].params
+    assert pose_params["std_walking"] == pose_params["std_standing"]
+    assert pose_params["std_running"] == pose_params["std_standing"]
 
 
 def test_spawn_is_aligned_with_fixed_pad_layout():
@@ -75,12 +91,12 @@ def test_unloaded_controller_settles_inside_all_release_thresholds():
     for name in ("passive_dpad_x", "passive_dpad_y", "passive_ab_rocker"):
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
         angle = abs(float(data.qpos[model.jnt_qposadr[joint_id]]))
-        assert angle < 0.01396263
+        assert angle < math.radians(0.5)
     press_id = mujoco.mj_name2id(
         model, mujoco.mjtObj.mjOBJ_JOINT, "passive_ab_press"
     )
     press_travel = -float(data.qpos[model.jnt_qposadr[press_id]])
-    assert press_travel < 0.001
+    assert press_travel < 0.0009
 
 
 def test_compact_command_decodes_all_six_buttons_and_chords():
