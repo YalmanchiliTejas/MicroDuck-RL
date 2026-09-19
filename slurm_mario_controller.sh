@@ -35,6 +35,7 @@ ITERATIONS_PER_JOB="${ITERATIONS_PER_JOB:-4000}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 MARIO_CONTROLLER_RUN_TAG="${MARIO_CONTROLLER_RUN_TAG:-default}"
 MARIO_BALANCE_CHECKPOINT="${MARIO_BALANCE_CHECKPOINT:-}"
+MARIO_VIDEO_ONLY="${MARIO_VIDEO_ONLY:-0}"
 
 for value_name in NUM_ENVS TARGET_ITERATIONS ITERATIONS_PER_JOB CHECKPOINT_INTERVAL; do
     value="${!value_name}"
@@ -45,6 +46,10 @@ for value_name in NUM_ENVS TARGET_ITERATIONS ITERATIONS_PER_JOB CHECKPOINT_INTER
 done
 if ! [[ "${MARIO_CONTROLLER_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "ERROR: MARIO_CONTROLLER_RUN_TAG may contain only letters, digits, '.', '_', and '-'." >&2
+    exit 1
+fi
+if [[ "${MARIO_VIDEO_ONLY}" != "0" && "${MARIO_VIDEO_ONLY}" != "1" ]]; then
+    echo "ERROR: MARIO_VIDEO_ONLY must be 0 or 1." >&2
     exit 1
 fi
 
@@ -131,6 +136,35 @@ echo "Environments: ${NUM_ENVS}"
 echo "CUDA devices: ${CUDA_VISIBLE_DEVICES:-not set}"
 
 uv sync --frozen
+
+# The video launcher submits this proven batch script rather than maintaining
+# a second Slurm descriptor. This keeps job submission byte-for-byte on the
+# same path as controller training; only the compute-node payload differs.
+if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
+    VIDEO_DIR="${SCRATCH_ROOT}/videos/checkpoints"
+    if [[ ! -d "${TENSORBOARD_DIR}" ]]; then
+        echo "ERROR: checkpoint directory does not exist: ${TENSORBOARD_DIR}" >&2
+        exit 1
+    fi
+    mkdir -p "${VIDEO_DIR}"
+    export MUJOCO_GL=egl
+    export PYOPENGL_PLATFORM=egl
+    srun uv run python scripts/record_grape_checkpoints.py \
+        --task-id "${TASK_ID}" \
+        --checkpoint-dir "${TENSORBOARD_DIR}" \
+        --video-dir "${VIDEO_DIR}" \
+        --video-length 300 \
+        --video-width 960 \
+        --video-height 720 \
+        --video-distance 0.55 \
+        --video-azimuth 145 \
+        --video-elevation -32 \
+        --device cuda:0 \
+        --mujoco-gl egl \
+        --once
+    echo "Mario-controller checkpoint videos: ${VIDEO_DIR}"
+    exit 0
+fi
 
 find_latest_checkpoint() {
     latest_checkpoint=""
