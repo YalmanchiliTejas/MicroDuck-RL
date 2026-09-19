@@ -7,9 +7,9 @@
 #SBATCH --job-name=microduck-mario-videos
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=4
+#SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
-#SBATCH --mem=16G
+#SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #SBATCH --partition=gpu
 
@@ -33,7 +33,7 @@ SLURM_DIR="${SCRATCH_ROOT}/video-slurm"
 mkdir -p "${VIDEO_DIR}" "${SLURM_DIR}"
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
-    submit_args=(
+    common_sbatch_args=(
         --parsable
         --output="${SLURM_DIR}/slurm-%j.out"
         --error="${SLURM_DIR}/slurm-%j.err"
@@ -41,7 +41,9 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     )
     echo "Checkpoints: ${CHECKPOINT_DIR}"
     echo "Videos:     ${VIDEO_DIR}"
-    job_id="$(sbatch "${submit_args[@]}" "${BASH_SOURCE[0]}")"
+    job_id="$(sbatch \
+        "${common_sbatch_args[@]}" \
+        "${BASH_SOURCE[0]}")"
     job_id="${job_id%%;*}"
     echo "Submitted Mario-controller video job: ${job_id}"
     echo "Slurm log: ${SLURM_DIR}/slurm-${job_id}.out"
@@ -67,7 +69,7 @@ export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/uv-python"
 export WARP_CACHE_PATH="${SCRATCH_ROOT}/warp-cache"
 export MPLCONFIGDIR="${SCRATCH_ROOT}/matplotlib-cache"
 export WANDB_MODE="disabled"
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
 
