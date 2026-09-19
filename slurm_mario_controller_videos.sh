@@ -4,8 +4,14 @@
 #
 #   MARIO_CONTROLLER_RUN_TAG=controller-v1 ./slurm_mario_controller_videos.sh
 
-# Slurm resources are supplied explicitly in submit_args below. Keeping them
-# in one place avoids site-specific #SBATCH parser/override ambiguity.
+#SBATCH --job-name=microduck-mario-videos
+#SBATCH --nodes=1
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=4
+#SBATCH --gres=gpu:1
+#SBATCH --mem=16G
+#SBATCH --time=04:00:00
+#SBATCH --partition=gpu
 
 set -euo pipefail
 
@@ -27,27 +33,19 @@ SLURM_DIR="${SCRATCH_ROOT}/video-slurm"
 mkdir -p "${VIDEO_DIR}" "${SLURM_DIR}"
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
-    submit_partition="${SLURM_PARTITION:-gpu}"
-    submit_account="${SLURM_ACCOUNT:-scholar}"
     submit_args=(
         --parsable
-        --job-name=microduck-mario-videos
-        --nodes=1
-        --ntasks=1
-        --cpus-per-task=16
-        --gres=gpu:1
-        --mem=64G
-        --time=04:00:00
-        --partition="${submit_partition}"
-        --account="${submit_account}"
         --output="${SLURM_DIR}/slurm-%j.out"
         --error="${SLURM_DIR}/slurm-%j.err"
         --export="ALL,MARIO_CONTROLLER_RUN_TAG=${MARIO_CONTROLLER_RUN_TAG},MICRODUCK_REPO_DIR=${REPO_DIR}"
     )
     echo "Checkpoints: ${CHECKPOINT_DIR}"
     echo "Videos:     ${VIDEO_DIR}"
-    echo "Slurm:      account=${submit_account} partition=${submit_partition} cpus=16 mem=64G gpu=1 time=04:00:00"
-    exec sbatch "${submit_args[@]}" "${BASH_SOURCE[0]}" "$@"
+    job_id="$(sbatch "${submit_args[@]}" "${BASH_SOURCE[0]}")"
+    job_id="${job_id%%;*}"
+    echo "Submitted Mario-controller video job: ${job_id}"
+    echo "Slurm log: ${SLURM_DIR}/slurm-${job_id}.out"
+    exit 0
 fi
 
 if [[ ! -d "${CHECKPOINT_DIR}" ]]; then
@@ -69,7 +67,7 @@ export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/uv-python"
 export WARP_CACHE_PATH="${SCRATCH_ROOT}/warp-cache"
 export MPLCONFIGDIR="${SCRATCH_ROOT}/matplotlib-cache"
 export WANDB_MODE="disabled"
-export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
+export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-4}"
 export MUJOCO_GL="egl"
 export PYOPENGL_PLATFORM="egl"
 
@@ -87,7 +85,6 @@ srun uv run python scripts/record_grape_checkpoints.py \
     --video-elevation -32 \
     --device cuda:0 \
     --mujoco-gl egl \
-    --once \
-    "$@"
+    --once
 
 echo "Mario-controller checkpoint videos: ${VIDEO_DIR}"
