@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
-# Train the low-level physical NES foot controller on Slurm and export the
-# final checkpoint to a normalized ONNX policy.
+# Train the low-level physical NES foot controller on Purdue CS Slurm and
+# export the final checkpoint to a normalized ONNX policy.
+#
+# Purdue CS jobs must be submitted from queue.cs.purdue.edu. The default
+# partition below is the department's V100-backed gorman-gpu partition.
 #
 # Smoke test first:
 #   MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
@@ -20,14 +23,35 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
-#SBATCH --partition=gpu
+#SBATCH --partition=gorman-gpu
 
 set -euo pipefail
 
 TASK_ID="Mjlab-MarioController-Flat-MicroDuck"
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${MICRODUCK_REPO_DIR:-${SCRIPT_DIR}}"
-: "${SCRATCH:?The cluster must provide SCRATCH (for example /scratch/$USER).}"
+
+# Purdue CS home directories have a small quota. Keep the environment,
+# checkpoints, caches, logs, and videos in the account's scratch directory.
+# MICRODUCK_RUN_ROOT can override this when a different shared filesystem was
+# assigned to the account.
+if [[ -n "${MICRODUCK_RUN_ROOT:-}" ]]; then
+    RUNS_ROOT="${MICRODUCK_RUN_ROOT}"
+elif [[ -d "${HOME}/scratch" ]]; then
+    RUNS_ROOT="${HOME}/scratch/microduck-rl"
+elif [[ -n "${SCRATCH:-}" ]]; then
+    RUNS_ROOT="${SCRATCH}/microduck-rl"
+else
+    echo "ERROR: no shared scratch directory was found." >&2
+    echo "Purdue CS users should have \${HOME}/scratch; otherwise set MICRODUCK_RUN_ROOT" >&2
+    echo "to an absolute directory visible from queue.cs and the GPU nodes." >&2
+    exit 1
+fi
+if [[ "${RUNS_ROOT}" != /* ]]; then
+    echo "ERROR: MICRODUCK_RUN_ROOT must be an absolute path: ${RUNS_ROOT}" >&2
+    exit 1
+fi
+export MICRODUCK_RUN_ROOT="${RUNS_ROOT}"
 
 NUM_ENVS="${NUM_ENVS:-4096}"
 TARGET_ITERATIONS="${TARGET_ITERATIONS:-5000}"
@@ -36,6 +60,7 @@ CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 MARIO_CONTROLLER_RUN_TAG="${MARIO_CONTROLLER_RUN_TAG:-default}"
 MARIO_BALANCE_CHECKPOINT="${MARIO_BALANCE_CHECKPOINT:-}"
 MARIO_VIDEO_ONLY="${MARIO_VIDEO_ONLY:-0}"
+MARIO_SLURM_PARTITION="${MARIO_SLURM_PARTITION:-gorman-gpu}"
 
 for value_name in NUM_ENVS TARGET_ITERATIONS ITERATIONS_PER_JOB CHECKPOINT_INTERVAL; do
     value="${!value_name}"
@@ -53,18 +78,38 @@ if [[ "${MARIO_VIDEO_ONLY}" != "0" && "${MARIO_VIDEO_ONLY}" != "1" ]]; then
     exit 1
 fi
 
-SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-nes-controller-${MARIO_CONTROLLER_RUN_TAG}"
+SCRATCH_ROOT="${RUNS_ROOT}/mario-nes-controller-${MARIO_CONTROLLER_RUN_TAG}"
 OUTPUT_DIR="${SCRATCH_ROOT}/slurm"
+VIDEO_OUTPUT_DIR="${SCRATCH_ROOT}/video-slurm"
 TENSORBOARD_DIR="${SCRATCH_ROOT}/tensorboard"
 POLICY_DIR="${SCRATCH_ROOT}/policy"
 POLICY_PATH="${POLICY_DIR}/mario_nes_controller.onnx"
 COMPLETE_MARKER="${SCRATCH_ROOT}/training-complete-${TARGET_ITERATIONS}"
-mkdir -p "${OUTPUT_DIR}" "${TENSORBOARD_DIR}" "${POLICY_DIR}"
+mkdir -p "${OUTPUT_DIR}" "${VIDEO_OUTPUT_DIR}" "${TENSORBOARD_DIR}" "${POLICY_DIR}"
 
 # Invoking this script from the login node submits a dependency chain. Each
 # segment resumes the numerically latest checkpoint. Two extra recovery slots
 # tolerate a timeout or node failure and become quick no-ops after completion.
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
+    if ! command -v sbatch >/dev/null 2>&1; then
+        echo "ERROR: sbatch is not available on $(hostname)." >&2
+        echo "Log in to queue.cs.purdue.edu and run this launcher there; data.cs is not the submission host." >&2
+        exit 1
+    fi
+    if ! command -v uv >/dev/null 2>&1; then
+        echo "ERROR: uv is not available on the submission PATH." >&2
+        echo "Install uv, add \${HOME}/.local/bin to PATH, then reconnect to queue.cs.purdue.edu." >&2
+        exit 1
+    fi
+    if command -v sinfo >/dev/null 2>&1; then
+        partition_info="$(sinfo -h -p "${MARIO_SLURM_PARTITION}" -o '%P' 2>/dev/null || true)"
+        if [[ -z "${partition_info}" ]]; then
+            echo "ERROR: Slurm partition '${MARIO_SLURM_PARTITION}' is not visible from $(hostname)." >&2
+            echo "Expected Purdue CS submission host: queue.cs.purdue.edu" >&2
+            exit 1
+        fi
+    fi
+
     required_jobs=$(((TARGET_ITERATIONS + ITERATIONS_PER_JOB - 1) / ITERATIONS_PER_JOB))
     MAX_JOBS="${MAX_JOBS:-$((required_jobs + 2))}"
     if ! [[ "${MAX_JOBS}" =~ ^[1-9][0-9]*$ ]]; then
@@ -72,30 +117,50 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
         exit 1
     fi
 
+    submission_log_dir="${OUTPUT_DIR}"
+    if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
+        submission_log_dir="${VIDEO_OUTPUT_DIR}"
+        if [[ -z "$(find "${TENSORBOARD_DIR}" -type f -name 'model_*.pt' -print -quit)" ]]; then
+            echo "ERROR: no model_*.pt checkpoints exist beneath ${TENSORBOARD_DIR}" >&2
+            echo "Complete at least the smoke test before submitting videos." >&2
+            exit 1
+        fi
+    fi
+
     common_sbatch_args=(
         --parsable
-        --output="${OUTPUT_DIR}/slurm-%j.out"
-        --error="${OUTPUT_DIR}/slurm-%j.err"
-        --export="ALL,NUM_ENVS=${NUM_ENVS},TARGET_ITERATIONS=${TARGET_ITERATIONS},ITERATIONS_PER_JOB=${ITERATIONS_PER_JOB},CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL},MARIO_CONTROLLER_RUN_TAG=${MARIO_CONTROLLER_RUN_TAG},MARIO_BALANCE_CHECKPOINT=${MARIO_BALANCE_CHECKPOINT},MICRODUCK_REPO_DIR=${REPO_DIR}"
+        --partition="${MARIO_SLURM_PARTITION}"
+        --output="${submission_log_dir}/slurm-%j.out"
+        --error="${submission_log_dir}/slurm-%j.err"
+        --export="ALL,NUM_ENVS=${NUM_ENVS},TARGET_ITERATIONS=${TARGET_ITERATIONS},ITERATIONS_PER_JOB=${ITERATIONS_PER_JOB},CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL},MARIO_CONTROLLER_RUN_TAG=${MARIO_CONTROLLER_RUN_TAG},MARIO_BALANCE_CHECKPOINT=${MARIO_BALANCE_CHECKPOINT},MARIO_VIDEO_ONLY=${MARIO_VIDEO_ONLY},MARIO_SLURM_PARTITION=${MARIO_SLURM_PARTITION},MICRODUCK_REPO_DIR=${REPO_DIR},MICRODUCK_RUN_ROOT=${RUNS_ROOT}"
     )
-    if [[ -n "${SLURM_PARTITION:-}" ]]; then
-        common_sbatch_args+=(--partition="${SLURM_PARTITION}")
-    fi
-    if [[ -n "${SLURM_ACCOUNT:-}" ]]; then
-        common_sbatch_args+=(--account="${SLURM_ACCOUNT}")
+
+    echo "Submission host: $(hostname)"
+    echo "Partition:       ${MARIO_SLURM_PARTITION}"
+    echo "Run storage:     ${SCRATCH_ROOT}"
+
+    if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
+        job_id="$(sbatch "${common_sbatch_args[@]}" "${BASH_SOURCE[0]}")"
+        job_id="${job_id%%;*}"
+        echo "Submitted Mario-controller video job: ${job_id}"
+        echo "Slurm log: ${VIDEO_OUTPUT_DIR}/slurm-${job_id}.out"
+        exit 0
     fi
 
     previous_job=""
     for ((job_number = 1; job_number <= MAX_JOBS; job_number++)); do
-        dependency_args=()
         if [[ -n "${previous_job}" ]]; then
-            dependency_args+=(--dependency="afterany:${previous_job}")
+            job_id="$(sbatch \
+                "${common_sbatch_args[@]}" \
+                --dependency="afterany:${previous_job}" \
+                "${BASH_SOURCE[0]}" \
+                "$@")"
+        else
+            job_id="$(sbatch \
+                "${common_sbatch_args[@]}" \
+                "${BASH_SOURCE[0]}" \
+                "$@")"
         fi
-        job_id="$(sbatch \
-            "${common_sbatch_args[@]}" \
-            "${dependency_args[@]}" \
-            "${BASH_SOURCE[0]}" \
-            "$@")"
         job_id="${job_id%%;*}"
         echo "Submitted Mario-controller segment ${job_number}/${MAX_JOBS}: job ${job_id}"
         previous_job="${job_id}"
@@ -129,21 +194,27 @@ mkdir -p \
 echo "Job ID:       ${SLURM_JOB_ID}"
 echo "Host:         $(hostname)"
 echo "Repository:   ${REPO_DIR}"
-echo "Scratch root: ${SCRATCH_ROOT}"
+echo "Run storage:  ${SCRATCH_ROOT}"
+echo "Partition:    ${SLURM_JOB_PARTITION:-${MARIO_SLURM_PARTITION}}"
 echo "Target:       ${TARGET_ITERATIONS} total iterations"
 echo "Segment size: ${ITERATIONS_PER_JOB} new iterations"
 echo "Environments: ${NUM_ENVS}"
 echo "CUDA devices: ${CUDA_VISIBLE_DEVICES:-not set}"
 
 uv sync --frozen
+if command -v nvidia-smi >/dev/null 2>&1; then
+    nvidia-smi -L
+fi
+srun uv run python -c \
+    'import sys, torch; print(f"PyTorch {torch.__version__}; CUDA runtime {torch.version.cuda}; visible GPUs {torch.cuda.device_count()}"); sys.exit(0 if torch.cuda.is_available() else "ERROR: the installed PyTorch build cannot use the allocated GPU")'
 
 # The video launcher submits this proven batch script rather than maintaining
 # a second Slurm descriptor. This keeps job submission byte-for-byte on the
 # same path as controller training; only the compute-node payload differs.
 if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
     VIDEO_DIR="${SCRATCH_ROOT}/videos/checkpoints"
-    if [[ ! -d "${TENSORBOARD_DIR}" ]]; then
-        echo "ERROR: checkpoint directory does not exist: ${TENSORBOARD_DIR}" >&2
+    if [[ -z "$(find "${TENSORBOARD_DIR}" -type f -name 'model_*.pt' -print -quit)" ]]; then
+        echo "ERROR: no model_*.pt checkpoints exist beneath ${TENSORBOARD_DIR}" >&2
         exit 1
     fi
     mkdir -p "${VIDEO_DIR}"
