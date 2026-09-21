@@ -5972,8 +5972,17 @@ def mario_requested_button_reward(
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
     controller_cfg: SceneEntityCfg | None = None,
+    camera_cfg: SceneEntityCfg | None = None,
+    min_trunk_height: float = 0.11,
+    full_trunk_height: float = 0.12,
+    min_camera_height: float = 0.20,
+    full_camera_height: float = 0.23,
+    full_tilt_deg: float = 12.0,
+    max_tilt_deg: float = 20.0,
+    min_view_alignment: float = 0.85,
+    full_view_alignment: float = 0.95,
 ) -> torch.Tensor:
-    """Reward requested activation while both feet remain on assigned pads."""
+    """Reward requested activation only with planted feet and a usable camera."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     activation = mario_nes_activation(
@@ -5993,7 +6002,22 @@ def mario_requested_button_reward(
     anchor_gate = _mario_foot_anchor_gate(
         env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
     )
-    return score if anchor_gate is None else score * anchor_gate
+    if anchor_gate is not None:
+        score = score * anchor_gate
+    if camera_cfg is not None:
+        score = score * mario_camera_ready(
+            env,
+            camera_cfg=camera_cfg,
+            min_trunk_height=min_trunk_height,
+            full_trunk_height=full_trunk_height,
+            min_camera_height=min_camera_height,
+            full_camera_height=full_camera_height,
+            full_tilt_deg=full_tilt_deg,
+            max_tilt_deg=max_tilt_deg,
+            min_view_alignment=min_view_alignment,
+            full_view_alignment=full_view_alignment,
+        )
+    return score
 
 
 def mario_requested_button_progress_reward(
@@ -6006,8 +6030,17 @@ def mario_requested_button_progress_reward(
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
     controller_cfg: SceneEntityCfg | None = None,
+    camera_cfg: SceneEntityCfg | None = None,
+    min_trunk_height: float = 0.11,
+    full_trunk_height: float = 0.12,
+    min_camera_height: float = 0.20,
+    full_camera_height: float = 0.23,
+    full_tilt_deg: float = 12.0,
+    max_tilt_deg: float = 20.0,
+    min_view_alignment: float = 0.85,
+    full_view_alignment: float = 0.95,
 ) -> torch.Tensor:
-    """Dense requested-button progress, gated on both feet staying planted."""
+    """Dense button progress only while planted and camera-ready."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     progress = mario_nes_progress(
@@ -6025,7 +6058,22 @@ def mario_requested_button_progress_reward(
     anchor_gate = _mario_foot_anchor_gate(
         env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
     )
-    return score if anchor_gate is None else score * anchor_gate
+    if anchor_gate is not None:
+        score = score * anchor_gate
+    if camera_cfg is not None:
+        score = score * mario_camera_ready(
+            env,
+            camera_cfg=camera_cfg,
+            min_trunk_height=min_trunk_height,
+            full_trunk_height=full_trunk_height,
+            min_camera_height=min_camera_height,
+            full_camera_height=full_camera_height,
+            full_tilt_deg=full_tilt_deg,
+            max_tilt_deg=max_tilt_deg,
+            min_view_alignment=min_view_alignment,
+            full_view_alignment=full_view_alignment,
+        )
+    return score
 
 
 def mario_unrequested_button_cost(
@@ -6058,6 +6106,91 @@ def feet_contact_loss_cost(
     """Non-negative 0/0.5/1 cost when zero/one/two feet lose support."""
 
     return 1.0 - feet_grounded_reward(env, sensor_name)
+
+
+def _mario_height_and_tilt(
+    env: ManagerBasedRlEnv,
+    camera_cfg: SceneEntityCfg,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Trunk height, head-camera height, and trunk tilt from physical state."""
+
+    robot: Entity = env.scene[camera_cfg.name]
+    terrain_z = env.scene.terrain.env_origins[:, 2]
+    trunk_z = robot.data.root_link_pos_w[:, 2] - terrain_z
+    camera_z = robot.data.site_pos_w[:, camera_cfg.site_ids[0], 2] - terrain_z
+    quat = robot.data.root_link_quat_w
+    upright_cos = 1.0 - 2.0 * (quat[:, 1].square() + quat[:, 2].square())
+    tilt_deg = torch.rad2deg(torch.acos(upright_cos.clamp(-1.0, 1.0)))
+    return trunk_z, camera_z, tilt_deg
+
+
+def mario_camera_ready(
+    env: ManagerBasedRlEnv,
+    camera_cfg: SceneEntityCfg,
+    min_trunk_height: float = 0.11,
+    full_trunk_height: float = 0.12,
+    min_camera_height: float = 0.20,
+    full_camera_height: float = 0.23,
+    full_tilt_deg: float = 12.0,
+    max_tilt_deg: float = 20.0,
+    min_view_alignment: float = 0.85,
+    full_view_alignment: float = 0.95,
+) -> torch.Tensor:
+    """Smooth 0–1 gate: button credit requires a usable monitor sightline.
+
+    The lower cutoffs make a collapsed posture earn exactly zero button reward;
+    smooth ramps above them preserve a gradient while the robot stands up.
+    """
+
+    trunk_z, camera_z, tilt_deg = _mario_height_and_tilt(env, camera_cfg)
+    robot: Entity = env.scene[camera_cfg.name]
+    camera_pos = robot.data.site_pos_w[:, camera_cfg.site_ids[0]]
+    camera_quat = robot.data.site_quat_w[:, camera_cfg.site_ids[0]]
+    camera_forward = quat_apply(
+        camera_quat, camera_pos.new_tensor((1.0, 0.0, 0.0)).expand_as(camera_pos)
+    )
+    # The monitor is fixed at (0.45, 0, 0.205) in each environment; its screen
+    # plane is 5 mm toward the duck.  The head_camera site's local +X points
+    # along the optical axis at HOME (verified against the MJCF camera frame).
+    monitor_center = env.scene.terrain.env_origins + camera_pos.new_tensor(
+        (0.445, 0.0, 0.205)
+    )
+    to_monitor = torch.nn.functional.normalize(
+        monitor_center - camera_pos, dim=-1
+    )
+    view_alignment = (camera_forward * to_monitor).sum(dim=-1)
+
+    def smooth_ramp(value: torch.Tensor, low: float, high: float) -> torch.Tensor:
+        t = ((value - low) / (high - low)).clamp(0.0, 1.0)
+        return t.square() * (3.0 - 2.0 * t)
+
+    trunk_gate = smooth_ramp(trunk_z, min_trunk_height, full_trunk_height)
+    camera_gate = smooth_ramp(camera_z, min_camera_height, full_camera_height)
+    tilt_gate = smooth_ramp(max_tilt_deg - tilt_deg, 0.0, max_tilt_deg - full_tilt_deg)
+    view_gate = smooth_ramp(
+        view_alignment, min_view_alignment, full_view_alignment
+    )
+    return torch.nan_to_num(
+        trunk_gate * camera_gate * tilt_gate * view_gate, nan=0.0
+    )
+
+
+def mario_crouch_cost(
+    env: ManagerBasedRlEnv,
+    camera_cfg: SceneEntityCfg,
+    trunk_floor: float = 0.12,
+    camera_floor: float = 0.23,
+    trunk_scale: float = 0.02,
+    camera_scale: float = 0.04,
+) -> torch.Tensor:
+    """Non-saturating shortfall cost below a usable standing camera pose."""
+
+    trunk_z, camera_z, _ = _mario_height_and_tilt(env, camera_cfg)
+    trunk_shortfall = (trunk_floor - trunk_z).clamp(min=0.0) / trunk_scale
+    camera_shortfall = (camera_floor - camera_z).clamp(min=0.0) / camera_scale
+    return torch.nan_to_num(
+        trunk_shortfall + camera_shortfall, nan=0.0, posinf=0.0
+    )
 
 
 def _mario_foot_anchor_errors(

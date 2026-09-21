@@ -73,6 +73,9 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert pose_params["std_running"] == pose_params["std_standing"]
     assert rewards["commanded_trunk_offset"].weight > 0.0
     assert rewards["standing_height"].params["target_height"] == 0.130
+    assert rewards["camera_crouch"].weight < 0.0
+    assert rewards["camera_crouch"].params["trunk_floor"] == 0.120
+    assert rewards["camera_crouch"].params["camera_floor"] == 0.230
     assert rewards["neutral_head_pose"].func is microduck_mdp.pose_target_match
     assert rewards["foot_anchor"].weight < 0.0
     assert rewards["foot_planar_speed"].weight < 0.0
@@ -89,6 +92,10 @@ def test_button_rewards_are_gated_by_both_foot_anchors():
         params = rewards[name].params
         assert params["anchor_radius"] > 0.0
         assert params["anchor_sensor_name"] == "feet_ground_contact"
+        assert params["camera_cfg"].site_names == ("head_camera",)
+        assert params["min_trunk_height"] < params["full_trunk_height"]
+        assert params["min_camera_height"] < params["full_camera_height"]
+        assert params["min_view_alignment"] < params["full_view_alignment"]
         assert params["robot_cfg"].site_names == ("left_foot", "right_foot")
         assert params["controller_cfg"].body_names == (
             "dpad_platform",
@@ -334,3 +341,52 @@ def test_foot_anchor_and_planar_speed_costs_penalize_walking():
     )
     assert anchor.item() == pytest.approx(0.5)
     assert speed.item() == pytest.approx(0.5)
+
+
+def test_camera_readiness_rejects_crouch_low_camera_tilt_and_bad_view():
+    angle = math.radians(25.0)
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            root_link_pos_w=torch.tensor(
+                [
+                    [0.0, 0.0, 0.13],
+                    [0.0, 0.0, 0.10],
+                    [0.0, 0.0, 0.13],
+                    [0.0, 0.0, 0.13],
+                    [0.0, 0.0, 0.13],
+                ]
+            ),
+            site_pos_w=torch.tensor(
+                [
+                    [[0.0, 0.0, 0.26]],
+                    [[0.0, 0.0, 0.26]],
+                    [[0.0, 0.0, 0.19]],
+                    [[0.0, 0.0, 0.26]],
+                    [[0.0, 0.0, 0.26]],
+                ]
+            ),
+            site_quat_w=torch.tensor(
+                [[[1.0, 0.0, 0.0, 0.0]]] * 4
+                + [[[math.cos(math.pi / 4), 0.0, 0.0, math.sin(math.pi / 4)]]]
+            ),
+            root_link_quat_w=torch.tensor(
+                [[1.0, 0.0, 0.0, 0.0]] * 3
+                + [[math.cos(angle / 2), 0.0, math.sin(angle / 2), 0.0]]
+                + [[1.0, 0.0, 0.0, 0.0]]
+            ),
+        )
+    )
+
+    class FakeScene(dict):
+        def __init__(self):
+            super().__init__(robot=robot)
+            self.terrain = SimpleNamespace(env_origins=torch.zeros(5, 3))
+
+    env = SimpleNamespace(scene=FakeScene())
+    camera_cfg = _resolved_cfg("robot", site_ids=[0])
+    readiness = microduck_mdp.mario_camera_ready(env, camera_cfg)
+    crouch = microduck_mdp.mario_crouch_cost(env, camera_cfg)
+    assert readiness.tolist() == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0])
+    assert crouch[0].item() == 0.0
+    assert crouch[1].item() > 0.0
+    assert crouch[2].item() > 0.0

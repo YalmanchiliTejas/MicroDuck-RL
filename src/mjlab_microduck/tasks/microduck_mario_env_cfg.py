@@ -40,6 +40,14 @@ FOOT_ANCHOR_RADIUS = 0.025
 COM_FORWARD_OFFSET = 0.012
 COM_LATERAL_OFFSET = 0.010
 COMMAND_LEAN_ANGLE = math.radians(6.0)
+MIN_TRUNK_HEIGHT = 0.110
+FULL_TRUNK_HEIGHT = 0.120
+MIN_CAMERA_HEIGHT = 0.200
+FULL_CAMERA_HEIGHT = 0.230
+FULL_CAMERA_TILT_DEG = 12.0
+MAX_CAMERA_TILT_DEG = 20.0
+MIN_VIEW_ALIGNMENT = 0.85
+FULL_VIEW_ALIGNMENT = 0.95
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -197,6 +205,20 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
+    # The Gaussian above becomes nearly flat once a policy discovers a deep
+    # crouch.  This shortfall cost keeps a useful slope back toward a usable
+    # head-camera height even when the trunk has dropped far below STAND_HEIGHT.
+    cfg.rewards["camera_crouch"] = RewardTermCfg(
+        func=microduck_mdp.mario_crouch_cost,
+        weight=-4.0,
+        params={
+            "camera_cfg": SceneEntityCfg("robot", site_names=("head_camera",)),
+            "trunk_floor": FULL_TRUNK_HEIGHT,
+            "camera_floor": FULL_CAMERA_HEIGHT,
+            "trunk_scale": 0.020,
+            "camera_scale": 0.040,
+        },
+    )
     cfg.rewards["neutral_head_pose"] = RewardTermCfg(
         func=microduck_mdp.pose_target_match,
         weight=1.5,
@@ -228,13 +250,25 @@ def make_microduck_mario_env_cfg(play: bool = False):
             body_names=("dpad_platform", "ab_rocker_platform"),
         ),
     }
+    camera_ready_params = {
+        "camera_cfg": SceneEntityCfg("robot", site_names=("head_camera",)),
+        "min_trunk_height": MIN_TRUNK_HEIGHT,
+        "full_trunk_height": FULL_TRUNK_HEIGHT,
+        "min_camera_height": MIN_CAMERA_HEIGHT,
+        "full_camera_height": FULL_CAMERA_HEIGHT,
+        "full_tilt_deg": FULL_CAMERA_TILT_DEG,
+        "max_tilt_deg": MAX_CAMERA_TILT_DEG,
+        "min_view_alignment": MIN_VIEW_ALIGNMENT,
+        "full_view_alignment": FULL_VIEW_ALIGNMENT,
+    }
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
         weight=BUTTON_ACTIVATION_WEIGHT,
-        params=anchored_button_params,
+        params={**anchored_button_params, **camera_ready_params},
     )
-    # Keep this separate in the logs: requested_button reports real physical
-    # activation, while this term supplies a gradient before the hard point.
+    # Keep this separate in the logs: requested_button reports physical
+    # activation while planted and camera-ready; this term supplies a gradient
+    # before the hard activation point, subject to the same gates.
     cfg.rewards["requested_button_progress"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_progress_reward,
         weight=BUTTON_PROGRESS_WEIGHT,
@@ -252,6 +286,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "nes_controller",
                 body_names=("dpad_platform", "ab_rocker_platform"),
             ),
+            **camera_ready_params,
         },
     )
     cfg.rewards["unrequested_button"] = RewardTermCfg(
