@@ -28,11 +28,13 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 
 
 EPISODE_LENGTH_S = 20.0
-BUTTON_RESAMPLE_S = (0.25, 0.75)
-ACTIVATE_ANGLE = math.radians(1.0)
-RELEASE_ANGLE = math.radians(0.5)
-CHORD_PRESS_TRAVEL = 0.00135
-CHORD_RELEASE_TRAVEL = 0.0009
+BUTTON_RESAMPLE_S = (0.5, 1.25)
+ACTIVATE_ANGLE = math.radians(0.6)
+RELEASE_ANGLE = math.radians(0.2)
+CHORD_PRESS_TRAVEL = 0.0011
+CHORD_RELEASE_TRAVEL = 0.0006
+BUTTON_ACTIVATION_WEIGHT = 3.0
+BUTTON_PROGRESS_WEIGHT = 1.0
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -56,8 +58,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
             entity="robot",
         ),
         secondary=ContactMatch(
-            mode="geom",
-            pattern=r"^(dpad_surface|ab_surface)$",
+            mode="subtree",
+            pattern="controller_root",
             entity="nes_controller",
         ),
         fields=("found", "force"),
@@ -142,12 +144,24 @@ def make_microduck_mario_env_cfg(play: bool = False):
     }
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
-        weight=4.0,
+        weight=BUTTON_ACTIVATION_WEIGHT,
         params=controller_reward_params,
+    )
+    # Keep this separate in the logs: requested_button reports real physical
+    # activation, while this term supplies a gradient before the hard point.
+    cfg.rewards["requested_button_progress"] = RewardTermCfg(
+        func=microduck_mdp.mario_requested_button_progress_reward,
+        weight=BUTTON_PROGRESS_WEIGHT,
+        params={
+            "command_name": "twist",
+            "asset_name": "nes_controller",
+            "activate_angle": ACTIVATE_ANGLE,
+            "chord_press_travel": CHORD_PRESS_TRAVEL,
+        },
     )
     cfg.rewards["unrequested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_unrequested_button_cost,
-        weight=-4.0,
+        weight=-2.0,
         params=controller_reward_params,
     )
     # Losing support can make a button press easier in simulation but violates

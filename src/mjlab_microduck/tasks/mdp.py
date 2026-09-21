@@ -1636,7 +1636,10 @@ def feet_grounded_reward(
     if sensor_name not in env.scene.sensors:
         return torch.zeros(env.num_envs, device=env.device)
     sensor = env.scene.sensors[sensor_name]
-    found = sensor.data.found  # (num_envs, num_feet) or (num_envs, 1)
+    # `found` contains the number of contact points for each primary geom, not
+    # a binary flag. Binarize first so three contacts on one foot cannot count
+    # as both feet being grounded.
+    found = (sensor.data.found > 0).to(dtype=torch.float32)
     if found.dim() > 1:
         found = found.sum(dim=-1)  # collapse foot dimension
     return torch.clamp(found, 0.0, 2.0) / 2.0
@@ -5857,13 +5860,26 @@ def _signed_axis_activation(
     return positive, negative
 
 
+def _signed_axis_progress(
+    value: torch.Tensor,
+    activate_threshold: float,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Directional progress from neutral to the physical activation point."""
+
+    if activate_threshold <= 0.0:
+        raise ValueError("activate_threshold must be positive")
+    positive = torch.clamp(value / activate_threshold, 0.0, 1.0)
+    negative = torch.clamp(-value / activate_threshold, 0.0, 1.0)
+    return positive, negative
+
+
 def mario_nes_activation(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01745329,
-    release_angle: float = 0.00872665,
-    chord_press_travel: float = 0.00135,
-    chord_release_travel: float = 0.0009,
+    activate_angle: float = 0.01047198,
+    release_angle: float = 0.00349066,
+    chord_press_travel: float = 0.0011,
+    chord_release_travel: float = 0.0006,
 ) -> torch.Tensor:
     """Continuous ``[up, down, left, right, A, B]`` physical activation."""
 
@@ -5887,6 +5903,30 @@ def mario_nes_activation(
         0.0,
         1.0,
     )
+    a = torch.maximum(a_tilt, chord)
+    b = torch.maximum(b_tilt, chord)
+    return torch.stack((up, down, left, right, a, b), dim=-1)
+
+
+def mario_nes_progress(
+    env: ManagerBasedRlEnv,
+    asset_name: str = "nes_controller",
+    activate_angle: float = 0.01047198,
+    chord_press_travel: float = 0.0011,
+) -> torch.Tensor:
+    """Dense directional progress toward ``[up, down, left, right, A, B]``.
+
+    Unlike physical activation, this begins at neutral. It gives PPO a slope
+    to follow before a rocker reaches its actual activation threshold.
+    """
+
+    if chord_press_travel <= 0.0:
+        raise ValueError("chord_press_travel must be positive")
+    state = mario_nes_joint_state(env, asset_name)
+    right, left = _signed_axis_progress(state[:, 0], activate_angle)
+    up, down = _signed_axis_progress(state[:, 1], activate_angle)
+    a_tilt, b_tilt = _signed_axis_progress(state[:, 2], activate_angle)
+    chord = torch.clamp(state[:, 3] / chord_press_travel, 0.0, 1.0)
     a = torch.maximum(a_tilt, chord)
     b = torch.maximum(b_tilt, chord)
     return torch.stack((up, down, left, right, a, b), dim=-1)
@@ -5918,12 +5958,12 @@ def mario_requested_button_reward(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01745329,
-    release_angle: float = 0.00872665,
-    chord_press_travel: float = 0.00135,
-    chord_release_travel: float = 0.0009,
+    activate_angle: float = 0.01047198,
+    release_angle: float = 0.00349066,
+    chord_press_travel: float = 0.0011,
+    chord_release_travel: float = 0.0006,
 ) -> torch.Tensor:
-    """Reward requested physical inputs; neutral requests pay zero."""
+    """Reward actual activation of requested inputs; neutral pays zero."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     activation = mario_nes_activation(
@@ -5942,14 +5982,38 @@ def mario_requested_button_reward(
     return torch.where(requested_count > 0.0, score, torch.zeros_like(score))
 
 
+def mario_requested_button_progress_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    asset_name: str = "nes_controller",
+    activate_angle: float = 0.01047198,
+    chord_press_travel: float = 0.0011,
+) -> torch.Tensor:
+    """Dense reward for moving a requested button toward activation."""
+
+    requested = mario_nes_requested_buttons(env, command_name)
+    progress = mario_nes_progress(
+        env,
+        asset_name,
+        activate_angle,
+        chord_press_travel,
+    )
+    requested_count = requested.sum(dim=-1)
+    score = (progress * requested).sum(dim=-1) / torch.clamp(
+        requested_count,
+        min=1.0,
+    )
+    return torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+
+
 def mario_unrequested_button_cost(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01745329,
-    release_angle: float = 0.00872665,
-    chord_press_travel: float = 0.00135,
-    chord_release_travel: float = 0.0009,
+    activate_angle: float = 0.01047198,
+    release_angle: float = 0.00349066,
+    chord_press_travel: float = 0.0011,
+    chord_release_travel: float = 0.0006,
 ) -> torch.Tensor:
     """Non-negative cost for physical inputs absent from the request."""
 

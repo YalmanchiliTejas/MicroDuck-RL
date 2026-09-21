@@ -23,7 +23,7 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
     cfg = make_microduck_mario_env_cfg()
     assert cfg.commands["twist"].class_type is microduck_mdp.MarioNesCommand
     assert sum(cfg.commands["twist"].category_weights) == 1.0
-    assert cfg.commands["twist"].resampling_time_range == (0.25, 0.75)
+    assert cfg.commands["twist"].resampling_time_range == (0.5, 1.25)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
     for group in ("actor", "critic"):
@@ -43,22 +43,27 @@ def test_controller_state_is_privileged_and_not_added_to_actor():
 def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     rewards = make_microduck_mario_env_cfg().rewards
     assert rewards["requested_button"].weight > 0.0
+    assert rewards["requested_button_progress"].weight > 0.0
     assert rewards["unrequested_button"].weight < 0.0
     assert rewards["foot_contact_loss"].weight < 0.0
     for name in ("track_linear_velocity", "air_time", "foot_clearance"):
         assert name not in rewards
     params = rewards["requested_button"].params
     assert params["release_angle"] < params["activate_angle"]
-    assert params["activate_angle"] == pytest.approx(math.radians(1.0))
-    assert params["release_angle"] == pytest.approx(math.radians(0.5))
-    assert params["chord_release_travel"] == 0.0009
-    assert params["chord_press_travel"] == 0.00135
+    assert params["activate_angle"] == pytest.approx(math.radians(0.6))
+    assert params["release_angle"] == pytest.approx(math.radians(0.2))
+    assert params["chord_release_travel"] == 0.0006
+    assert params["chord_press_travel"] == 0.0011
 
 
 def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     rewards = make_microduck_mario_env_cfg().rewards
-    assert rewards["upright"].weight > rewards["requested_button"].weight
-    assert rewards["foot_contact_loss"].weight < -rewards["requested_button"].weight
+    total_button_weight = (
+        rewards["requested_button"].weight
+        + rewards["requested_button_progress"].weight
+    )
+    assert rewards["upright"].weight > total_button_weight
+    assert rewards["foot_contact_loss"].weight < -total_button_weight
     assert rewards["body_ang_vel"].weight == -0.15
     assert rewards["angular_momentum"].weight == -0.05
     assert rewards["pose"].weight == 2.0
@@ -128,4 +133,49 @@ def test_foot_sensor_targets_controller_surfaces_not_floor():
         if sensor.name == "feet_ground_contact"
     )
     assert sensor.secondary.entity == "nes_controller"
-    assert sensor.secondary.pattern == r"^(dpad_surface|ab_surface)$"
+    assert sensor.secondary.mode == "subtree"
+    assert sensor.secondary.pattern == "controller_root"
+
+
+def test_feet_grounded_counts_feet_not_contact_points():
+    sensor = SimpleNamespace(
+        data=SimpleNamespace(
+            found=torch.tensor([[3.0, 0.0], [1.0, 1.0], [0.0, 0.0]])
+        )
+    )
+    env = SimpleNamespace(
+        num_envs=3,
+        device=torch.device("cpu"),
+        scene=SimpleNamespace(sensors={"feet": sensor}),
+    )
+    grounded = microduck_mdp.feet_grounded_reward(env, "feet")
+    assert grounded.tolist() == [0.5, 1.0, 0.0]
+
+
+def test_requested_button_has_dense_progress_before_activation():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            joint_pos=torch.tensor([[math.radians(0.1), 0.0, 0.0, 0.0]])
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.tensor([[1.0, 0.0, 0.0]])
+        ),
+    )
+    activation = microduck_mdp.mario_nes_activation(env)[0, 3]
+    activation_reward = microduck_mdp.mario_requested_button_reward(env)[0]
+    progress_reward = microduck_mdp.mario_requested_button_progress_reward(env)[0]
+    assert activation == 0.0
+    assert activation_reward == 0.0
+    assert 0.0 < progress_reward < 1.0

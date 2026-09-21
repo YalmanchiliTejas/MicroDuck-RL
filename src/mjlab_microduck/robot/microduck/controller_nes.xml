@@ -9,26 +9,30 @@
       passive_ab_rocker pitches fore/aft (A/B). A nested 2 mm vertical travel
       axis, passive_ab_press, produces the otherwise mechanically impossible
       A+B chord when the right foot shifts more weight downward. Angular axes
-      have a 2 degree hard stop, 5.0 N m/rad centering spring, and
-      0.10 N m s/rad damping. Those values keep ordinary centered standing in
-      the dead zone while allowing a modest weight shift to reach 1 degree;
+      have a 2 degree hard stop, 2.5 N m/rad centering spring, and
+      0.08 N m s/rad damping. Those values keep ordinary centered standing in
+      the dead zone while allowing a modest weight shift to reach 0.6 degrees;
       they are exposed here for later system-identification tuning. At the
       plate edge, 1 degree is about 0.9 mm of travel.
 
       These XML values are intentionally easy to tune. Python activation and
       release thresholds live in mjlab_microduck.controller and default to
-      50% / 25% of the same 2 degree range.
+      30% / 10% of the same 2 degree range.
     -->
 
     <default>
         <default class="nes_hinge">
             <joint type="hinge" limited="true" range="-0.034906585 0.034906585"
-                   stiffness="5.0" damping="0.10" springref="0"
+                   stiffness="2.5" damping="0.08" springref="0"
                    armature="0.00002"/>
         </default>
         <default class="nes_surface">
-            <geom type="box" size="0.053 0.033 0.004"
-                  friction="1.6 0.02 0.002" condim="3"/>
+            <!-- Priority 2 makes these firm contact parameters win over the
+                 robot foot geoms (priority 1). The 12 mm plate prevents a
+                 fast foot from crossing the whole surface in one substep. -->
+            <geom type="box" size="0.053 0.033 0.006"
+                  friction="1.6 0.02 0.002" condim="3" priority="2"
+                  solref="0.005 1" solimp="0.98 0.999 0.0005"/>
         </default>
         <default class="nes_visual">
             <geom contype="0" conaffinity="0" group="2"/>
@@ -36,6 +40,9 @@
     </default>
 
     <worldbody>
+      <!-- A named common root lets one contact sensor match both moving
+           surfaces as a subtree without silently selecting only one geom. -->
+      <body name="controller_root">
         <!-- Recessed fixed housings sit below the two moving top surfaces. -->
         <geom name="dpad_housing" type="box" pos="0.007 0.041 0.004"
               size="0.059 0.039 0.004" rgba="0.025 0.030 0.045 1"
@@ -45,7 +52,7 @@
               contype="0" conaffinity="0"/>
 
         <!-- LEFT FOOT: outer pitch hinge, then nested roll hinge. -->
-        <body name="dpad_pitch_gimbal" pos="0.007 0.041 0.011">
+        <body name="dpad_pitch_gimbal" pos="0.007 0.041 0.009">
             <joint name="passive_dpad_y" class="nes_hinge" axis="0 1 0"/>
             <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
             <body name="dpad_platform">
@@ -56,51 +63,52 @@
                 <!-- Cross-shaped top graphic; the dark full plate is the real
                      collision surface so the entire sole remains supported. -->
                 <geom name="dpad_cross_long" class="nes_visual" type="box"
-                      pos="0 0 0.00425" size="0.049 0.011 0.00025"
+                      pos="0 0 0.00605" size="0.049 0.011 0.00005"
                       rgba="0.25 0.30 0.40 1"/>
                 <geom name="dpad_cross_wide" class="nes_visual" type="box"
-                      pos="0 0 0.00430" size="0.011 0.029 0.00025"
+                      pos="0 0 0.00606" size="0.011 0.029 0.00005"
                       rgba="0.25 0.30 0.40 1"/>
                 <geom name="dpad_up" class="nes_visual" type="box"
-                      pos="0.039 0 0.0046" size="0.009 0.009 0.00025"
+                      pos="0.039 0 0.00608" size="0.009 0.009 0.00005"
                       rgba="0.25 0.72 1 1"/>
                 <geom name="dpad_down" class="nes_visual" type="box"
-                      pos="-0.039 0 0.0046" size="0.009 0.009 0.00025"
+                      pos="-0.039 0 0.00608" size="0.009 0.009 0.00005"
                       rgba="0.25 0.72 1 1"/>
                 <geom name="dpad_left" class="nes_visual" type="box"
-                      pos="0 0.024 0.0046" size="0.009 0.007 0.00025"
+                      pos="0 0.024 0.00608" size="0.009 0.007 0.00005"
                       rgba="0.25 0.72 1 1"/>
                 <geom name="dpad_right" class="nes_visual" type="box"
-                      pos="0 -0.024 0.0046" size="0.009 0.007 0.00025"
+                      pos="0 -0.024 0.00608" size="0.009 0.007 0.00005"
                       rgba="0.25 0.72 1 1"/>
                 <geom name="dpad_neutral" class="nes_visual" type="cylinder"
-                      pos="0 0 0.00465" size="0.006 0.0003"
+                      pos="0 0 0.00608" size="0.006 0.00005"
                       rgba="0.7 0.78 0.88 1"/>
             </body>
         </body>
 
         <!-- RIGHT FOOT: fore/aft rocker plus a tiny vertical A+B chord press.
-             The 4000 N/m spring settles roughly 1 mm under half the robot's
-             weight; activation is 1.35 mm, reached by a modest shift right. -->
-        <body name="ab_press_carriage" pos="0.007 -0.041 0.011">
+             The 3000 N/m spring settles near 1 mm under ordinary load;
+             activation is 1.1 mm, reached by a modest shift right. -->
+        <body name="ab_press_carriage" pos="0.007 -0.041 0.009">
             <joint name="passive_ab_press" type="slide" axis="0 0 1"
                    limited="true" range="-0.002 0" springref="0"
-                   stiffness="4000" damping="8.0" armature="0.00002"/>
+                   stiffness="3000" damping="7.0" armature="0.00002"/>
             <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
             <body name="ab_rocker_platform">
                 <joint name="passive_ab_rocker" class="nes_hinge" axis="0 1 0"/>
                 <inertial pos="0 0 0" mass="0.035" diaginertia="2.2e-5 5.0e-5 6.3e-5"/>
                 <geom name="ab_surface" class="nes_surface" rgba="0.18 0.12 0.16 1"/>
                 <geom name="button_a_visual" class="nes_visual" type="cylinder"
-                      pos="0.033 0 0.0044" size="0.015 0.0004"
+                      pos="0.033 0 0.00608" size="0.015 0.00005"
                       rgba="0.95 0.18 0.20 1"/>
                 <geom name="button_b_visual" class="nes_visual" type="cylinder"
-                      pos="-0.033 0 0.0044" size="0.015 0.0004"
+                      pos="-0.033 0 0.00608" size="0.015 0.00005"
                       rgba="0.95 0.64 0.12 1"/>
                 <geom name="ab_chord_visual" class="nes_visual" type="box"
-                      pos="0 0 0.00445" size="0.008 0.025 0.0004"
+                      pos="0 0 0.00608" size="0.008 0.025 0.00005"
                       rgba="0.78 0.30 0.82 1"/>
             </body>
         </body>
+      </body>
     </worldbody>
 </mujoco>
