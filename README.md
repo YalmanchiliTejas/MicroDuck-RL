@@ -128,35 +128,43 @@ uv run train Mjlab-MarioController-Flat-MicroDuck \
     --env.scene.num-envs 64 --agent.max_iterations 5
 ```
 
-On Slurm, use the dedicated launcher. It submits a resumable dependency chain
-and exports the final normalized ONNX policy to the path printed at submission:
+For the Purdue CS GPU cluster, copy or clone the repository into your CS home
+directory, then submit from `queue.cs.purdue.edu` (not `data.cs.purdue.edu`).
+The launcher defaults to the V100-backed `gorman-gpu` partition, keeps its
+large files under `~/scratch/microduck-rl`, submits a resumable dependency
+chain, and exports the final normalized ONNX policy to the printed path:
 
 ```bash
-# Required cheap smoke test.
-MARIO_BALANCE_CHECKPOINT=/path/to/proven/velocity/model_N.pt \
-    MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+# Required cheap smoke test from scratch.
+MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
     ITERATIONS_PER_JOB=5 CHECKPOINT_INTERVAL=5 MAX_JOBS=1 \
     ./slurm_mario_controller.sh
 
-# Full 5,000-iteration controller training.
+# Full 5,000-iteration controller training from scratch.
+MARIO_CONTROLLER_RUN_TAG=nes-v3 ./slurm_mario_controller.sh
+
+# Optional: accelerate a new run with a compatible proven 61D actor.
 MARIO_BALANCE_CHECKPOINT=/path/to/proven/velocity/model_N.pt \
-    MARIO_CONTROLLER_RUN_TAG=nes-v3 ./slurm_mario_controller.sh
+    MARIO_CONTROLLER_RUN_TAG=nes-v3-warmstart ./slurm_mario_controller.sh
 ```
 
-For a new run, the launcher warm-starts only the proven policy's 61D actor
-backbone and proprioceptive normalizer. It deliberately resets the critic,
-optimizer, exploration standard deviation, and all command-slot semantics;
-full `--resume` from a velocity checkpoint is incompatible with this task.
+`MARIO_BALANCE_CHECKPOINT` is optional. Without it, the task learns standing,
+balance, and controller presses together from randomly initialized weights.
+When it is supplied, the launcher warm-starts only the proven policy's 61D
+actor backbone and proprioceptive normalizer. It deliberately resets the
+critic, optimizer, exploration standard deviation, and all command-slot
+semantics; full `--resume` from a velocity checkpoint is incompatible with
+this task.
 
 After checkpoints exist, render a deterministic six-second rollout from every
 saved Mario-controller checkpoint in a separate GPU job:
 
 ```bash
-MARIO_CONTROLLER_RUN_TAG=default ./slurm_mario_controller_videos.sh
+MARIO_CONTROLLER_RUN_TAG=nes-v3 ./slurm_mario_controller_videos.sh
 ```
 
 Videos are written beneath
-`$SCRATCH/microduck-rl/mario-nes-controller-default/videos/checkpoints/`.
+`~/scratch/microduck-rl/mario-nes-controller-nes-v3/videos/checkpoints/`.
 
 The runtime loop is intentionally one-way:
 

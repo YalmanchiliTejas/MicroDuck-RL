@@ -118,6 +118,12 @@ if TYPE_CHECKING:
 
 
 _DEFAULT_ASSET_CFG = SceneEntityCfg("robot")
+_MARIO_FEET_CFG = SceneEntityCfg(
+    "robot", site_names=("left_foot", "right_foot")
+)
+_MARIO_CONTROLLER_PLATFORMS_CFG = SceneEntityCfg(
+    "nes_controller", body_names=("dpad_platform", "ab_rocker_platform")
+)
 
 # Name patterns matching the 4 neck/head actuated joints. Used by head_pose
 # tracking reward and by UniformPoseCommand asset hookups.
@@ -5962,8 +5968,12 @@ def mario_requested_button_reward(
     release_angle: float = 0.00349066,
     chord_press_travel: float = 0.0011,
     chord_release_travel: float = 0.0006,
+    anchor_radius: float | None = None,
+    anchor_sensor_name: str | None = None,
+    robot_cfg: SceneEntityCfg | None = None,
+    controller_cfg: SceneEntityCfg | None = None,
 ) -> torch.Tensor:
-    """Reward actual activation of requested inputs; neutral pays zero."""
+    """Reward requested activation while both feet remain on assigned pads."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     activation = mario_nes_activation(
@@ -5979,7 +5989,11 @@ def mario_requested_button_reward(
         requested_count,
         min=1.0,
     )
-    return torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+    score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+    anchor_gate = _mario_foot_anchor_gate(
+        env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
+    )
+    return score if anchor_gate is None else score * anchor_gate
 
 
 def mario_requested_button_progress_reward(
@@ -5988,8 +6002,12 @@ def mario_requested_button_progress_reward(
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
     chord_press_travel: float = 0.0011,
+    anchor_radius: float | None = None,
+    anchor_sensor_name: str | None = None,
+    robot_cfg: SceneEntityCfg | None = None,
+    controller_cfg: SceneEntityCfg | None = None,
 ) -> torch.Tensor:
-    """Dense reward for moving a requested button toward activation."""
+    """Dense requested-button progress, gated on both feet staying planted."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     progress = mario_nes_progress(
@@ -6003,7 +6021,11 @@ def mario_requested_button_progress_reward(
         requested_count,
         min=1.0,
     )
-    return torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+    score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+    anchor_gate = _mario_foot_anchor_gate(
+        env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
+    )
+    return score if anchor_gate is None else score * anchor_gate
 
 
 def mario_unrequested_button_cost(
@@ -6036,6 +6058,146 @@ def feet_contact_loss_cost(
     """Non-negative 0/0.5/1 cost when zero/one/two feet lose support."""
 
     return 1.0 - feet_grounded_reward(env, sensor_name)
+
+
+def _mario_foot_anchor_errors(
+    env: ManagerBasedRlEnv,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Per-foot horizontal error from its assigned controller platform.
+
+    ``robot_cfg`` must resolve ``[left_foot, right_foot]`` and
+    ``controller_cfg`` must resolve ``[dpad_platform, ab_rocker_platform]`` in
+    the same order.  Measuring against the moving platform bodies (rather than
+    reset-time world coordinates) keeps the metric correct while the rockers
+    tilt and across vectorized environment origins.
+    """
+
+    robot: Entity = env.scene[robot_cfg.name]
+    controller: Entity = env.scene[controller_cfg.name]
+    foot_xy = robot.data.site_pos_w[:, robot_cfg.site_ids, :2]
+    platform_xy = controller.data.body_link_pos_w[:, controller_cfg.body_ids, :2]
+    return torch.linalg.vector_norm(foot_xy - platform_xy, dim=-1)
+
+
+def mario_foot_anchor_cost(
+    env: ManagerBasedRlEnv,
+    deadzone: float = 0.008,
+    scale: float = 0.020,
+    robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
+    controller_cfg: SceneEntityCfg = _MARIO_CONTROLLER_PLATFORMS_CFG,
+) -> torch.Tensor:
+    """Bounded cost for moving either foot away from its assigned pad center."""
+
+    errors = _mario_foot_anchor_errors(env, robot_cfg, controller_cfg)
+    excess = torch.clamp(errors - deadzone, min=0.0)
+    return torch.clamp(excess / max(scale, 1e-6), max=1.0).mean(dim=-1)
+
+
+def mario_foot_planar_speed_cost(
+    env: ManagerBasedRlEnv,
+    speed_scale: float = 0.10,
+    max_cost: float = 2.0,
+    robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
+) -> torch.Tensor:
+    """Cost planar foot motion, catching both planted slip and swing motion."""
+
+    robot: Entity = env.scene[robot_cfg.name]
+    velocity_xy = robot.data.site_lin_vel_w[:, robot_cfg.site_ids, :2]
+    speed = torch.linalg.vector_norm(velocity_xy, dim=-1)
+    return torch.clamp(speed / max(speed_scale, 1e-6), max=max_cost).mean(dim=-1)
+
+
+def mario_commanded_trunk_offset_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    forward_offset: float = 0.012,
+    lateral_offset: float = 0.010,
+    std: float = 0.008,
+    robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
+) -> torch.Tensor:
+    """Track a command-conditioned trunk offset relative to planted feet.
+
+    NES ``UP/DOWN`` command forward/backward trunk motion. ``RIGHT/LEFT`` command
+    right/left trunk motion.  In the robot frame +Y is left, hence the minus sign
+    mapping positive d-pad X (RIGHT) to a negative lateral offset.
+    """
+
+    robot: Entity = env.scene[robot_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    target_x = forward_offset * command[:, 1]
+    target_y = -lateral_offset * command[:, 0]
+
+    feet_centroid = robot.data.site_pos_w[:, robot_cfg.site_ids, :2].mean(dim=1)
+    # Use the trunk frame, not root_com_pos_w: the trunk link's own inertial
+    # CoM is 22.6 mm behind its frame and is not the whole-robot CoM.  Using it
+    # would make neutral standing miss a zero-offset target by almost 3 stds.
+    delta_w = robot.data.root_link_pos_w[:, :2] - feet_centroid
+    quat = robot.data.root_link_quat_w
+    qw, qx, qy, qz = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
+    yaw = torch.atan2(
+        2.0 * (qw * qz + qx * qy),
+        1.0 - 2.0 * (qy * qy + qz * qz),
+    )
+    cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
+    x_body = cos_yaw * delta_w[:, 0] + sin_yaw * delta_w[:, 1]
+    y_body = -sin_yaw * delta_w[:, 0] + cos_yaw * delta_w[:, 1]
+
+    x_score = torch.exp(-((x_body - target_x) / std) ** 2)
+    y_score = torch.exp(-((y_body - target_y) / std) ** 2)
+    # A product prevents the policy from collecting half-credit by matching
+    # the easy neutral axis while ignoring the requested directional shift.
+    return x_score * y_score
+
+
+def mario_commanded_lean_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    lean_angle: float = math.radians(6.0),
+    std: float = math.radians(7.0),
+    asset_cfg: SceneEntityCfg = _DEFAULT_ASSET_CFG,
+) -> torch.Tensor:
+    """Track directional trunk lean and strict upright for neutral/A/B input."""
+
+    asset: Entity = env.scene[asset_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    target_roll = lean_angle * command[:, 0]
+    target_pitch = lean_angle * command[:, 1]
+
+    quat = asset.data.root_link_quat_w
+    qw, qx, qy, qz = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
+    roll = torch.atan2(
+        2.0 * (qw * qx + qy * qz),
+        1.0 - 2.0 * (qx * qx + qy * qy),
+    )
+    pitch = torch.asin(
+        torch.clamp(2.0 * (qw * qy - qz * qx), -1.0, 1.0)
+    )
+    roll_score = torch.exp(-((roll - target_roll) / std) ** 2)
+    pitch_score = torch.exp(-((pitch - target_pitch) / std) ** 2)
+    return roll_score * pitch_score
+
+
+def _mario_foot_anchor_gate(
+    env: ManagerBasedRlEnv,
+    anchor_radius: float | None,
+    sensor_name: str | None,
+    robot_cfg: SceneEntityCfg | None,
+    controller_cfg: SceneEntityCfg | None,
+) -> torch.Tensor | None:
+    if anchor_radius is None:
+        return None
+    if robot_cfg is None or controller_cfg is None:
+        raise ValueError("robot_cfg and controller_cfg are required with anchor_radius")
+    errors = _mario_foot_anchor_errors(env, robot_cfg, controller_cfg)
+    anchored = (errors <= anchor_radius).all(dim=-1)
+    if sensor_name is not None:
+        found = env.scene.sensors[sensor_name].data.found
+        if found.dim() == 3:
+            found = found.any(dim=-1)
+        anchored = anchored & found.bool().all(dim=-1)
+    return anchored.to(dtype=errors.dtype)
 
 
 def head_pose_tracking(
