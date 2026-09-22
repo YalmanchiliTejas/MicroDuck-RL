@@ -76,7 +76,11 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert rewards["camera_crouch"].weight < 0.0
     assert rewards["camera_crouch"].params["trunk_floor"] == 0.120
     assert rewards["camera_crouch"].params["camera_floor"] == 0.230
-    assert rewards["neutral_head_pose"].func is microduck_mdp.pose_target_match
+    assert rewards["leg_pose_l1"].weight < 0.0
+    assert (
+        rewards["neutral_head_pose"].func
+        is microduck_mdp.mario_selected_pose_reward
+    )
     assert rewards["foot_anchor"].weight < 0.0
     assert rewards["foot_planar_speed"].weight < 0.0
 
@@ -96,6 +100,11 @@ def test_button_rewards_are_gated_by_both_foot_anchors():
         assert params["min_trunk_height"] < params["full_trunk_height"]
         assert params["min_camera_height"] < params["full_camera_height"]
         assert params["min_view_alignment"] < params["full_view_alignment"]
+        assert params["standing_pose_cfg"].joint_names == (
+            r"^(?!passive_|.*neck.*|.*head.*).*",
+        )
+        assert params["full_pose_error"] < params["max_pose_error"]
+        assert params["require_exclusive"] is True
         assert params["robot_cfg"].site_names == ("left_foot", "right_foot")
         assert params["controller_cfg"].body_names == (
             "dpad_platform",
@@ -216,6 +225,42 @@ def test_requested_button_has_dense_progress_before_activation():
     assert activation == 0.0
     assert activation_reward == 0.0
     assert 0.0 < progress_reward < 1.0
+
+
+def test_requested_button_requires_wrong_buttons_to_be_released():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            # RIGHT is requested and fully active, but A is active too.
+            joint_pos=torch.tensor(
+                [[math.radians(0.6), 0.0, math.radians(0.6), 0.0]]
+            )
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.tensor([[1.0, 0.0, 0.0]])
+        ),
+    )
+    permissive = microduck_mdp.mario_requested_button_reward(env)
+    exclusive = microduck_mdp.mario_requested_button_reward(
+        env, require_exclusive=True
+    )
+    success = microduck_mdp.mario_clean_button_success(
+        env, require_exclusive=True
+    )
+    assert permissive.item() == pytest.approx(1.0)
+    assert exclusive.item() < 1e-5
+    assert success.item() == 0.0
 
 
 def _resolved_cfg(name, *, site_ids=None, body_ids=None):
@@ -341,6 +386,35 @@ def test_foot_anchor_and_planar_speed_costs_penalize_walking():
     )
     assert anchor.item() == pytest.approx(0.5)
     assert speed.item() == pytest.approx(0.5)
+
+
+def test_standing_pose_gate_and_l1_cost_reject_folded_legs():
+    joint_pos = torch.tensor([[0.1, -0.1], [0.6, -0.6]])
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            joint_pos=joint_pos,
+            default_joint_pos=torch.zeros_like(joint_pos),
+        )
+    )
+    env = SimpleNamespace(scene={"robot": robot})
+    cfg = SceneEntityCfg("robot")
+    cfg.joint_ids = [0, 1]
+    ready = microduck_mdp.mario_standing_pose_ready(env, cfg)
+    cost = microduck_mdp.mario_leg_pose_l1_cost(env, cfg)
+    assert ready.tolist() == pytest.approx([1.0, 0.0])
+    assert cost[1] > cost[0]
+
+
+def test_mario_cfg_exposes_unweighted_policy_quality_metrics():
+    metrics = make_microduck_mario_env_cfg().metrics
+    assert set(metrics) >= {
+        "camera_ready",
+        "standing_pose_ready",
+        "requested_button_clean",
+        "requested_button_success",
+        "feet_anchored",
+        "unrequested_button_activation",
+    }
 
 
 def test_camera_readiness_rejects_crouch_low_camera_tilt_and_bad_view():

@@ -12,7 +12,12 @@ privileged state and is not required on the real robot.
 import math
 from copy import deepcopy
 
-from mjlab.managers import EventTermCfg, ObservationTermCfg, RewardTermCfg
+from mjlab.managers import (
+    EventTermCfg,
+    MetricsTermCfg,
+    ObservationTermCfg,
+    RewardTermCfg,
+)
 from mjlab.managers.scene_entity_config import SceneEntityCfg
 from mjlab.sensor import ContactMatch, ContactSensorCfg
 from mjlab.tasks.velocity import mdp
@@ -48,6 +53,8 @@ FULL_CAMERA_TILT_DEG = 12.0
 MAX_CAMERA_TILT_DEG = 20.0
 MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
+FULL_LEG_POSE_ERROR = 0.16
+MAX_LEG_POSE_ERROR = 0.40
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -219,8 +226,16 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "camera_scale": 0.040,
         },
     )
+    leg_pose_cfg = SceneEntityCfg(
+        "robot", joint_names=(r"^(?!passive_|.*neck.*|.*head.*).*",)
+    )
+    cfg.rewards["leg_pose_l1"] = RewardTermCfg(
+        func=microduck_mdp.mario_leg_pose_l1_cost,
+        weight=-2.0,
+        params={"asset_cfg": leg_pose_cfg, "scale": 0.35, "max_cost": 2.0},
+    )
     cfg.rewards["neutral_head_pose"] = RewardTermCfg(
-        func=microduck_mdp.pose_target_match,
+        func=microduck_mdp.mario_selected_pose_reward,
         weight=1.5,
         params={
             "std": 0.15,
@@ -261,10 +276,20 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "min_view_alignment": MIN_VIEW_ALIGNMENT,
         "full_view_alignment": FULL_VIEW_ALIGNMENT,
     }
+    standing_pose_params = {
+        "standing_pose_cfg": leg_pose_cfg,
+        "full_pose_error": FULL_LEG_POSE_ERROR,
+        "max_pose_error": MAX_LEG_POSE_ERROR,
+        "require_exclusive": True,
+    }
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
         weight=BUTTON_ACTIVATION_WEIGHT,
-        params={**anchored_button_params, **camera_ready_params},
+        params={
+            **anchored_button_params,
+            **camera_ready_params,
+            **standing_pose_params,
+        },
     )
     # Keep this separate in the logs: requested_button reports physical
     # activation while planted and camera-ready; this term supplies a gradient
@@ -276,7 +301,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "command_name": "twist",
             "asset_name": "nes_controller",
             "activate_angle": ACTIVATE_ANGLE,
+            "release_angle": RELEASE_ANGLE,
             "chord_press_travel": CHORD_PRESS_TRAVEL,
+            "chord_release_travel": CHORD_RELEASE_TRAVEL,
             "anchor_radius": FOOT_ANCHOR_RADIUS,
             "anchor_sensor_name": controller_feet_contact.name,
             "robot_cfg": SceneEntityCfg(
@@ -287,6 +314,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 body_names=("dpad_platform", "ab_rocker_platform"),
             ),
             **camera_ready_params,
+            **standing_pose_params,
         },
     )
     cfg.rewards["unrequested_button"] = RewardTermCfg(
@@ -320,7 +348,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["foot_planar_speed"] = RewardTermCfg(
         func=microduck_mdp.mario_foot_planar_speed_cost,
-        weight=-1.0,
+        weight=-2.0,
         params={
             "speed_scale": 0.10,
             "max_cost": 2.0,
@@ -328,6 +356,58 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "robot", site_names=("left_foot", "right_foot")
             ),
         },
+    )
+
+    # Unweighted audit signals.  These show whether reward growth corresponds
+    # to a physically usable policy rather than another compromise pose.
+    cfg.metrics["camera_ready"] = MetricsTermCfg(
+        func=microduck_mdp.mario_camera_ready,
+        params={
+            "camera_cfg": camera_ready_params["camera_cfg"],
+            **{
+                key: value
+                for key, value in camera_ready_params.items()
+                if key != "camera_cfg"
+            },
+        },
+    )
+    cfg.metrics["standing_pose_ready"] = MetricsTermCfg(
+        func=microduck_mdp.mario_standing_pose_ready,
+        params={
+            "asset_cfg": leg_pose_cfg,
+            "full_error": FULL_LEG_POSE_ERROR,
+            "max_error": MAX_LEG_POSE_ERROR,
+        },
+    )
+    cfg.metrics["requested_button_clean"] = MetricsTermCfg(
+        func=microduck_mdp.mario_requested_button_reward,
+        params={
+            **anchored_button_params,
+            **camera_ready_params,
+            **standing_pose_params,
+        },
+    )
+    cfg.metrics["requested_button_success"] = MetricsTermCfg(
+        func=microduck_mdp.mario_clean_button_success,
+        params={
+            "success_threshold": 0.95,
+            **anchored_button_params,
+            **camera_ready_params,
+            **standing_pose_params,
+        },
+    )
+    cfg.metrics["feet_anchored"] = MetricsTermCfg(
+        func=microduck_mdp.mario_feet_anchored,
+        params={
+            "anchor_radius": FOOT_ANCHOR_RADIUS,
+            "sensor_name": controller_feet_contact.name,
+            "robot_cfg": anchored_button_params["robot_cfg"],
+            "controller_cfg": anchored_button_params["controller_cfg"],
+        },
+    )
+    cfg.metrics["unrequested_button_activation"] = MetricsTermCfg(
+        func=microduck_mdp.mario_unrequested_button_cost,
+        params=controller_activation_params,
     )
 
     # Small weight shifts should be discovered before smoothness is tightened.

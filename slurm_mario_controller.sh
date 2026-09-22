@@ -230,6 +230,7 @@ if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
         --video-distance 0.55 \
         --video-azimuth 40 \
         --video-elevation -32 \
+        --video-debug-overlay \
         --device cuda:0 \
         --mujoco-gl egl \
         --once

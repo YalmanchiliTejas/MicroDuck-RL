@@ -1,6 +1,7 @@
 """Unit tests for checkpoint-video watcher bookkeeping (no simulator needed)."""
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -38,6 +39,16 @@ def test_completion_marker_is_isolated_per_iteration(tmp_path):
     assert watcher.completion_marker(tmp_path, 250) == (
         tmp_path / "model_250" / "complete.json"
     )
+
+
+def test_overlay_request_rerenders_legacy_unannotated_video(tmp_path):
+    marker = watcher.completion_marker(tmp_path, 250)
+    marker.parent.mkdir(parents=True)
+    marker.write_text(json.dumps({"iteration": 250}))
+    args = type("Args", (), {"video_dir": tmp_path, "video_debug_overlay": True})()
+    assert not watcher.recording_is_complete(args, 250)
+    marker.write_text(json.dumps({"video_debug_overlay": True}))
+    assert watcher.recording_is_complete(args, 250)
 
 
 def test_default_video_covers_full_six_second_cycle(tmp_path, monkeypatch):

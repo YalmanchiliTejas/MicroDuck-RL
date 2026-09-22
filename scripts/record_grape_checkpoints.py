@@ -46,6 +46,22 @@ def completion_marker(video_root: Path, iteration: int) -> Path:
     return video_root / f"model_{iteration}" / "complete.json"
 
 
+def recording_is_complete(args: argparse.Namespace, iteration: int) -> bool:
+    """Return whether the existing recording has the requested overlay mode."""
+    marker = completion_marker(args.video_dir, iteration)
+    if not marker.exists():
+        return False
+    if not args.video_debug_overlay:
+        return True
+    try:
+        metadata = json.loads(marker.read_text())
+    except (json.JSONDecodeError, OSError):
+        return False
+    # Old markers predate overlays. Force a one-time rerender when the caller
+    # asks for diagnostics instead of silently accepting the unannotated MP4.
+    return metadata.get("video_debug_overlay") is True
+
+
 def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int) -> None:
     """Run the existing checkpoint player and leave an iteration-specific video."""
     destination = args.video_dir / f"model_{iteration}"
@@ -72,6 +88,7 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
             "--video-distance", str(args.video_distance),
             "--video-azimuth", str(args.video_azimuth),
             "--video-elevation", str(args.video_elevation),
+            "--video-debug-overlay", str(args.video_debug_overlay),
             "--num-envs", "1",
             "--device", args.device,
             "--seed", str(args.seed),
@@ -96,6 +113,7 @@ def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int
         "iteration": iteration,
         "seed": args.seed,
         "video_length": args.video_length,
+        "video_debug_overlay": args.video_debug_overlay,
         "camera": {
             "distance": args.video_distance,
             "azimuth": args.video_azimuth,
@@ -127,6 +145,8 @@ def parse_args() -> argparse.Namespace:
                         help="Camera orbit angle in degrees; 90 gives the grape side view.")
     parser.add_argument("--video-elevation", type=float, default=-15.0,
                         help="Camera elevation in degrees.")
+    parser.add_argument("--video-debug-overlay", action="store_true",
+                        help="Annotate supported task videos with live diagnostics.")
     parser.add_argument("--seed", type=int, default=0,
                         help="Fixed evaluation seed, shared by every checkpoint video.")
     parser.add_argument("--device", default="cpu",
@@ -157,7 +177,7 @@ def main() -> int:
         for checkpoint in find_checkpoints(args.checkpoint_dir):
             iteration = checkpoint_iteration(checkpoint)
             assert iteration is not None
-            if completion_marker(args.video_dir, iteration).exists():
+            if recording_is_complete(args, iteration):
                 continue
             if now - checkpoint.stat().st_mtime < args.min_age_seconds:
                 continue

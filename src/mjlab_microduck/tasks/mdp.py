@@ -5981,6 +5981,10 @@ def mario_requested_button_reward(
     max_tilt_deg: float = 20.0,
     min_view_alignment: float = 0.85,
     full_view_alignment: float = 0.95,
+    standing_pose_cfg: SceneEntityCfg | None = None,
+    full_pose_error: float = 0.16,
+    max_pose_error: float = 0.40,
+    require_exclusive: bool = False,
 ) -> torch.Tensor:
     """Reward requested activation only with planted feet and a usable camera."""
 
@@ -5999,6 +6003,12 @@ def mario_requested_button_reward(
         min=1.0,
     )
     score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+    if require_exclusive:
+        # A requested press is only useful to the game if no other direction
+        # or face button is active.  Keep this continuous so releasing a wrong
+        # button still supplies a gradient instead of creating a binary cliff.
+        wrong = (activation * (1.0 - requested)).amax(dim=-1)
+        score = score * (1.0 - wrong)
     anchor_gate = _mario_foot_anchor_gate(
         env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
     )
@@ -6017,6 +6027,13 @@ def mario_requested_button_reward(
             min_view_alignment=min_view_alignment,
             full_view_alignment=full_view_alignment,
         )
+    if standing_pose_cfg is not None:
+        score = score * mario_standing_pose_ready(
+            env,
+            asset_cfg=standing_pose_cfg,
+            full_error=full_pose_error,
+            max_error=max_pose_error,
+        )
     return score
 
 
@@ -6026,6 +6043,8 @@ def mario_requested_button_progress_reward(
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
     chord_press_travel: float = 0.0011,
+    release_angle: float = 0.00349066,
+    chord_release_travel: float = 0.0006,
     anchor_radius: float | None = None,
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
@@ -6039,6 +6058,10 @@ def mario_requested_button_progress_reward(
     max_tilt_deg: float = 20.0,
     min_view_alignment: float = 0.85,
     full_view_alignment: float = 0.95,
+    standing_pose_cfg: SceneEntityCfg | None = None,
+    full_pose_error: float = 0.16,
+    max_pose_error: float = 0.40,
+    require_exclusive: bool = False,
 ) -> torch.Tensor:
     """Dense button progress only while planted and camera-ready."""
 
@@ -6055,6 +6078,17 @@ def mario_requested_button_progress_reward(
         min=1.0,
     )
     score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
+    if require_exclusive:
+        activation = mario_nes_activation(
+            env,
+            asset_name,
+            activate_angle,
+            release_angle,
+            chord_press_travel,
+            chord_release_travel,
+        )
+        wrong = (activation * (1.0 - requested)).amax(dim=-1)
+        score = score * (1.0 - wrong)
     anchor_gate = _mario_foot_anchor_gate(
         env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
     )
@@ -6072,6 +6106,13 @@ def mario_requested_button_progress_reward(
             max_tilt_deg=max_tilt_deg,
             min_view_alignment=min_view_alignment,
             full_view_alignment=full_view_alignment,
+        )
+    if standing_pose_cfg is not None:
+        score = score * mario_standing_pose_ready(
+            env,
+            asset_cfg=standing_pose_cfg,
+            full_error=full_pose_error,
+            max_error=max_pose_error,
         )
     return score
 
@@ -6191,6 +6232,61 @@ def mario_crouch_cost(
     return torch.nan_to_num(
         trunk_shortfall + camera_shortfall, nan=0.0, posinf=0.0
     )
+
+
+def mario_leg_pose_l1_cost(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    scale: float = 0.35,
+    max_cost: float = 2.0,
+) -> torch.Tensor:
+    """Non-saturating cost for folding the legs away from HOME.
+
+    The inherited Gaussian pose reward is effectively flat once every leg
+    joint is far from HOME.  This term retains a slope in exactly that region.
+    ``asset_cfg`` deliberately selects leg joints only.
+    """
+
+    asset: Entity = env.scene[asset_cfg.name]
+    error = torch.abs(
+        asset.data.joint_pos[:, asset_cfg.joint_ids]
+        - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    )
+    return torch.clamp(error.mean(dim=-1) / max(scale, 1e-6), max=max_cost)
+
+
+def mario_standing_pose_ready(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    full_error: float = 0.16,
+    max_error: float = 0.40,
+) -> torch.Tensor:
+    """Smooth gate requiring the selected joints to remain near HOME."""
+
+    if max_error <= full_error:
+        raise ValueError("max_error must exceed full_error")
+    asset: Entity = env.scene[asset_cfg.name]
+    error = torch.abs(
+        asset.data.joint_pos[:, asset_cfg.joint_ids]
+        - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    ).mean(dim=-1)
+    t = ((max_error - error) / (max_error - full_error)).clamp(0.0, 1.0)
+    return t.square() * (3.0 - 2.0 * t)
+
+
+def mario_selected_pose_reward(
+    env: ManagerBasedRlEnv,
+    asset_cfg: SceneEntityCfg,
+    std: float = 0.15,
+) -> torch.Tensor:
+    """Gaussian HOME-pose reward over exactly the joints in ``asset_cfg``."""
+
+    asset: Entity = env.scene[asset_cfg.name]
+    error = (
+        asset.data.joint_pos[:, asset_cfg.joint_ids]
+        - asset.data.default_joint_pos[:, asset_cfg.joint_ids]
+    )
+    return torch.exp(-torch.square(error / std)).mean(dim=-1)
 
 
 def _mario_foot_anchor_errors(
@@ -6331,6 +6427,39 @@ def _mario_foot_anchor_gate(
             found = found.any(dim=-1)
         anchored = anchored & found.bool().all(dim=-1)
     return anchored.to(dtype=errors.dtype)
+
+
+def mario_feet_anchored(
+    env: ManagerBasedRlEnv,
+    anchor_radius: float,
+    sensor_name: str,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Diagnostic 0/1 signal that both feet are supported on assigned pads."""
+
+    gate = _mario_foot_anchor_gate(
+        env, anchor_radius, sensor_name, robot_cfg, controller_cfg
+    )
+    assert gate is not None
+    return gate
+
+
+def mario_clean_button_success(
+    env: ManagerBasedRlEnv,
+    success_threshold: float = 0.95,
+    **reward_params,
+) -> torch.Tensor:
+    """Strict success rate derived from the fully gated button score.
+
+    Unlike the dense progress and activation rewards, this is binary and is
+    intended for metrics only.  A sample succeeds only when every requested
+    button is nearly fully active, wrong buttons are released, both feet are
+    planted, and camera/standing-pose gates are satisfied.
+    """
+
+    score = mario_requested_button_reward(env, **reward_params)
+    return (score >= success_threshold).to(dtype=score.dtype)
 
 
 def head_pose_tracking(

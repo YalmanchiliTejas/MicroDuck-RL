@@ -49,6 +49,7 @@ class ExportConfig:
     video_distance: float | None = None
     video_azimuth: float | None = None
     video_elevation: float | None = None
+    video_debug_overlay: bool = False
     seed: int | None = None
     camera: int | str | None = None
     viewer: Literal["auto", "native", "viser"] = "auto"
@@ -239,7 +240,17 @@ def run_export(task_id: str, cfg: ExportConfig) -> ExportResult:
             if cfg.video_folder is not None
             else log_dir / "videos" / "play"
         )
-        env = VideoRecorder(
+        recorder_cls = VideoRecorder
+        if cfg.video_debug_overlay:
+            if "MarioController" not in task_id:
+                raise ValueError(
+                    "video_debug_overlay is currently supported only for "
+                    "MarioController tasks"
+                )
+            from mjlab_microduck.mario_video import MarioDebugVideoRecorder
+
+            recorder_cls = MarioDebugVideoRecorder
+        env = recorder_cls(
             env,
             video_folder=video_folder,
             step_trigger=lambda step: step == 0,
