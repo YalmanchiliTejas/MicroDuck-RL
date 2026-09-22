@@ -5884,8 +5884,8 @@ def mario_nes_activation(
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
     release_angle: float = 0.00349066,
-    chord_press_travel: float = 0.0011,
-    chord_release_travel: float = 0.0006,
+    chord_press_travel: float = 0.0007,
+    chord_release_travel: float = 0.0005,
 ) -> torch.Tensor:
     """Continuous ``[up, down, left, right, A, B]`` physical activation."""
 
@@ -5918,7 +5918,7 @@ def mario_nes_progress(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
-    chord_press_travel: float = 0.0011,
+    chord_press_travel: float = 0.0007,
 ) -> torch.Tensor:
     """Dense directional progress toward ``[up, down, left, right, A, B]``.
 
@@ -5966,8 +5966,8 @@ def mario_requested_button_reward(
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
     release_angle: float = 0.00349066,
-    chord_press_travel: float = 0.0011,
-    chord_release_travel: float = 0.0006,
+    chord_press_travel: float = 0.0007,
+    chord_release_travel: float = 0.0005,
     anchor_radius: float | None = None,
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
@@ -6042,9 +6042,9 @@ def mario_requested_button_progress_reward(
     command_name: str = "twist",
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
-    chord_press_travel: float = 0.0011,
+    chord_press_travel: float = 0.0007,
     release_angle: float = 0.00349066,
-    chord_release_travel: float = 0.0006,
+    chord_release_travel: float = 0.0005,
     anchor_radius: float | None = None,
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
@@ -6123,21 +6123,42 @@ def mario_unrequested_button_cost(
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
     release_angle: float = 0.00349066,
-    chord_press_travel: float = 0.0011,
-    chord_release_travel: float = 0.0006,
+    chord_press_travel: float = 0.0007,
+    chord_release_travel: float = 0.0005,
 ) -> torch.Tensor:
-    """Non-negative cost for physical inputs absent from the request."""
+    """Non-negative, non-saturating cost for inputs absent from the request.
 
+    Activation deliberately clamps at one after the physical threshold, which
+    is correct for reporting a button press but gives PPO no slope when a wrong
+    button is held farther into its stop.  This cost instead uses raw directed
+    controller travel normalized by the activation thresholds.  Consequently
+    the policy is always paid to unload a wrongly held rocker/chord.
+    """
+
+    if activate_angle <= 0.0 or chord_press_travel <= 0.0:
+        raise ValueError("activation angle and chord press travel must be positive")
     requested = mario_nes_requested_buttons(env, command_name)
-    activation = mario_nes_activation(
-        env,
-        asset_name,
-        activate_angle,
-        release_angle,
-        chord_press_travel,
-        chord_release_travel,
+    del release_angle, chord_release_travel
+    state = mario_nes_joint_state(env, asset_name)
+    right = torch.relu(state[:, 0]) / activate_angle
+    left = torch.relu(-state[:, 0]) / activate_angle
+    up = torch.relu(state[:, 1]) / activate_angle
+    down = torch.relu(-state[:, 1]) / activate_angle
+    a_tilt = torch.relu(state[:, 2]) / activate_angle
+    b_tilt = torch.relu(-state[:, 2]) / activate_angle
+    chord = state[:, 3] / chord_press_travel
+    travel = torch.stack(
+        (
+            up,
+            down,
+            left,
+            right,
+            torch.maximum(a_tilt, chord),
+            torch.maximum(b_tilt, chord),
+        ),
+        dim=-1,
     )
-    return (activation * (1.0 - requested)).sum(dim=-1)
+    return (travel * (1.0 - requested)).sum(dim=-1)
 
 
 def feet_contact_loss_cost(

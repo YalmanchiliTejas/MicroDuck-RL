@@ -87,12 +87,14 @@
         </body>
 
         <!-- RIGHT FOOT: fore/aft rocker plus a tiny vertical A+B chord press.
-             The 3000 N/m spring settles near 1 mm under ordinary load;
-             activation is 1.1 mm, reached by a modest shift right. -->
+             10000 N/m keeps ordinary two-foot standing below the 0.5 mm
+             release point.  A deliberate near-full-body weight shift reaches
+             the 0.7 mm chord threshold.  The old 3000 N/m spring sat at about
+             1 mm under ordinary load and therefore held A+B almost constantly. -->
         <body name="ab_press_carriage" pos="0.007 -0.041 0.009">
             <joint name="passive_ab_press" type="slide" axis="0 0 1"
                    limited="true" range="-0.002 0" springref="0"
-                   stiffness="3000" damping="7.0" armature="0.00002"/>
+                   stiffness="10000" damping="30.0" armature="0.00002"/>
             <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
             <body name="ab_rocker_platform">
                 <joint name="passive_ab_rocker" class="nes_hinge" axis="0 1 0"/>

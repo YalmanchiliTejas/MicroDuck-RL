@@ -10,8 +10,8 @@ class ABRockerCalibration:
     max_tilt: float = 0.034906585  # 2 degrees
     activate_ratio: float = 0.3
     release_ratio: float = 0.1
-    chord_press_travel: float = 0.0011
-    chord_release_travel: float = 0.0006
+    chord_press_travel: float = 0.0007
+    chord_release_travel: float = 0.0005
 
     def __post_init__(self) -> None:
         if self.max_tilt <= 0.0:

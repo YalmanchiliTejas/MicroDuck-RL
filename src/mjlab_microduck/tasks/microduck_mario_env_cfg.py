@@ -36,8 +36,8 @@ EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (0.5, 1.25)
 ACTIVATE_ANGLE = math.radians(0.6)
 RELEASE_ANGLE = math.radians(0.2)
-CHORD_PRESS_TRAVEL = 0.0011
-CHORD_RELEASE_TRAVEL = 0.0006
+CHORD_PRESS_TRAVEL = 0.0007
+CHORD_RELEASE_TRAVEL = 0.0005
 BUTTON_ACTIVATION_WEIGHT = 3.0
 BUTTON_PROGRESS_WEIGHT = 1.0
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
@@ -405,7 +405,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "controller_cfg": anchored_button_params["controller_cfg"],
         },
     )
-    cfg.metrics["unrequested_button_activation"] = MetricsTermCfg(
+    cfg.metrics["unrequested_button_travel"] = MetricsTermCfg(
         func=microduck_mdp.mario_unrequested_button_cost,
         params=controller_activation_params,
     )

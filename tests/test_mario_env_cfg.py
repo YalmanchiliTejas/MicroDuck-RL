@@ -53,8 +53,8 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     assert params["release_angle"] < params["activate_angle"]
     assert params["activate_angle"] == pytest.approx(math.radians(0.6))
     assert params["release_angle"] == pytest.approx(math.radians(0.2))
-    assert params["chord_release_travel"] == 0.0006
-    assert params["chord_press_travel"] == 0.0011
+    assert params["chord_release_travel"] == 0.0005
+    assert params["chord_press_travel"] == 0.0007
 
 
 def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
@@ -149,7 +149,32 @@ def test_unloaded_controller_settles_inside_all_release_thresholds():
         assert angle < math.radians(0.5)
     press_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "passive_ab_press")
     press_travel = -float(data.qpos[model.jnt_qposadr[press_id]])
-    assert press_travel < 0.0009
+    assert press_travel < 0.0007
+
+
+def test_chord_slide_rejects_standing_load_but_accepts_weight_shift():
+    path = (
+        Path(__file__).parents[1]
+        / "src/mjlab_microduck/robot/microduck/controller_nes.xml"
+    )
+    model = mujoco.MjModel.from_xml_path(str(path))
+    press_id = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_JOINT, "passive_ab_press"
+    )
+    body_id = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_BODY, "ab_press_carriage"
+    )
+
+    def settled_travel(force: float) -> float:
+        data = mujoco.MjData(model)
+        data.xfrc_applied[body_id, 2] = -force
+        for _ in range(2_000):
+            mujoco.mj_step(model, data)
+        return -float(data.qpos[model.jnt_qposadr[press_id]])
+
+    # Roughly half versus all of an 800 g robot's weight on the right plate.
+    assert settled_travel(4.0) < 0.0005
+    assert settled_travel(8.0) > 0.0007
 
 
 def test_compact_command_decodes_all_six_buttons_and_chords():
@@ -261,6 +286,39 @@ def test_requested_button_requires_wrong_buttons_to_be_released():
     assert permissive.item() == pytest.approx(1.0)
     assert exclusive.item() < 1e-5
     assert success.item() == 0.0
+
+
+def test_unrequested_button_cost_keeps_growing_past_activation():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            joint_pos=torch.tensor(
+                [
+                    [0.0, 0.0, math.radians(0.6), 0.0],
+                    [0.0, 0.0, math.radians(1.2), 0.0],
+                ]
+            )
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        # Request UP, making A an unrequested button in both samples.
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.tensor(
+                [[0.0, 1.0, 0.0], [0.0, 1.0, 0.0]]
+            )
+        ),
+    )
+    cost = microduck_mdp.mario_unrequested_button_cost(env)
+    assert cost[1] == pytest.approx(2.0 * cost[0])
 
 
 def _resolved_cfg(name, *, site_ids=None, body_ids=None):
@@ -413,7 +471,7 @@ def test_mario_cfg_exposes_unweighted_policy_quality_metrics():
         "requested_button_clean",
         "requested_button_success",
         "feet_anchored",
-        "unrequested_button_activation",
+        "unrequested_button_travel",
     }
 
 
