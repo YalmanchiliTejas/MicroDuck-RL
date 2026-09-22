@@ -23,7 +23,7 @@
 #SBATCH --gres=gpu:1
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
-#SBATCH --partition=gorman-gpu
+#SBATCH --partition=gpu
 
 set -euo pipefail
 
@@ -53,14 +53,14 @@ if [[ "${RUNS_ROOT}" != /* ]]; then
 fi
 export MICRODUCK_RUN_ROOT="${RUNS_ROOT}"
 
-NUM_ENVS="${NUM_ENVS:-4096}"
+NUM_ENVS="${NUM_ENVS:-2048}"
 TARGET_ITERATIONS="${TARGET_ITERATIONS:-5000}"
 ITERATIONS_PER_JOB="${ITERATIONS_PER_JOB:-4000}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 MARIO_CONTROLLER_RUN_TAG="${MARIO_CONTROLLER_RUN_TAG:-default}"
 MARIO_BALANCE_CHECKPOINT="${MARIO_BALANCE_CHECKPOINT:-}"
 MARIO_VIDEO_ONLY="${MARIO_VIDEO_ONLY:-0}"
-MARIO_SLURM_PARTITION="${MARIO_SLURM_PARTITION:-gorman-gpu}"
+MARIO_SLURM_PARTITION="${MARIO_SLURM_PARTITION:-gpu}"
 
 for value_name in NUM_ENVS TARGET_ITERATIONS ITERATIONS_PER_JOB CHECKPOINT_INTERVAL; do
     value="${!value_name}"
@@ -228,7 +228,7 @@ if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
         --video-width 960 \
         --video-height 720 \
         --video-distance 0.55 \
-        --video-azimuth 145 \
+        --video-azimuth 40 \
         --video-elevation -32 \
         --device cuda:0 \
         --mujoco-gl egl \
