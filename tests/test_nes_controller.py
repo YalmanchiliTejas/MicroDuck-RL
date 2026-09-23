@@ -28,9 +28,9 @@ def test_physical_controller_compiles_with_four_passive_limited_axes():
         assert tuple(model.jnt_range[joint_id]) == pytest.approx(
             (-radians(2), radians(2))
         )
-        assert model.jnt_stiffness[joint_id] == pytest.approx(2.5)
+        assert model.jnt_stiffness[joint_id] == pytest.approx(6.0)
         dof_id = model.jnt_dofadr[joint_id]
-        assert model.dof_damping[dof_id] == pytest.approx(0.08)
+        assert model.dof_damping[dof_id] == pytest.approx(0.25)
 
     for name in ("dpad_surface", "ab_surface"):
         geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)

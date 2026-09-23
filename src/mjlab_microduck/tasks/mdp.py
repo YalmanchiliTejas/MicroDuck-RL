@@ -5742,6 +5742,7 @@ class MarioNesCommand(CommandTerm):
     def __init__(self, cfg: "MarioNesCommandCfg", env: ManagerBasedRlEnv):
         super().__init__(cfg, env)
         self._command = torch.zeros(self.num_envs, 3, device=self.device)
+        self.command_age = torch.zeros(self.num_envs, device=self.device)
 
     @property
     def command(self) -> torch.Tensor:
@@ -5787,9 +5788,15 @@ class MarioNesCommand(CommandTerm):
             )
         category = torch.multinomial(probabilities, n, replacement=True)
         self._command[env_ids] = commands[category]
+        # ``CommandManager.compute(dt=0)`` still calls ``_update_command``
+        # immediately after a reset. Start one tick negative so that both a
+        # reset-time sample and an in-episode sample have age zero when first
+        # exposed to the policy.
+        self.command_age[env_ids] = -self._env.step_dt
 
     def _update_command(self) -> None:
-        pass
+        # CommandTerm.compute resamples before this hook.
+        self.command_age += self._env.step_dt
 
     def _update_metrics(self) -> None:
         pass
@@ -5818,6 +5825,47 @@ class MarioNesCommandCfg(CommandTermCfg):
 
     def build(self, env: ManagerBasedRlEnv) -> "MarioNesCommand":
         return MarioNesCommand(self, env)
+
+
+def mario_command_category_curriculum(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    command_name: str,
+    weight_stages: list[dict],
+) -> torch.Tensor:
+    """Stage Mario requests from singles to combinations.
+
+    Each stage is ``{"step": int, "weights": tuple[float, ...]}`` in the
+    command table order.  The live command term is mutated so subsequent
+    resamples immediately use the selected distribution.
+    """
+
+    del env_ids
+    stage_index = 0
+    for index, stage in enumerate(weight_stages):
+        if env.common_step_counter >= stage["step"]:
+            stage_index = index
+    term = env.command_manager.get_term(command_name)
+    weights = tuple(weight_stages[stage_index]["weights"])
+    if len(weights) != len(term.cfg.category_weights):
+        raise ValueError("Mario command curriculum weight count is invalid")
+    term.cfg.category_weights = weights
+    return torch.tensor(float(stage_index), device=env.device)
+
+
+def mario_command_ready(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    transition_grace_s: float = 0.15,
+) -> torch.Tensor:
+    """One after the post-resample grace interval, otherwise zero."""
+
+    if transition_grace_s < 0.0:
+        raise ValueError("transition_grace_s must be non-negative")
+    term = env.command_manager.get_term(command_name)
+    if not isinstance(term, MarioNesCommand):
+        raise TypeError(f"{command_name} is not a MarioNesCommand")
+    return (term.command_age >= transition_grace_s).to(dtype=term.command.dtype)
 
 
 _MARIO_NES_JOINTS = (
@@ -5985,6 +6033,7 @@ def mario_requested_button_reward(
     full_pose_error: float = 0.16,
     max_pose_error: float = 0.40,
     require_exclusive: bool = False,
+    transition_grace_s: float = 0.0,
 ) -> torch.Tensor:
     """Reward requested activation only with planted feet and a usable camera."""
 
@@ -6034,6 +6083,10 @@ def mario_requested_button_reward(
             full_error=full_pose_error,
             max_error=max_pose_error,
         )
+    if transition_grace_s > 0.0:
+        score = score * mario_command_ready(
+            env, command_name, transition_grace_s
+        )
     return score
 
 
@@ -6062,6 +6115,7 @@ def mario_requested_button_progress_reward(
     full_pose_error: float = 0.16,
     max_pose_error: float = 0.40,
     require_exclusive: bool = False,
+    transition_grace_s: float = 0.0,
 ) -> torch.Tensor:
     """Dense button progress only while planted and camera-ready."""
 
@@ -6114,6 +6168,10 @@ def mario_requested_button_progress_reward(
             full_error=full_pose_error,
             max_error=max_pose_error,
         )
+    if transition_grace_s > 0.0:
+        score = score * mario_command_ready(
+            env, command_name, transition_grace_s
+        )
     return score
 
 
@@ -6125,6 +6183,7 @@ def mario_unrequested_button_cost(
     release_angle: float = 0.00349066,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
+    transition_grace_s: float = 0.0,
 ) -> torch.Tensor:
     """Non-negative, non-saturating cost for inputs absent from the request.
 
@@ -6158,7 +6217,10 @@ def mario_unrequested_button_cost(
         ),
         dim=-1,
     )
-    return (travel * (1.0 - requested)).sum(dim=-1)
+    cost = (travel * (1.0 - requested)).sum(dim=-1)
+    if transition_grace_s > 0.0:
+        cost = cost * mario_command_ready(env, command_name, transition_grace_s)
+    return cost
 
 
 def feet_contact_loss_cost(
@@ -6343,6 +6405,91 @@ def mario_foot_anchor_cost(
     errors = _mario_foot_anchor_errors(env, robot_cfg, controller_cfg)
     excess = torch.clamp(errors - deadzone, min=0.0)
     return torch.clamp(excess / max(scale, 1e-6), max=1.0).mean(dim=-1)
+
+
+def mario_commanded_foot_pose_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    position_offset: float,
+    target_tilt: float,
+    position_std: float,
+    angle_std: float,
+    left_nominal_roll: float,
+    right_nominal_roll: float,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Track command-specific foot position and sole orientation on each pad.
+
+    The left foot moves its pressure point fore/aft for UP/DOWN and laterally
+    for LEFT/RIGHT.  The right foot moves fore/aft for A/B.  A+B keeps the
+    right sole centered and level because the chord is produced by vertical
+    load rather than rocker tilt.  Explicitly targeting the unused axes at
+    neutral prevents the cross-axis presses that a radius-only anchor permits.
+    """
+
+    if position_std <= 0.0 or angle_std <= 0.0:
+        raise ValueError("foot pose standard deviations must be positive")
+    from mjlab.utils.lab_api.math import quat_apply_inverse
+
+    robot: Entity = env.scene[robot_cfg.name]
+    controller: Entity = env.scene[controller_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    dpad_x, dpad_y, ab = command[:, 0], command[:, 1], command[:, 2]
+    ab_direction = torch.where(ab.abs() > 1.5, torch.zeros_like(ab), ab)
+
+    foot_pos = robot.data.site_pos_w[:, robot_cfg.site_ids]
+    pad_pos = controller.data.body_link_pos_w[:, controller_cfg.body_ids]
+    pad_quat = controller.data.body_link_quat_w[:, controller_cfg.body_ids]
+    local_delta = quat_apply_inverse(
+        pad_quat.reshape(-1, 4), (foot_pos - pad_pos).reshape(-1, 3)
+    ).reshape(foot_pos.shape)
+    target_xy = torch.stack(
+        (
+            torch.stack(
+                (position_offset * dpad_y, -position_offset * dpad_x), dim=-1
+            ),
+            torch.stack(
+                (position_offset * ab_direction, torch.zeros_like(ab)), dim=-1
+            ),
+        ),
+        dim=1,
+    )
+    position_error = local_delta[:, :, :2] - target_xy
+
+    foot_quat = robot.data.site_quat_w[:, robot_cfg.site_ids]
+    qw, qx, qy, qz = (
+        foot_quat[..., 0],
+        foot_quat[..., 1],
+        foot_quat[..., 2],
+        foot_quat[..., 3],
+    )
+    roll = torch.atan2(
+        2.0 * (qw * qx + qy * qz),
+        1.0 - 2.0 * (qx.square() + qy.square()),
+    )
+    pitch = torch.asin(
+        torch.clamp(2.0 * (qw * qy - qz * qx), -1.0, 1.0)
+    )
+    target_roll = torch.stack(
+        (
+            left_nominal_roll + target_tilt * dpad_x,
+            torch.full_like(ab, right_nominal_roll),
+        ),
+        dim=-1,
+    )
+    target_pitch = torch.stack(
+        (target_tilt * dpad_y, target_tilt * ab_direction), dim=-1
+    )
+    angle_error = torch.stack((roll - target_roll, pitch - target_pitch), dim=-1)
+
+    position_score = torch.exp(
+        -torch.square(position_error / position_std).mean(dim=(1, 2))
+    )
+    angle_score = torch.exp(
+        -torch.square(angle_error / angle_std).mean(dim=(1, 2))
+    )
+    return position_score * angle_score
 
 
 def mario_foot_planar_speed_cost(

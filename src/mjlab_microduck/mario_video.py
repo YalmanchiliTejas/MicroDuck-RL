@@ -46,8 +46,10 @@ def mario_overlay_lines(
     feet = metrics.get("feet_anchored", 0.0) >= 0.5
     pose = metrics.get("standing_pose_ready", 0.0) >= 0.5
     camera = metrics.get("camera_ready", 0.0) >= 0.5
+    command_ready = metrics.get("command_ready", 1.0) >= 0.5
     green = (105, 235, 140)
     red = (255, 105, 105)
+    amber = (255, 205, 95)
     white = (245, 245, 245)
     return [
         (f"REQUEST: {request_text}", (255, 222, 80)),
@@ -56,13 +58,22 @@ def mario_overlay_lines(
         (
             "  ".join(
                 (
-                    f"SUCCESS:{'PASS' if success else 'FAIL'}",
+                    (
+                        "SUCCESS:WAIT"
+                        if not command_ready
+                        else f"SUCCESS:{'PASS' if success else 'FAIL'}"
+                    ),
                     f"FEET:{'PASS' if feet else 'FAIL'}",
                     f"POSE:{'PASS' if pose else 'FAIL'}",
                     f"CAMERA:{'PASS' if camera else 'FAIL'}",
+                    f"CMD:{'READY' if command_ready else 'WAIT'}",
                 )
             ),
-            green if success and feet and pose and camera else red,
+            (
+                amber
+                if not command_ready
+                else green if success and feet and pose and camera else red
+            ),
         ),
     ]
 

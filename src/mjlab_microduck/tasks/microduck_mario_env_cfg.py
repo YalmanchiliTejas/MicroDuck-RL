@@ -13,6 +13,7 @@ import math
 from copy import deepcopy
 
 from mjlab.managers import (
+    CurriculumTermCfg,
     EventTermCfg,
     MetricsTermCfg,
     ObservationTermCfg,
@@ -34,6 +35,7 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 
 EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (0.5, 1.25)
+BUTTON_TRANSITION_GRACE_S = 0.15
 ACTIVATE_ANGLE = math.radians(0.6)
 RELEASE_ANGLE = math.radians(0.2)
 CHORD_PRESS_TRAVEL = 0.0007
@@ -55,6 +57,27 @@ MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
 FULL_LEG_POSE_ERROR = 0.16
 MAX_LEG_POSE_ERROR = 0.40
+FOOT_POSITION_OFFSET = 0.010
+FOOT_TARGET_TILT = math.radians(1.0)
+FOOT_POSITION_STD = 0.008
+FOOT_ANGLE_STD = math.radians(2.0)
+LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
+RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
+
+# Command table order: neutral, L, R, U, D, A, B, A+B,
+# L+A, L+B, L+A+B, R+A, R+B, R+A+B.
+SINGLE_BUTTON_WEIGHTS = (
+    0.25, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125,
+    0, 0, 0, 0, 0, 0, 0,
+)
+TWO_BUTTON_WEIGHTS = (
+    0.14, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07,
+    0.088, 0.088, 0.088, 0, 0.088, 0.088, 0,
+)
+FULL_COMMAND_WEIGHTS = (
+    0.10, 0.08, 0.10, 0.04, 0.08, 0.10, 0.08,
+    0.07, 0.07, 0.05, 0.04, 0.08, 0.06, 0.05,
+)
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -137,6 +160,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
 
     cfg.commands["twist"] = microduck_mdp.MarioNesCommandCfg(
         resampling_time_range=BUTTON_RESAMPLE_S,
+        category_weights=(
+            FULL_COMMAND_WEIGHTS if play else SINGLE_BUTTON_WEIGHTS
+        ),
     )
     # Head/body slots stay present in the observation but are unused here.
     cfg.commands.pop("head_pose", None)
@@ -254,16 +280,18 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "release_angle": RELEASE_ANGLE,
         "chord_press_travel": CHORD_PRESS_TRAVEL,
         "chord_release_travel": CHORD_RELEASE_TRAVEL,
+        "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
     }
+    feet_cfg = SceneEntityCfg("robot", site_names=("left_foot", "right_foot"))
+    platforms_cfg = SceneEntityCfg(
+        "nes_controller", body_names=("dpad_platform", "ab_rocker_platform")
+    )
     anchored_button_params = {
         **controller_activation_params,
         "anchor_radius": FOOT_ANCHOR_RADIUS,
         "anchor_sensor_name": controller_feet_contact.name,
-        "robot_cfg": SceneEntityCfg("robot", site_names=("left_foot", "right_foot")),
-        "controller_cfg": SceneEntityCfg(
-            "nes_controller",
-            body_names=("dpad_platform", "ab_rocker_platform"),
-        ),
+        "robot_cfg": feet_cfg,
+        "controller_cfg": platforms_cfg,
     }
     camera_ready_params = {
         "camera_cfg": SceneEntityCfg("robot", site_names=("head_camera",)),
@@ -298,21 +326,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
         func=microduck_mdp.mario_requested_button_progress_reward,
         weight=BUTTON_PROGRESS_WEIGHT,
         params={
-            "command_name": "twist",
-            "asset_name": "nes_controller",
-            "activate_angle": ACTIVATE_ANGLE,
-            "release_angle": RELEASE_ANGLE,
-            "chord_press_travel": CHORD_PRESS_TRAVEL,
-            "chord_release_travel": CHORD_RELEASE_TRAVEL,
+            **anchored_button_params,
             "anchor_radius": FOOT_ANCHOR_RADIUS,
             "anchor_sensor_name": controller_feet_contact.name,
-            "robot_cfg": SceneEntityCfg(
-                "robot", site_names=("left_foot", "right_foot")
-            ),
-            "controller_cfg": SceneEntityCfg(
-                "nes_controller",
-                body_names=("dpad_platform", "ab_rocker_platform"),
-            ),
             **camera_ready_params,
             **standing_pose_params,
         },
@@ -321,6 +337,22 @@ def make_microduck_mario_env_cfg(play: bool = False):
         func=microduck_mdp.mario_unrequested_button_cost,
         weight=-2.0,
         params=controller_activation_params,
+    )
+    foot_pose_params = {
+        "command_name": "twist",
+        "position_offset": FOOT_POSITION_OFFSET,
+        "target_tilt": FOOT_TARGET_TILT,
+        "position_std": FOOT_POSITION_STD,
+        "angle_std": FOOT_ANGLE_STD,
+        "left_nominal_roll": LEFT_NOMINAL_FOOT_ROLL,
+        "right_nominal_roll": RIGHT_NOMINAL_FOOT_ROLL,
+        "robot_cfg": feet_cfg,
+        "controller_cfg": platforms_cfg,
+    }
+    cfg.rewards["commanded_foot_pose"] = RewardTermCfg(
+        func=microduck_mdp.mario_commanded_foot_pose_reward,
+        weight=2.0,
+        params=foot_pose_params,
     )
     # Losing support can make a button press easier in simulation but violates
     # the physical design. This is a cost (not a constant positive jackpot).
@@ -409,6 +441,17 @@ def make_microduck_mario_env_cfg(play: bool = False):
         func=microduck_mdp.mario_unrequested_button_cost,
         params=controller_activation_params,
     )
+    cfg.metrics["commanded_foot_pose"] = MetricsTermCfg(
+        func=microduck_mdp.mario_commanded_foot_pose_reward,
+        params=foot_pose_params,
+    )
+    cfg.metrics["command_ready"] = MetricsTermCfg(
+        func=microduck_mdp.mario_command_ready,
+        params={
+            "command_name": "twist",
+            "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
+        },
+    )
 
     # Small weight shifts should be discovered before smoothness is tightened.
     cfg.rewards["action_rate_l2"].weight = -0.02
@@ -428,6 +471,19 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "head_pose_bias_weight",
     ):
         cfg.curriculum.pop(name, None)
+
+    if not play:
+        cfg.curriculum["mario_command_stage"] = CurriculumTermCfg(
+            func=microduck_mdp.mario_command_category_curriculum,
+            params={
+                "command_name": "twist",
+                "weight_stages": [
+                    {"step": 0, "weights": SINGLE_BUTTON_WEIGHTS},
+                    {"step": 1_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
+                    {"step": 3_000 * 24, "weights": FULL_COMMAND_WEIGHTS},
+                ],
+            },
+        )
 
     return cfg
 

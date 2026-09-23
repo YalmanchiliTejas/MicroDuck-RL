@@ -18,6 +18,18 @@ def test_mario_overlay_names_request_and_marks_failed_gate():
     assert lines[0][0] == "REQUEST: RIGHT+A"
     assert "B:0.20" in lines[1][0]
     assert "SUCCESS:FAIL" in lines[-1][0]
+    assert "CMD:READY" in lines[-1][0]
+
+
+def test_mario_overlay_marks_command_transition_grace():
+    lines = mario_overlay_lines(
+        requested=[0, 0, 1, 0, 0, 0],
+        activation=[0, 0, 0, 0, 0, 0],
+        progress=[0, 0, 0, 0, 0, 0],
+        metrics={"command_ready": 0.0},
+    )
+    assert "CMD:WAIT" in lines[-1][0]
+    assert "SUCCESS:WAIT" in lines[-1][0]
 
 
 def test_mario_overlay_draws_without_changing_frame_shape():

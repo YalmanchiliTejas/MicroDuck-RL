@@ -24,6 +24,7 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
     cfg = make_microduck_mario_env_cfg()
     assert cfg.commands["twist"].class_type is microduck_mdp.MarioNesCommand
     assert sum(cfg.commands["twist"].category_weights) == 1.0
+    assert all(weight == 0.0 for weight in cfg.commands["twist"].category_weights[7:])
     assert cfg.commands["twist"].resampling_time_range == (0.5, 1.25)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
@@ -105,6 +106,7 @@ def test_button_rewards_are_gated_by_both_foot_anchors():
         )
         assert params["full_pose_error"] < params["max_pose_error"]
         assert params["require_exclusive"] is True
+        assert params["transition_grace_s"] > 0.0
         assert params["robot_cfg"].site_names == ("left_foot", "right_foot")
         assert params["controller_cfg"].body_names == (
             "dpad_platform",
@@ -132,6 +134,35 @@ def test_spawn_is_aligned_with_fixed_pad_layout():
 
 def test_mario_runner_has_distinct_experiment_name():
     assert MicroduckMarioRlCfg.experiment_name == "mario_nes_controller"
+
+
+def test_mario_command_curriculum_stages_singles_combos_then_chords():
+    train_cfg = make_microduck_mario_env_cfg(play=False)
+    play_cfg = make_microduck_mario_env_cfg(play=True)
+    curriculum = train_cfg.curriculum["mario_command_stage"]
+    stages = curriculum.params["weight_stages"]
+    assert stages[0]["step"] == 0
+    assert all(weight == 0.0 for weight in stages[0]["weights"][7:])
+    assert stages[1]["weights"][8] > 0.0
+    assert stages[1]["weights"][7] > 0.0
+    assert stages[1]["weights"][10] == 0.0
+    assert stages[1]["weights"][13] == 0.0
+    assert stages[2]["weights"][10] > 0.0
+    assert "mario_command_stage" not in play_cfg.curriculum
+    assert all(weight > 0.0 for weight in play_cfg.commands["twist"].category_weights)
+
+
+def test_mario_command_grace_tracks_time_since_resample():
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term.command_age = torch.tensor([0.05, 0.20])
+    term._command = torch.zeros(2, 3)
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_term=lambda _name: term)
+    )
+    ready = microduck_mdp.mario_command_ready(
+        env, transition_grace_s=0.15
+    )
+    assert ready.tolist() == [0.0, 1.0]
 
 
 def test_unloaded_controller_settles_inside_all_release_thresholds():
@@ -446,6 +477,68 @@ def test_foot_anchor_and_planar_speed_costs_penalize_walking():
     assert speed.item() == pytest.approx(0.5)
 
 
+def test_commanded_foot_pose_targets_independent_controller_axes():
+    position_offset = 0.010
+    target_tilt = math.radians(1.0)
+    left_roll = math.radians(-5.0)
+    right_roll = math.radians(5.0)
+    commands = torch.tensor(
+        [[0.0, 0.0, 0.0], [1.0, 0.0, -1.0]]  # neutral, RIGHT+B
+    )
+
+    def quat_from_roll_pitch(roll: float, pitch: float) -> list[float]:
+        cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+        cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+        return [cr * cp, sr * cp, cr * sp, -sr * sp]
+
+    foot_pos = torch.tensor(
+        [
+            [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
+            [[0.0, -position_offset, 0.0], [-position_offset, 0.0, 0.0]],
+        ]
+    )
+    foot_quat = torch.tensor(
+        [
+            [
+                quat_from_roll_pitch(left_roll, 0.0),
+                quat_from_roll_pitch(right_roll, 0.0),
+            ],
+            [
+                quat_from_roll_pitch(left_roll + target_tilt, 0.0),
+                quat_from_roll_pitch(right_roll, -target_tilt),
+            ],
+        ]
+    )
+    robot = SimpleNamespace(
+        data=SimpleNamespace(site_pos_w=foot_pos, site_quat_w=foot_quat)
+    )
+    controller = SimpleNamespace(
+        data=SimpleNamespace(
+            body_link_pos_w=torch.zeros(2, 2, 3),
+            body_link_quat_w=torch.tensor(
+                [[[1.0, 0.0, 0.0, 0.0]] * 2] * 2
+            ),
+        )
+    )
+    env = SimpleNamespace(
+        scene={"robot": robot, "nes_controller": controller},
+        command_manager=SimpleNamespace(get_command=lambda _name: commands),
+    )
+    score = microduck_mdp.mario_commanded_foot_pose_reward(
+        env,
+        command_name="twist",
+        position_offset=position_offset,
+        target_tilt=target_tilt,
+        position_std=0.008,
+        angle_std=math.radians(2.0),
+        left_nominal_roll=left_roll,
+        right_nominal_roll=right_roll,
+        robot_cfg=_resolved_cfg("robot", site_ids=[0, 1]),
+        controller_cfg=_resolved_cfg("nes_controller", body_ids=[0, 1]),
+    )
+    assert score.tolist() == pytest.approx([1.0, 1.0], abs=1e-6)
+
+
 def test_standing_pose_gate_and_l1_cost_reject_folded_legs():
     joint_pos = torch.tensor([[0.1, -0.1], [0.6, -0.6]])
     robot = SimpleNamespace(
@@ -471,6 +564,8 @@ def test_mario_cfg_exposes_unweighted_policy_quality_metrics():
         "requested_button_clean",
         "requested_button_success",
         "feet_anchored",
+        "commanded_foot_pose",
+        "command_ready",
         "unrequested_button_travel",
     }
 

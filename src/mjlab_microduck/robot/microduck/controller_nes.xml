@@ -9,11 +9,12 @@
       passive_ab_rocker pitches fore/aft (A/B). A nested 2 mm vertical travel
       axis, passive_ab_press, produces the otherwise mechanically impossible
       A+B chord when the right foot shifts more weight downward. Angular axes
-      have a 2 degree hard stop, 2.5 N m/rad centering spring, and
-      0.08 N m s/rad damping. Those values keep ordinary centered standing in
-      the dead zone while allowing a modest weight shift to reach 0.6 degrees;
-      they are exposed here for later system-identification tuning. At the
-      plate edge, 1 degree is about 0.9 mm of travel.
+      have a 2 degree hard stop, 6 N m/rad centering spring, and
+      0.25 N m s/rad damping. The high damping suppresses ringing after a
+      command transition, while the stronger spring makes each uncommanded
+      axis return decisively to neutral. A deliberate weight shift still has
+      ample torque to reach 0.6 degrees. At the plate edge, 1 degree is about
+      0.9 mm of travel.
 
       These XML values are intentionally easy to tune. Python activation and
       release thresholds live in mjlab_microduck.controller and default to
@@ -23,7 +24,7 @@
     <default>
         <default class="nes_hinge">
             <joint type="hinge" limited="true" range="-0.034906585 0.034906585"
-                   stiffness="2.5" damping="0.08" springref="0"
+                   stiffness="6.0" damping="0.25" springref="0"
                    armature="0.00002"/>
         </default>
         <default class="nes_surface">
