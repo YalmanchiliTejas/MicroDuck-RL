@@ -1,9 +1,9 @@
 """Pixel-based Double-DQN "flybrain" for the Microduck Mario controller.
 
-The flybrain chooses one of six compact controller actions.  During training
+The flybrain chooses one of ten compact controller actions.  During training
 the action is applied directly to the emulator.  During physical play it is
-sent as a *request* to the robot; only measured pad levels are allowed to step
-the emulator.
+sent as a *request* to the robot.  Left/right/jump remain gated by measured pad
+levels, while ``run`` controls the emulator-side virtual B button.
 """
 
 from __future__ import annotations
@@ -28,20 +28,29 @@ class FlybrainAction(IntEnum):
     JUMP = 3
     LEFT_JUMP = 4
     RIGHT_JUMP = 5
+    LEFT_RUN = 6
+    RIGHT_RUN = 7
+    LEFT_RUN_JUMP = 8
+    RIGHT_RUN_JUMP = 9
 
 
-ACTION_LEVELS: tuple[tuple[bool, bool, bool], ...] = (
-    (False, False, False),
-    (True, False, False),
-    (False, True, False),
-    (False, False, True),
-    (True, False, True),
-    (False, True, True),
+ACTION_LEVELS: tuple[tuple[bool, bool, bool, bool], ...] = (
+    # left, right, jump, run
+    (False, False, False, False),
+    (True, False, False, False),
+    (False, True, False, False),
+    (False, False, True, False),
+    (True, False, True, False),
+    (False, True, True, False),
+    (True, False, False, True),
+    (False, True, False, True),
+    (True, False, True, True),
+    (False, True, True, True),
 )
 
 
-def action_levels(action: int | FlybrainAction) -> tuple[bool, bool, bool]:
-    """Map a discrete action to ``(left, right, jump)`` request levels."""
+def action_levels(action: int | FlybrainAction) -> tuple[bool, bool, bool, bool]:
+    """Map an action to ``(left, right, jump, virtual_run)`` levels."""
 
     try:
         return ACTION_LEVELS[int(action)]
@@ -128,7 +137,7 @@ class DuelingQNetwork(nn.Module):
     def __init__(
         self,
         stack_depth: int = 4,
-        num_actions: int = 6,
+        num_actions: int = len(ACTION_LEVELS),
         frame_size: int = 84,
     ) -> None:
         super().__init__()

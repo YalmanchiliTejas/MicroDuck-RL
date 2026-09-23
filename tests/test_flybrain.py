@@ -52,16 +52,20 @@ def _load_visualizer():
 
 def test_flybrain_actions_cover_combinations_without_opposite_directions():
     flybrain = _load_flybrain()
-    assert [flybrain.action_levels(i) for i in range(6)] == [
-        (False, False, False),
-        (True, False, False),
-        (False, True, False),
-        (False, False, True),
-        (True, False, True),
-        (False, True, True),
+    assert [flybrain.action_levels(i) for i in range(10)] == [
+        (False, False, False, False),
+        (True, False, False, False),
+        (False, True, False, False),
+        (False, False, True, False),
+        (True, False, True, False),
+        (False, True, True, False),
+        (True, False, False, True),
+        (False, True, False, True),
+        (True, False, True, True),
+        (False, True, True, True),
     ]
     with pytest.raises(ValueError):
-        flybrain.action_levels(6)
+        flybrain.action_levels(10)
 
 
 def test_frame_preprocessing_and_stack_have_cnn_shape():
@@ -117,7 +121,7 @@ def test_dueling_network_outputs_one_q_value_per_action():
     flybrain = _load_flybrain()
     network = flybrain.DuelingQNetwork(frame_size=84)
     output = network(torch.zeros(2, 4, 84, 84, dtype=torch.uint8))
-    assert output.shape == (2, 6)
+    assert output.shape == (2, 10)
 
 
 def test_reward_packet_preserves_action_sequence_components_and_terminal():

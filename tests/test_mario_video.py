@@ -15,8 +15,9 @@ def test_mario_overlay_names_request_and_marks_failed_gate():
             "camera_ready": 1.0,
         },
     )
-    assert lines[0][0] == "REQUEST: RIGHT+A"
-    assert "B:0.20" in lines[1][0]
+    assert lines[0][0] == "REQUEST: RIGHT+JUMP"
+    assert "JUMP:0.80" in lines[1][0]
+    assert "B:" not in lines[1][0]
     assert "SUCCESS:FAIL" in lines[-1][0]
     assert "CMD:READY" in lines[-1][0]
 

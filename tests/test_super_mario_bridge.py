@@ -9,6 +9,7 @@ import pytest
 from mjlab_microduck.controller_game import ControllerFrame
 from mjlab_microduck.super_mario_bridge import (
     decode_controller_packet,
+    decode_flybrain_request_packet,
     encode_controller_packet,
 )
 from mjlab_microduck.mario_monitor import MarioFrameSubscriber
@@ -49,17 +50,25 @@ def test_sidecar_maps_direction_and_jump_combinations():
     assert sidecar.action_index(sidecar.PadLevels(jump=True)) == 3
     assert sidecar.action_index(sidecar.PadLevels(left=True, jump=True)) == 4
     assert sidecar.action_index(sidecar.PadLevels(right=True, jump=True)) == 5
-    assert sidecar.nes_actions(always_run=True)[5] == ["right", "A", "B"]
+    assert sidecar.action_index(sidecar.PadLevels(left=True), run=True) == 6
+    assert sidecar.action_index(sidecar.PadLevels(right=True), run=True) == 7
+    assert sidecar.action_index(sidecar.PadLevels(left=True, jump=True), run=True) == 8
+    assert sidecar.action_index(sidecar.PadLevels(right=True, jump=True), run=True) == 9
+    assert sidecar.nes_actions()[5] == ["right", "A"]
+    assert sidecar.nes_actions()[9] == ["right", "A", "B"]
 
 
 def test_flybrain_request_packet_uses_controller_protocol():
     sidecar = _load_sidecar()
     payload = sidecar.encode_request_packet(
-        sidecar.PadLevels(right=True, jump=True), sequence=7
+        sidecar.PadLevels(right=True, jump=True, run=True), sequence=7
     )
-    sequence, frame = decode_controller_packet(payload)
+    sequence, frame = decode_flybrain_request_packet(payload)
     assert sequence == 7
-    assert frame == ControllerFrame(right=True, jump=True)
+    assert frame.right is True
+    assert frame.jump is True
+    assert frame.run is True
+    assert frame.robot_command == (1.0, 0.0, 1.0)
 
 
 def test_sidecar_publishes_complete_rgb_frames():

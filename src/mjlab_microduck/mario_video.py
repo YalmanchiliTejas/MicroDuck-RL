@@ -11,7 +11,8 @@ from PIL import Image, ImageDraw, ImageFont
 
 from mjlab_microduck.tasks import mdp
 
-BUTTON_NAMES = ("UP", "DOWN", "LEFT", "RIGHT", "A", "B")
+GAME_BUTTON_INDICES = (2, 3, 4)
+GAME_BUTTON_NAMES = ("LEFT", "RIGHT", "JUMP")
 
 
 def _font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -30,16 +31,18 @@ def mario_overlay_lines(
     """Build human-readable overlay lines and their status colors."""
 
     requested_names = [
-        name for name, value in zip(BUTTON_NAMES, requested, strict=True) if value > 0.5
+        name
+        for index, name in zip(GAME_BUTTON_INDICES, GAME_BUTTON_NAMES, strict=True)
+        if requested[index] > 0.5
     ]
     request_text = "+".join(requested_names) if requested_names else "NEUTRAL"
     activation_text = "  ".join(
-        f"{name}:{value:.2f}"
-        for name, value in zip(BUTTON_NAMES, activation, strict=True)
+        f"{name}:{activation[index]:.2f}"
+        for index, name in zip(GAME_BUTTON_INDICES, GAME_BUTTON_NAMES, strict=True)
     )
     progress_text = "  ".join(
-        f"{name}:{value:.2f}"
-        for name, value in zip(BUTTON_NAMES, progress, strict=True)
+        f"{name}:{progress[index]:.2f}"
+        for index, name in zip(GAME_BUTTON_INDICES, GAME_BUTTON_NAMES, strict=True)
     )
 
     success = metrics.get("requested_button_success", 0.0) >= 0.5

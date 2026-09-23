@@ -1360,7 +1360,10 @@ def main():
 
                 if flybrain_receiver is not None:
                     request = flybrain_receiver.poll()
-                    policy.vel_cmd[:] = (request.left, request.right, request.jump)
+                    # Mario PPO command layout is
+                    # [signed horizontal, unused vertical, jump]. Run/B is a
+                    # game-side choice and must not alter the robot command.
+                    policy.vel_cmd[:] = request.robot_command
                     policy._update_command()
 
                 if policy_enabled:

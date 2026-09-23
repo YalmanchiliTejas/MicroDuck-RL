@@ -95,11 +95,11 @@ Keyboard-driven (velocity commands, `G` ground pick, `Y` sit/stand, `R` roulade,
 ### Physical NES controller
 
 The Mario controller is a pair of physical, spring-centered surfaces. The
-left foot stays planted on a two-axis D-pad; the right foot stays planted on
-an A/B rocker. A firmer 1.35 mm right-foot press supplies the A+B chord that a
-single fore/aft rocker cannot otherwise represent. Every moving joint uses
-the required `passive_*` prefix. Emulator code remains separate from the
-physical asset and decoder.
+left foot stays planted on the horizontal axis of a D-pad and the right foot
+uses the positive side of a rocker as JUMP/A. The other rocker axes are not
+game inputs; RUN/B is selected virtually by the high-level flybrain. Every
+moving joint uses the required `passive_*` prefix. Emulator code remains
+separate from the physical asset and decoder.
 
 Render the combined robot-and-controller MuJoCo scene to a PNG with:
 
@@ -115,10 +115,12 @@ uv run scripts/preview_mario_game.py --output mario_game_preview.png
 ```
 
 The registered task `Mjlab-MarioController-Flat-MicroDuck` trains the duck to
-follow `[dpad_x, dpad_y, ab_mode]` requests in the existing 3D twist slot:
+follow `[horizontal, 0, jump]` requests in the existing 3D twist slot:
 
-- D-pad axes use `-1`, `0`, `+1`.
-- A/B mode uses `-1=B`, `0=neutral`, `+1=A`, `+2=A+B`.
+- Horizontal uses `-1=left`, `0=neutral`, `+1=right`.
+- Jump uses `0=neutral`, `+1=A`.
+- NES B is a virtual run modifier selected by the flybrain. It is not a
+  physical robot command or controller-success signal.
 
 The actor stays 61D; only the critic receives the four physical controller
 joint values. Smoke-test it before any long run:
@@ -169,8 +171,8 @@ Videos are written beneath
 The runtime loop is intentionally one-way:
 
 ```text
-game planner -> compact 3D request -> 61D duck policy -> robot motion
-     -> measured passive joints -> hysteresis -> six NES buttons -> game
+game planner -> [horizontal, 0, jump] -> 61D duck policy -> robot motion
+     -> measured LEFT/RIGHT/JUMP + planner RUN -> NES direction/A/B -> game
 ```
 
 The request never moves the game directly. For the real NES game, the emulator
@@ -186,20 +188,22 @@ python3.13 -m venv .super-mario-venv
 
 For physical control, omit `--demo`. The emulator listens for measured pad
 levels on UDP `127.0.0.1:55355`; `SuperMarioUdpClient` sends those frames from
-the Microduck process. Direction pads hold NES `B` for running, JUMP maps to
-NES `A`, and simultaneous direction+jump is supported. A 250 ms deadman timer
-releases all buttons if controller packets stop.
+the Microduck process. JUMP maps to NES `A`; the flybrain independently
+selects whether a measured direction also receives virtual NES `B` for
+running. A 250 ms deadman timer releases all buttons if controller packets
+stop.
 
 #### Flybrain (high-level DQN)
 
 The flybrain is deliberately separate from the 50 Hz PPO motor controller. It
-sees four stacked 84×84 grayscale game frames and chooses one of six actions:
-`idle`, `left`, `right`, `jump`, `left+jump`, or `right+jump`. A dueling Double
-DQN learns those actions with prioritized replay. PER priorities belong to
-whole transitions `(frame stack, action, reward, next frame stack, done)`, not
-to individual raw frames. Every replay item is self-contained: it stores its
-uint8 pre-action stack plus the post-action frame, so random PER sampling and
-circular-buffer overwrites cannot detach an action from its resulting state.
+sees four stacked 84×84 grayscale game frames and chooses one of ten actions:
+the six `idle`/walk/jump combinations plus `left+run`, `right+run`,
+`left+run+jump`, and `right+run+jump`. A dueling Double DQN learns those
+actions with prioritized replay. PER priorities belong to whole transitions
+`(frame stack, action, reward, next frame stack, done)`, not to individual raw
+frames. Every replay item is self-contained: it stores its uint8 pre-action
+stack plus the post-action frame, so random PER sampling and circular-buffer
+overwrites cannot detach an action from its resulting state.
 
 The physical pads are now a tight, non-overlapping triangle (5–20 mm edge gaps)
 so a request change does not require crossing the original large empty spaces.

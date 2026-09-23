@@ -50,8 +50,13 @@ def run(args: argparse.Namespace) -> None:
         seed=args.seed,
     )
 
+    if config.num_actions != len(nes_actions()):
+        raise ValueError(
+            f"checkpoint has {config.num_actions} actions, but dynamic walk/run "
+            f"training requires {len(nes_actions())}; start a fresh flybrain"
+        )
     env = gym.make(args.env, render_mode="rgb_array")
-    env = JoypadSpace(env, nes_actions(always_run=not args.walk))
+    env = JoypadSpace(env, nes_actions())
     observation, _ = env.reset(seed=args.seed)
     stack = FrameStack(config.stack_depth)
     state = stack.reset(preprocess_frame(observation, config.frame_size))
@@ -125,9 +130,6 @@ def main() -> None:
         "--device", choices=("auto", "cpu", "cuda", "mps"), default="auto"
     )
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument(
-        "--walk", action="store_true", help="do not hold NES B with direction"
-    )
     args = parser.parse_args()
     if args.steps <= 0 or args.action_repeat <= 0:
         parser.error("--steps and --action-repeat must be positive")

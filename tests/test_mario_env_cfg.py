@@ -24,7 +24,10 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
     cfg = make_microduck_mario_env_cfg()
     assert cfg.commands["twist"].class_type is microduck_mdp.MarioNesCommand
     assert sum(cfg.commands["twist"].category_weights) == 1.0
-    assert all(weight == 0.0 for weight in cfg.commands["twist"].category_weights[7:])
+    weights = cfg.commands["twist"].category_weights
+    assert [index for index, weight in enumerate(weights) if weight > 0.0] == [
+        0, 1, 2, 5
+    ]
     assert cfg.commands["twist"].resampling_time_range == (0.5, 1.25)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
@@ -136,20 +139,24 @@ def test_mario_runner_has_distinct_experiment_name():
     assert MicroduckMarioRlCfg.experiment_name == "mario_nes_controller"
 
 
-def test_mario_command_curriculum_stages_singles_combos_then_chords():
+def test_mario_command_curriculum_stages_singles_then_jump_combos():
     train_cfg = make_microduck_mario_env_cfg(play=False)
     play_cfg = make_microduck_mario_env_cfg(play=True)
     curriculum = train_cfg.curriculum["mario_command_stage"]
     stages = curriculum.params["weight_stages"]
     assert stages[0]["step"] == 0
-    assert all(weight == 0.0 for weight in stages[0]["weights"][7:])
+    assert len(stages) == 2
+    assert [i for i, weight in enumerate(stages[0]["weights"]) if weight > 0] == [
+        0, 1, 2, 5
+    ]
+    assert stages[1]["step"] == 2_000 * 24
     assert stages[1]["weights"][8] > 0.0
-    assert stages[1]["weights"][7] > 0.0
+    assert stages[1]["weights"][11] > 0.0
+    assert stages[1]["weights"][7] == 0.0
     assert stages[1]["weights"][10] == 0.0
     assert stages[1]["weights"][13] == 0.0
-    assert stages[2]["weights"][10] > 0.0
     assert "mario_command_stage" not in play_cfg.curriculum
-    assert all(weight > 0.0 for weight in play_cfg.commands["twist"].category_weights)
+    assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
 
 
 def test_mario_command_grace_tracks_time_since_resample():
@@ -317,6 +324,42 @@ def test_requested_button_requires_wrong_buttons_to_be_released():
     assert permissive.item() == pytest.approx(1.0)
     assert exclusive.item() < 1e-5
     assert success.item() == 0.0
+
+
+def test_game_button_mask_ignores_virtual_b_and_unused_dpad_axes():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            # RIGHT is requested and active. DOWN and physical B also move,
+            # but neither is consumed by the three-signal Mario bridge.
+            joint_pos=torch.tensor(
+                [[math.radians(0.6), -math.radians(0.6), -math.radians(0.6), 0.0]]
+            )
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.tensor([[1.0, 0.0, 0.0]])
+        ),
+    )
+    enabled = (False, False, True, True, True, False)
+    score = microduck_mdp.mario_requested_button_reward(
+        env, require_exclusive=True, enabled_buttons=enabled
+    )
+    wrong_cost = microduck_mdp.mario_unrequested_button_cost(
+        env, enabled_buttons=enabled
+    )
+    assert score.item() == pytest.approx(1.0)
+    assert wrong_cost.item() == pytest.approx(0.0)
 
 
 def test_unrequested_button_cost_keeps_growing_past_activation():

@@ -29,6 +29,7 @@ class PadLevels:
     left: bool = False
     right: bool = False
     jump: bool = False
+    run: bool = False
 
 
 def encode_request_packet(levels: PadLevels, sequence: int) -> bytes:
@@ -41,6 +42,7 @@ def encode_request_packet(levels: PadLevels, sequence: int) -> bytes:
             "left": levels.left,
             "right": levels.right,
             "jump": levels.jump,
+            "run": levels.run,
         },
         separators=(",", ":"),
     ).encode("ascii")
@@ -149,27 +151,34 @@ def decode_packet(payload: bytes) -> tuple[int, PadLevels]:
     return sequence, PadLevels(*values)
 
 
-def nes_actions(always_run: bool = True) -> list[list[str]]:
-    """Compact JoypadSpace actions for the three physical controller pads."""
+def nes_actions() -> list[list[str]]:
+    """Joypad actions with physical direction/jump and a virtual run button."""
 
-    run = ["B"] if always_run else []
     return [
         ["NOOP"],
-        ["left", *run],
-        ["right", *run],
+        ["left"],
+        ["right"],
         ["A"],
-        ["left", "A", *run],
-        ["right", "A", *run],
+        ["left", "A"],
+        ["right", "A"],
+        ["left", "B"],
+        ["right", "B"],
+        ["left", "A", "B"],
+        ["right", "A", "B"],
     ]
 
 
-def action_index(levels: PadLevels) -> int:
-    """Map pad levels to the corresponding compact JoypadSpace index."""
+def action_index(levels: PadLevels, run: bool = False) -> int:
+    """Map measured pads plus the requested virtual-run bit to JoypadSpace."""
 
     horizontal = int(levels.right) - int(levels.left)
     if horizontal < 0:
+        if run:
+            return 8 if levels.jump else 6
         return 4 if levels.jump else 1
     if horizontal > 0:
+        if run:
+            return 9 if levels.jump else 7
         return 5 if levels.jump else 2
     return 3 if levels.jump else 0
 
@@ -212,7 +221,7 @@ def demo_levels(step: int) -> PadLevels:
     """Simple connection test: run right and periodically tap jump."""
 
     phase = step % 120
-    return PadLevels(right=True, jump=48 <= phase < 56)
+    return PadLevels(right=True, jump=48 <= phase < 56, run=True)
 
 
 def run(args: argparse.Namespace) -> None:
@@ -222,7 +231,7 @@ def run(args: argparse.Namespace) -> None:
 
     render_mode = "rgb_array" if args.headless or args.screenshot else "human"
     env = gym.make(args.env, render_mode=render_mode)
-    env = JoypadSpace(env, nes_actions(always_run=not args.walk))
+    env = JoypadSpace(env, nes_actions())
     receiver = None if args.demo else PadReceiver(args.host, args.port, args.timeout)
     observation, info = env.reset(seed=args.seed)
     flybrain = None
@@ -333,7 +342,13 @@ def run(args: argparse.Namespace) -> None:
                 # if this process stalls or exits.
                 request_sender.send(requested)
             levels = demo_levels(step) if args.demo else receiver.poll()
-            observation, reward, terminated, truncated, info = env.step(action_index(levels))
+            # During flybrain operation the requested run bit selects virtual
+            # B, while direction and jump still come only from measured pads.
+            # Manual/demo mode retains the old --walk global override.
+            virtual_run = requested.run if flybrain is not None else not args.walk
+            observation, reward, terminated, truncated, info = env.step(
+                action_index(levels, run=virtual_run)
+            )
             if active_state is not None:
                 interval_reward += float(reward)
                 interval_steps += 1
@@ -427,7 +442,11 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=DEFAULT_PORT)
     parser.add_argument("--timeout", type=float, default=0.25)
     parser.add_argument("--seed", type=int, default=123)
-    parser.add_argument("--walk", action="store_true", help="do not hold NES B with direction")
+    parser.add_argument(
+        "--walk",
+        action="store_true",
+        help="manual/demo mode only: do not add virtual B to direction",
+    )
     parser.add_argument(
         "--demo", action="store_true", help="use scripted controls instead of UDP pads"
     )

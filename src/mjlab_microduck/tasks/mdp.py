@@ -6034,10 +6034,13 @@ def mario_requested_button_reward(
     max_pose_error: float = 0.40,
     require_exclusive: bool = False,
     transition_grace_s: float = 0.0,
+    enabled_buttons: tuple[bool, ...] | None = None,
 ) -> torch.Tensor:
     """Reward requested activation only with planted feet and a usable camera."""
 
     requested = mario_nes_requested_buttons(env, command_name)
+    enabled = _mario_enabled_button_mask(requested, enabled_buttons)
+    requested = requested * enabled
     activation = mario_nes_activation(
         env,
         asset_name,
@@ -6056,7 +6059,7 @@ def mario_requested_button_reward(
         # A requested press is only useful to the game if no other direction
         # or face button is active.  Keep this continuous so releasing a wrong
         # button still supplies a gradient instead of creating a binary cliff.
-        wrong = (activation * (1.0 - requested)).amax(dim=-1)
+        wrong = (activation * (1.0 - requested) * enabled).amax(dim=-1)
         score = score * (1.0 - wrong)
     anchor_gate = _mario_foot_anchor_gate(
         env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
@@ -6116,10 +6119,13 @@ def mario_requested_button_progress_reward(
     max_pose_error: float = 0.40,
     require_exclusive: bool = False,
     transition_grace_s: float = 0.0,
+    enabled_buttons: tuple[bool, ...] | None = None,
 ) -> torch.Tensor:
     """Dense button progress only while planted and camera-ready."""
 
     requested = mario_nes_requested_buttons(env, command_name)
+    enabled = _mario_enabled_button_mask(requested, enabled_buttons)
+    requested = requested * enabled
     progress = mario_nes_progress(
         env,
         asset_name,
@@ -6141,7 +6147,7 @@ def mario_requested_button_progress_reward(
             chord_press_travel,
             chord_release_travel,
         )
-        wrong = (activation * (1.0 - requested)).amax(dim=-1)
+        wrong = (activation * (1.0 - requested) * enabled).amax(dim=-1)
         score = score * (1.0 - wrong)
     anchor_gate = _mario_foot_anchor_gate(
         env, anchor_radius, anchor_sensor_name, robot_cfg, controller_cfg
@@ -6184,6 +6190,7 @@ def mario_unrequested_button_cost(
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
     transition_grace_s: float = 0.0,
+    enabled_buttons: tuple[bool, ...] | None = None,
 ) -> torch.Tensor:
     """Non-negative, non-saturating cost for inputs absent from the request.
 
@@ -6197,6 +6204,8 @@ def mario_unrequested_button_cost(
     if activate_angle <= 0.0 or chord_press_travel <= 0.0:
         raise ValueError("activation angle and chord press travel must be positive")
     requested = mario_nes_requested_buttons(env, command_name)
+    enabled = _mario_enabled_button_mask(requested, enabled_buttons)
+    requested = requested * enabled
     del release_angle, chord_release_travel
     state = mario_nes_joint_state(env, asset_name)
     right = torch.relu(state[:, 0]) / activate_angle
@@ -6217,10 +6226,25 @@ def mario_unrequested_button_cost(
         ),
         dim=-1,
     )
-    cost = (travel * (1.0 - requested)).sum(dim=-1)
+    cost = (travel * (1.0 - requested) * enabled).sum(dim=-1)
     if transition_grace_s > 0.0:
         cost = cost * mario_command_ready(env, command_name, transition_grace_s)
     return cost
+
+
+def _mario_enabled_button_mask(
+    reference: torch.Tensor,
+    enabled_buttons: tuple[bool, ...] | None,
+) -> torch.Tensor:
+    """Return the enabled logical-button mask on ``reference``'s device."""
+
+    if enabled_buttons is None:
+        return torch.ones_like(reference)
+    if len(enabled_buttons) != reference.shape[-1]:
+        raise ValueError(
+            f"enabled_buttons must contain {reference.shape[-1]} entries"
+        )
+    return reference.new_tensor(enabled_buttons)
 
 
 def feet_contact_loss_cost(

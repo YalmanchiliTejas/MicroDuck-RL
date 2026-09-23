@@ -16,6 +16,22 @@ DEFAULT_PORT = 55355
 DEFAULT_REQUEST_PORT = 55356
 
 
+@dataclass(frozen=True, slots=True)
+class FlybrainRequest:
+    """High-level request; run is virtual and never enters robot observations."""
+
+    left: bool = False
+    right: bool = False
+    jump: bool = False
+    run: bool = False
+
+    @property
+    def robot_command(self) -> tuple[float, float, float]:
+        """Return ``[signed horizontal, zero padding, jump]`` for PPO."""
+
+        return float(self.right) - float(self.left), 0.0, float(self.jump)
+
+
 def encode_controller_packet(frame: ControllerFrame, sequence: int) -> bytes:
     """Serialize one measured controller frame for the emulator sidecar."""
 
@@ -49,6 +65,26 @@ def decode_controller_packet(payload: bytes) -> tuple[int, ControllerFrame]:
             raise ValueError(f"controller field {key!r} must be boolean")
         levels.append(value)
     return sequence, ControllerFrame(*levels)
+
+
+def decode_flybrain_request_packet(
+    payload: bytes,
+) -> tuple[int, FlybrainRequest]:
+    """Decode the four-level flybrain request sent by the emulator sidecar."""
+
+    message = json.loads(payload.decode("ascii"))
+    if message.get("v") != PROTOCOL_VERSION:
+        raise ValueError("unsupported controller protocol version")
+    sequence = message.get("seq")
+    if not isinstance(sequence, int) or isinstance(sequence, bool) or sequence < 0:
+        raise ValueError("invalid sequence")
+    values = []
+    for key in ("left", "right", "jump", "run"):
+        value = message.get(key)
+        if not isinstance(value, bool):
+            raise ValueError(f"{key} must be boolean")
+        values.append(value)
+    return sequence, FlybrainRequest(*values)
 
 
 @dataclass(slots=True)
@@ -90,7 +126,7 @@ class FlybrainUdpReceiver:
     port: int = DEFAULT_REQUEST_PORT
     timeout_s: float = 0.5
     _socket: socket.socket = field(init=False)
-    _frame: ControllerFrame = field(default_factory=ControllerFrame, init=False)
+    _request: FlybrainRequest = field(default_factory=FlybrainRequest, init=False)
     _last_sequence: int = field(default=-1, init=False)
     _last_received: float = field(default=0.0, init=False)
 
@@ -101,28 +137,27 @@ class FlybrainUdpReceiver:
         self._socket.bind((self.host, self.port))
         self._socket.setblocking(False)
 
-    def poll(self) -> ControllerFrame:
+    def poll(self) -> FlybrainRequest:
         while True:
             try:
                 payload, _ = self._socket.recvfrom(4096)
             except BlockingIOError:
                 break
             try:
-                sequence, frame = decode_controller_packet(payload)
+                sequence, request = decode_flybrain_request_packet(payload)
             except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
                 continue
             if sequence > self._last_sequence:
                 self._last_sequence = sequence
-                self._frame = frame
+                self._request = request
                 self._last_received = time.monotonic()
         if time.monotonic() - self._last_received > self.timeout_s:
-            return ControllerFrame()
-        return self._frame
+            return FlybrainRequest()
+        return self._request
 
     @property
     def command_vector(self) -> tuple[float, float, float]:
-        frame = self.poll()
-        return float(frame.left), float(frame.right), float(frame.jump)
+        return self.poll().robot_command
 
     def close(self) -> None:
         self._socket.close()

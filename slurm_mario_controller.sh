@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Train the low-level physical NES foot controller on Purdue CS Slurm and
+# Train the low-level LEFT/RIGHT/JUMP foot controller on Purdue CS Slurm and
 # export the final checkpoint to a normalized ONNX policy.
 #
 # Purdue CS jobs must be submitted from queue.cs.purdue.edu. The default

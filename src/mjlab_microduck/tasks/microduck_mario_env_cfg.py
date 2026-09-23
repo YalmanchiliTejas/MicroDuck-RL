@@ -1,9 +1,9 @@
-"""Microduck physical NES-controller task for a Mario-style platform game.
+"""Microduck physical controller task for a Mario-style platform game.
 
-The policy receives ``[dpad_x, dpad_y, ab_mode]`` in the established 3D twist
-slot and must move real spring-centered controller surfaces with its feet.
-``ab_mode`` is -1=B, +1=A, and +2=A+B. The game consumes measured controller
-joint state, so requests cannot bypass the simulated robot.
+The policy receives ``[horizontal, 0, jump]`` in the established 3D twist slot
+and must move real spring-centered controller surfaces with its feet. NES B is
+a virtual game-side run modifier selected by the flybrain; it is deliberately
+absent from the robot command and physical-success objective.
 
 Actor observations remain exactly 61D. Controller joint state is critic-only
 privileged state and is not required on the real robot.
@@ -64,20 +64,24 @@ FOOT_ANGLE_STD = math.radians(2.0)
 LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
 RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
 
-# Command table order: neutral, L, R, U, D, A, B, A+B,
+# The command sampler retains its historical 14-entry table, but Mario only
+# needs neutral, L, R, jump/A, L+jump, and R+jump. B/run is selected virtually
+# by the flybrain and never requires another physical foot input.
+# Table order: neutral, L, R, U, D, A, B, A+B,
 # L+A, L+B, L+A+B, R+A, R+B, R+A+B.
 SINGLE_BUTTON_WEIGHTS = (
-    0.25, 0.125, 0.125, 0.125, 0.125, 0.125, 0.125,
+    0.25, 0.25, 0.25, 0, 0, 0.25, 0,
     0, 0, 0, 0, 0, 0, 0,
 )
 TWO_BUTTON_WEIGHTS = (
-    0.14, 0.07, 0.07, 0.07, 0.07, 0.07, 0.07,
-    0.088, 0.088, 0.088, 0, 0.088, 0.088, 0,
+    0.15, 0.15, 0.15, 0, 0, 0.15, 0,
+    0, 0.20, 0, 0, 0.20, 0, 0,
 )
-FULL_COMMAND_WEIGHTS = (
-    0.10, 0.08, 0.10, 0.04, 0.08, 0.10, 0.08,
-    0.07, 0.07, 0.05, 0.04, 0.08, 0.06, 0.05,
-)
+FULL_COMMAND_WEIGHTS = TWO_BUTTON_WEIGHTS
+
+# Activation tensor order is UP, DOWN, LEFT, RIGHT, A, B. Only the physical
+# signals consumed by the Mario bridge participate in success/exclusivity.
+GAME_BUTTON_MASK = (False, False, True, True, True, False)
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -281,6 +285,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "chord_press_travel": CHORD_PRESS_TRAVEL,
         "chord_release_travel": CHORD_RELEASE_TRAVEL,
         "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
+        "enabled_buttons": GAME_BUTTON_MASK,
     }
     feet_cfg = SceneEntityCfg("robot", site_names=("left_foot", "right_foot"))
     platforms_cfg = SceneEntityCfg(
@@ -479,8 +484,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "command_name": "twist",
                 "weight_stages": [
                     {"step": 0, "weights": SINGLE_BUTTON_WEIGHTS},
-                    {"step": 1_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
-                    {"step": 3_000 * 24, "weights": FULL_COMMAND_WEIGHTS},
+                    {"step": 2_000 * 24, "weights": TWO_BUTTON_WEIGHTS},
                 ],
             },
         )
