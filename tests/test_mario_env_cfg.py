@@ -28,7 +28,7 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
     assert [index for index, weight in enumerate(weights) if weight > 0.0] == [
         0, 1, 2, 5
     ]
-    assert cfg.commands["twist"].resampling_time_range == (0.5, 1.25)
+    assert cfg.commands["twist"].resampling_time_range == (0.75, 1.50)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
     for group in ("actor", "critic"):
@@ -59,6 +59,7 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     assert params["release_angle"] == pytest.approx(math.radians(0.2))
     assert params["chord_release_travel"] == 0.0005
     assert params["chord_press_travel"] == 0.0007
+    assert params["use_chord"] is False
 
 
 def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
@@ -78,7 +79,7 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert rewards["commanded_trunk_offset"].weight > 0.0
     assert rewards["standing_height"].params["target_height"] == 0.130
     assert rewards["camera_crouch"].weight < 0.0
-    assert rewards["camera_crouch"].params["trunk_floor"] == 0.120
+    assert rewards["camera_crouch"].params["trunk_floor"] == 0.128
     assert rewards["camera_crouch"].params["camera_floor"] == 0.230
     assert rewards["leg_pose_l1"].weight < 0.0
     assert (
@@ -149,7 +150,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert [i for i, weight in enumerate(stages[0]["weights"]) if weight > 0] == [
         0, 1, 2, 5
     ]
-    assert stages[1]["step"] == 2_000 * 24
+    assert stages[1]["step"] == 2_500 * 24
     assert stages[1]["weights"][8] > 0.0
     assert stages[1]["weights"][11] > 0.0
     assert stages[1]["weights"][7] == 0.0
@@ -235,6 +236,32 @@ def test_compact_command_decodes_all_six_buttons_and_chords():
         [True, False, False, False, False, True],
         [False, True, False, False, False, False],
     ]
+
+
+def test_legacy_chord_slide_does_not_activate_game_jump():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            joint_pos=torch.tensor([[0.0, 0.0, 0.0, -0.0010]])
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+    )
+    game_activation = microduck_mdp.mario_nes_activation(env)
+    legacy_activation = microduck_mdp.mario_nes_activation(env, use_chord=True)
+    game_progress = microduck_mdp.mario_nes_progress(env)
+    assert game_activation[0, 4:].tolist() == [0.0, 0.0]
+    assert game_progress[0, 4:].tolist() == [0.0, 0.0]
+    assert legacy_activation[0, 4:].tolist() == [1.0, 1.0]
 
 
 def test_foot_sensor_targets_controller_surfaces_not_floor():
@@ -324,6 +351,74 @@ def test_requested_button_requires_wrong_buttons_to_be_released():
     assert permissive.item() == pytest.approx(1.0)
     assert exclusive.item() < 1e-5
     assert success.item() == 0.0
+
+
+def test_clean_success_counts_released_neutral_as_success():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(joint_pos=torch.zeros(1, 4))
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.zeros(1, 3)
+        ),
+    )
+    success = microduck_mdp.mario_clean_button_success(
+        env,
+        enabled_buttons=(False, False, True, True, True, False),
+    )
+    assert success.item() == 1.0
+
+
+def test_clean_success_thresholds_readiness_components_not_their_product(
+    monkeypatch,
+):
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            joint_pos=torch.tensor([[math.radians(0.6), 0.0, 0.0, 0.0]])
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=1,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.tensor([[1.0, 0.0, 0.0]])
+        ),
+    )
+    monkeypatch.setattr(
+        microduck_mdp,
+        "mario_camera_ready",
+        lambda *args, **kwargs: torch.tensor([0.8]),
+    )
+    monkeypatch.setattr(
+        microduck_mdp,
+        "mario_standing_pose_ready",
+        lambda *args, **kwargs: torch.tensor([0.8]),
+    )
+    success = microduck_mdp.mario_clean_button_success(
+        env,
+        camera_cfg=SceneEntityCfg("robot"),
+        standing_pose_cfg=SceneEntityCfg("robot"),
+        enabled_buttons=(False, False, True, True, True, False),
+    )
+    assert success.item() == 1.0
 
 
 def test_game_button_mask_ignores_virtual_b_and_unused_dpad_axes():

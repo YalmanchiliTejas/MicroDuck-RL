@@ -5934,8 +5934,13 @@ def mario_nes_activation(
     release_angle: float = 0.00349066,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
+    use_chord: bool = False,
 ) -> torch.Tensor:
-    """Continuous ``[up, down, left, right, A, B]`` physical activation."""
+    """Continuous ``[up, down, left, right, A, B]`` physical activation.
+
+    ``use_chord`` is disabled for Mario: RUN/B is virtual, so ordinary support
+    load on the legacy vertical A+B slide must not masquerade as JUMP/A.
+    """
 
     state = mario_nes_joint_state(env, asset_name)
     right, left = _signed_axis_activation(
@@ -5947,18 +5952,24 @@ def mario_nes_activation(
     a_tilt, b_tilt = _signed_axis_activation(
         state[:, 2], activate_angle, release_angle
     )
-    if chord_release_travel < 0.0 or chord_press_travel <= chord_release_travel:
-        raise ValueError(
-            "chord_press_travel must exceed non-negative chord_release_travel"
+    if use_chord:
+        if (
+            chord_release_travel < 0.0
+            or chord_press_travel <= chord_release_travel
+        ):
+            raise ValueError(
+                "chord_press_travel must exceed non-negative chord_release_travel"
+            )
+        chord = torch.clamp(
+            (state[:, 3] - chord_release_travel)
+            / (chord_press_travel - chord_release_travel),
+            0.0,
+            1.0,
         )
-    chord = torch.clamp(
-        (state[:, 3] - chord_release_travel)
-        / (chord_press_travel - chord_release_travel),
-        0.0,
-        1.0,
-    )
-    a = torch.maximum(a_tilt, chord)
-    b = torch.maximum(b_tilt, chord)
+        a = torch.maximum(a_tilt, chord)
+        b = torch.maximum(b_tilt, chord)
+    else:
+        a, b = a_tilt, b_tilt
     return torch.stack((up, down, left, right, a, b), dim=-1)
 
 
@@ -5967,6 +5978,7 @@ def mario_nes_progress(
     asset_name: str = "nes_controller",
     activate_angle: float = 0.01047198,
     chord_press_travel: float = 0.0007,
+    use_chord: bool = False,
 ) -> torch.Tensor:
     """Dense directional progress toward ``[up, down, left, right, A, B]``.
 
@@ -5974,15 +5986,18 @@ def mario_nes_progress(
     to follow before a rocker reaches its actual activation threshold.
     """
 
-    if chord_press_travel <= 0.0:
+    if use_chord and chord_press_travel <= 0.0:
         raise ValueError("chord_press_travel must be positive")
     state = mario_nes_joint_state(env, asset_name)
     right, left = _signed_axis_progress(state[:, 0], activate_angle)
     up, down = _signed_axis_progress(state[:, 1], activate_angle)
     a_tilt, b_tilt = _signed_axis_progress(state[:, 2], activate_angle)
-    chord = torch.clamp(state[:, 3] / chord_press_travel, 0.0, 1.0)
-    a = torch.maximum(a_tilt, chord)
-    b = torch.maximum(b_tilt, chord)
+    if use_chord:
+        chord = torch.clamp(state[:, 3] / chord_press_travel, 0.0, 1.0)
+        a = torch.maximum(a_tilt, chord)
+        b = torch.maximum(b_tilt, chord)
+    else:
+        a, b = a_tilt, b_tilt
     return torch.stack((up, down, left, right, a, b), dim=-1)
 
 
@@ -6016,6 +6031,7 @@ def mario_requested_button_reward(
     release_angle: float = 0.00349066,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
+    use_chord: bool = False,
     anchor_radius: float | None = None,
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
@@ -6048,6 +6064,7 @@ def mario_requested_button_reward(
         release_angle,
         chord_press_travel,
         chord_release_travel,
+        use_chord,
     )
     requested_count = requested.sum(dim=-1)
     score = (activation * requested).sum(dim=-1) / torch.clamp(
@@ -6067,7 +6084,7 @@ def mario_requested_button_reward(
     if anchor_gate is not None:
         score = score * anchor_gate
     if camera_cfg is not None:
-        score = score * mario_camera_ready(
+        camera_score = mario_camera_ready(
             env,
             camera_cfg=camera_cfg,
             min_trunk_height=min_trunk_height,
@@ -6079,13 +6096,18 @@ def mario_requested_button_reward(
             min_view_alignment=min_view_alignment,
             full_view_alignment=full_view_alignment,
         )
+        # Geometric posture gating keeps collapsed states at zero without
+        # squaring away the button gradient when both usable-state scores are
+        # merely good rather than numerically perfect.
+        score = score * torch.sqrt(camera_score.clamp(min=0.0))
     if standing_pose_cfg is not None:
-        score = score * mario_standing_pose_ready(
+        pose_score = mario_standing_pose_ready(
             env,
             asset_cfg=standing_pose_cfg,
             full_error=full_pose_error,
             max_error=max_pose_error,
         )
+        score = score * torch.sqrt(pose_score.clamp(min=0.0))
     if transition_grace_s > 0.0:
         score = score * mario_command_ready(
             env, command_name, transition_grace_s
@@ -6101,6 +6123,7 @@ def mario_requested_button_progress_reward(
     chord_press_travel: float = 0.0007,
     release_angle: float = 0.00349066,
     chord_release_travel: float = 0.0005,
+    use_chord: bool = False,
     anchor_radius: float | None = None,
     anchor_sensor_name: str | None = None,
     robot_cfg: SceneEntityCfg | None = None,
@@ -6131,6 +6154,7 @@ def mario_requested_button_progress_reward(
         asset_name,
         activate_angle,
         chord_press_travel,
+        use_chord,
     )
     requested_count = requested.sum(dim=-1)
     score = (progress * requested).sum(dim=-1) / torch.clamp(
@@ -6146,6 +6170,7 @@ def mario_requested_button_progress_reward(
             release_angle,
             chord_press_travel,
             chord_release_travel,
+            use_chord,
         )
         wrong = (activation * (1.0 - requested) * enabled).amax(dim=-1)
         score = score * (1.0 - wrong)
@@ -6155,7 +6180,7 @@ def mario_requested_button_progress_reward(
     if anchor_gate is not None:
         score = score * anchor_gate
     if camera_cfg is not None:
-        score = score * mario_camera_ready(
+        camera_score = mario_camera_ready(
             env,
             camera_cfg=camera_cfg,
             min_trunk_height=min_trunk_height,
@@ -6167,13 +6192,15 @@ def mario_requested_button_progress_reward(
             min_view_alignment=min_view_alignment,
             full_view_alignment=full_view_alignment,
         )
+        score = score * torch.sqrt(camera_score.clamp(min=0.0))
     if standing_pose_cfg is not None:
-        score = score * mario_standing_pose_ready(
+        pose_score = mario_standing_pose_ready(
             env,
             asset_cfg=standing_pose_cfg,
             full_error=full_pose_error,
             max_error=max_pose_error,
         )
+        score = score * torch.sqrt(pose_score.clamp(min=0.0))
     if transition_grace_s > 0.0:
         score = score * mario_command_ready(
             env, command_name, transition_grace_s
@@ -6189,6 +6216,7 @@ def mario_unrequested_button_cost(
     release_angle: float = 0.00349066,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
+    use_chord: bool = False,
     transition_grace_s: float = 0.0,
     enabled_buttons: tuple[bool, ...] | None = None,
 ) -> torch.Tensor:
@@ -6201,7 +6229,7 @@ def mario_unrequested_button_cost(
     the policy is always paid to unload a wrongly held rocker/chord.
     """
 
-    if activate_angle <= 0.0 or chord_press_travel <= 0.0:
+    if activate_angle <= 0.0 or (use_chord and chord_press_travel <= 0.0):
         raise ValueError("activation angle and chord press travel must be positive")
     requested = mario_nes_requested_buttons(env, command_name)
     enabled = _mario_enabled_button_mask(requested, enabled_buttons)
@@ -6214,7 +6242,11 @@ def mario_unrequested_button_cost(
     down = torch.relu(-state[:, 1]) / activate_angle
     a_tilt = torch.relu(state[:, 2]) / activate_angle
     b_tilt = torch.relu(-state[:, 2]) / activate_angle
-    chord = state[:, 3] / chord_press_travel
+    chord = (
+        state[:, 3] / chord_press_travel
+        if use_chord
+        else torch.zeros_like(state[:, 3])
+    )
     travel = torch.stack(
         (
             up,
@@ -6640,18 +6672,91 @@ def mario_feet_anchored(
 def mario_clean_button_success(
     env: ManagerBasedRlEnv,
     success_threshold: float = 0.95,
+    wrong_threshold: float = 0.05,
+    readiness_threshold: float = 0.5,
     **reward_params,
 ) -> torch.Tensor:
-    """Strict success rate derived from the fully gated button score.
+    """Componentwise clean-success diagnostic, including neutral release.
 
-    Unlike the dense progress and activation rewards, this is binary and is
-    intended for metrics only.  A sample succeeds only when every requested
-    button is nearly fully active, wrong buttons are released, both feet are
-    planted, and camera/standing-pose gates are satisfied.
+    Do not threshold the product of soft readiness gates: two individually
+    acceptable 0.9 gates would turn a physically perfect press into 0.81 and
+    report failure. Neutral is successful when every enabled input is released.
     """
 
-    score = mario_requested_button_reward(env, **reward_params)
-    return (score >= success_threshold).to(dtype=score.dtype)
+    if not 0.0 < success_threshold <= 1.0:
+        raise ValueError("success_threshold must be in (0, 1]")
+    if not 0.0 <= wrong_threshold < success_threshold:
+        raise ValueError("wrong_threshold must be below success_threshold")
+    if not 0.0 <= readiness_threshold <= 1.0:
+        raise ValueError("readiness_threshold must be in [0, 1]")
+
+    command_name = reward_params.get("command_name", "twist")
+    requested = mario_nes_requested_buttons(env, command_name)
+    enabled = _mario_enabled_button_mask(
+        requested, reward_params.get("enabled_buttons")
+    )
+    requested = requested * enabled
+    activation = mario_nes_activation(
+        env,
+        reward_params.get("asset_name", "nes_controller"),
+        reward_params.get("activate_angle", 0.01047198),
+        reward_params.get("release_angle", 0.00349066),
+        reward_params.get("chord_press_travel", 0.0007),
+        reward_params.get("chord_release_travel", 0.0005),
+        reward_params.get("use_chord", False),
+    )
+    requested_count = requested.sum(dim=-1)
+    requested_min = torch.where(
+        requested.bool(), activation, torch.ones_like(activation)
+    ).amin(dim=-1)
+    requested_ok = (requested_count == 0.0) | (
+        requested_min >= success_threshold
+    )
+    wrong_max = (activation * (1.0 - requested) * enabled).amax(dim=-1)
+    success = requested_ok & (wrong_max <= wrong_threshold)
+
+    anchor_gate = _mario_foot_anchor_gate(
+        env,
+        reward_params.get("anchor_radius"),
+        reward_params.get("anchor_sensor_name"),
+        reward_params.get("robot_cfg"),
+        reward_params.get("controller_cfg"),
+    )
+    if anchor_gate is not None:
+        success &= anchor_gate.bool()
+
+    camera_cfg = reward_params.get("camera_cfg")
+    if camera_cfg is not None:
+        camera_score = mario_camera_ready(
+            env,
+            camera_cfg=camera_cfg,
+            min_trunk_height=reward_params.get("min_trunk_height", 0.11),
+            full_trunk_height=reward_params.get("full_trunk_height", 0.12),
+            min_camera_height=reward_params.get("min_camera_height", 0.20),
+            full_camera_height=reward_params.get("full_camera_height", 0.23),
+            full_tilt_deg=reward_params.get("full_tilt_deg", 12.0),
+            max_tilt_deg=reward_params.get("max_tilt_deg", 20.0),
+            min_view_alignment=reward_params.get("min_view_alignment", 0.85),
+            full_view_alignment=reward_params.get("full_view_alignment", 0.95),
+        )
+        success &= camera_score >= readiness_threshold
+
+    standing_pose_cfg = reward_params.get("standing_pose_cfg")
+    if standing_pose_cfg is not None:
+        pose_score = mario_standing_pose_ready(
+            env,
+            asset_cfg=standing_pose_cfg,
+            full_error=reward_params.get("full_pose_error", 0.16),
+            max_error=reward_params.get("max_pose_error", 0.40),
+        )
+        success &= pose_score >= readiness_threshold
+
+    transition_grace_s = reward_params.get("transition_grace_s", 0.0)
+    if transition_grace_s > 0.0:
+        success &= mario_command_ready(
+            env, command_name, transition_grace_s
+        ).bool()
+    return success.to(dtype=activation.dtype)
 
 
 def head_pose_tracking(

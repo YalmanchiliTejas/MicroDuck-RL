@@ -34,21 +34,21 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 )
 
 EPISODE_LENGTH_S = 20.0
-BUTTON_RESAMPLE_S = (0.5, 1.25)
-BUTTON_TRANSITION_GRACE_S = 0.15
+BUTTON_RESAMPLE_S = (0.75, 1.50)
+BUTTON_TRANSITION_GRACE_S = 0.25
 ACTIVATE_ANGLE = math.radians(0.6)
 RELEASE_ANGLE = math.radians(0.2)
 CHORD_PRESS_TRAVEL = 0.0007
 CHORD_RELEASE_TRAVEL = 0.0005
-BUTTON_ACTIVATION_WEIGHT = 3.0
-BUTTON_PROGRESS_WEIGHT = 1.0
+BUTTON_ACTIVATION_WEIGHT = 5.0
+BUTTON_PROGRESS_WEIGHT = 2.0
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.025
 COM_FORWARD_OFFSET = 0.012
 COM_LATERAL_OFFSET = 0.010
 COMMAND_LEAN_ANGLE = math.radians(6.0)
-MIN_TRUNK_HEIGHT = 0.110
-FULL_TRUNK_HEIGHT = 0.120
+MIN_TRUNK_HEIGHT = 0.115
+FULL_TRUNK_HEIGHT = 0.128
 MIN_CAMERA_HEIGHT = 0.200
 FULL_CAMERA_HEIGHT = 0.230
 FULL_CAMERA_TILT_DEG = 12.0
@@ -212,7 +212,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     cfg.rewards["pose"].weight = 2.0
     cfg.rewards["upright"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_lean_reward,
-        weight=5.0,
+        weight=8.0,
         params={
             "command_name": "twist",
             "lean_angle": COMMAND_LEAN_ANGLE,
@@ -235,7 +235,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["standing_height"] = RewardTermCfg(
         func=microduck_mdp.height_target_gaussian,
-        weight=3.0,
+        weight=4.0,
         params={
             "target_height": STAND_HEIGHT,
             "std": 0.012,
@@ -261,7 +261,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["leg_pose_l1"] = RewardTermCfg(
         func=microduck_mdp.mario_leg_pose_l1_cost,
-        weight=-2.0,
+        weight=-3.0,
         params={"asset_cfg": leg_pose_cfg, "scale": 0.35, "max_cost": 2.0},
     )
     cfg.rewards["neutral_head_pose"] = RewardTermCfg(
@@ -284,6 +284,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "release_angle": RELEASE_ANGLE,
         "chord_press_travel": CHORD_PRESS_TRAVEL,
         "chord_release_travel": CHORD_RELEASE_TRAVEL,
+        "use_chord": False,
         "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
         "enabled_buttons": GAME_BUTTON_MASK,
     }
@@ -340,7 +341,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["unrequested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_unrequested_button_cost,
-        weight=-2.0,
+        weight=-3.0,
         params=controller_activation_params,
     )
     foot_pose_params = {
@@ -363,7 +364,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     # the physical design. This is a cost (not a constant positive jackpot).
     cfg.rewards["foot_contact_loss"] = RewardTermCfg(
         func=microduck_mdp.feet_contact_loss_cost,
-        weight=-6.0,
+        weight=-8.0,
         params={
             "sensor_name": controller_feet_contact.name,
         },
@@ -484,7 +485,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "command_name": "twist",
                 "weight_stages": [
                     {"step": 0, "weights": SINGLE_BUTTON_WEIGHTS},
-                    {"step": 2_000 * 24, "weights": TWO_BUTTON_WEIGHTS},
+                    {"step": 2_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
                 ],
             },
         )
