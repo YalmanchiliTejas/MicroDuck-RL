@@ -2,17 +2,37 @@
 
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 import numpy as np
 import torch
 from mjlab.utils.wrappers import VideoRecorder
 from PIL import Image, ImageDraw, ImageFont
 
+from mjlab_microduck.controller import NESController
 from mjlab_microduck.tasks import mdp
 
 GAME_BUTTON_INDICES = (2, 3, 4)
 GAME_BUTTON_NAMES = ("LEFT", "RIGHT", "JUMP")
+
+
+@dataclass(frozen=True, slots=True)
+class MarioFrameDiagnostics:
+    """Physical controller details that disambiguate travel from a real click."""
+
+    # [dpad_x, dpad_y, A/B rocker, downward chord travel].
+    joint_state: Sequence[float]
+    # Stateful hysteretic decoder in [UP, DOWN, LEFT, RIGHT, A, B] order.
+    decoded: Sequence[bool]
+    # Raw, pre-weight travel charged to LEFT, RIGHT, and JUMP respectively.
+    unrequested_travel: Sequence[float]
+    unrequested_raw_total: float
+    unrequested_applied_total: float
+    unrequested_weighted: float
+    # Per-foot global net contact-force vectors, [left, right].
+    foot_forces: Sequence[Sequence[float]]
 
 
 def _font(size: int) -> ImageFont.ImageFont | ImageFont.FreeTypeFont:
@@ -27,6 +47,7 @@ def mario_overlay_lines(
     activation: Sequence[float],
     progress: Sequence[float],
     metrics: dict[str, float],
+    diagnostics: MarioFrameDiagnostics | None = None,
 ) -> list[tuple[str, tuple[int, int, int]]]:
     """Build human-readable overlay lines and their status colors."""
 
@@ -54,10 +75,58 @@ def mario_overlay_lines(
     red = (255, 105, 105)
     amber = (255, 205, 95)
     white = (245, 245, 245)
-    return [
+    lines = [
         (f"REQUEST: {request_text}", (255, 222, 80)),
         (f"activation  {activation_text}", white),
         (f"progress    {progress_text}", (185, 215, 255)),
+    ]
+    if diagnostics is not None:
+        dpad_x, dpad_y, ab_angle, press_travel = diagnostics.joint_state
+        decoded_names = ("UP", "DOWN", "LEFT", "RIGHT", "A", "B")
+        decoded_text = "  ".join(
+            f"{name}:{int(active)}"
+            for name, active in zip(
+                decoded_names, diagnostics.decoded, strict=True
+            )
+        )
+        wrong_binary = any(
+            diagnostics.decoded[index] and requested[index] <= 0.5
+            for index in GAME_BUTTON_INDICES
+        )
+        left_wrong, right_wrong, jump_wrong = diagnostics.unrequested_travel
+        force_text = []
+        for name, force in zip(("L", "R"), diagnostics.foot_forces, strict=True):
+            magnitude = math.sqrt(sum(component * component for component in force))
+            force_text.append(f"{name}:{magnitude:.1f}/z{force[2]:+.1f}")
+        lines.extend(
+            (
+                (
+                    "joints(deg)  "
+                    f"X:{math.degrees(dpad_x):+.2f}  "
+                    f"Y:{math.degrees(dpad_y):+.2f}  "
+                    f"AB:{math.degrees(ab_angle):+.2f}  "
+                    f"PRESS:{press_travel * 1e3:.2f}mm",
+                    (205, 205, 255),
+                ),
+                (
+                    f"decoder     {decoded_text}",
+                    red if wrong_binary else green,
+                ),
+                (
+                    "wrong travel "
+                    f"L:{left_wrong:.2f}  R:{right_wrong:.2f}  "
+                    f"J:{jump_wrong:.2f}  "
+                    f"RAW:{diagnostics.unrequested_raw_total:.2f}  "
+                    f"APPLIED:{diagnostics.unrequested_applied_total:.2f}  "
+                    f"RW:{diagnostics.unrequested_weighted:+.2f}",
+                    red
+                    if diagnostics.unrequested_applied_total > 0.0
+                    else amber if not command_ready else green,
+                ),
+                (f"foot force(N) {'  '.join(force_text)}", (210, 235, 210)),
+            )
+        )
+    lines.append(
         (
             "  ".join(
                 (
@@ -77,8 +146,9 @@ def mario_overlay_lines(
                 if not command_ready
                 else green if success and feet and pose and camera else red
             ),
-        ),
-    ]
+        )
+    )
+    return lines
 
 
 def annotate_mario_frame(
@@ -118,6 +188,64 @@ class MarioDebugVideoRecorder(VideoRecorder):
             for name, values in self._wrapped_env.metrics_manager.get_active_iterable_terms(0)
         }
 
+    def _frame_diagnostics(
+        self,
+        requested: torch.Tensor,
+        joint_state: torch.Tensor,
+        metrics: dict[str, float],
+    ) -> MarioFrameDiagnostics:
+        if not hasattr(self, "_mario_nes_decoder"):
+            self._mario_nes_decoder = NESController()
+        state = joint_state.detach().cpu().tolist()
+        decoded_state = self._mario_nes_decoder.update(*state)
+        decoded_dict = decoded_state.as_dict()
+        decoded = tuple(
+            decoded_dict[name] for name in ("UP", "DOWN", "LEFT", "RIGHT", "A", "B")
+        )
+
+        reward_cfg = self._wrapped_env.reward_manager.get_term_cfg(
+            "unrequested_button"
+        )
+        activate_angle = float(reward_cfg.params["activate_angle"])
+        enabled = reward_cfg.params.get("enabled_buttons")
+        if enabled is None:
+            enabled = (True,) * 6
+        requested_values = requested.detach().cpu().tolist()
+        x_angle, _, ab_angle, _ = state
+        raw_game_travel = (
+            max(-x_angle, 0.0) / activate_angle,
+            max(x_angle, 0.0) / activate_angle,
+            max(ab_angle, 0.0) / activate_angle,
+        )
+        contributions = tuple(
+            travel * (1.0 - requested_values[index]) * float(enabled[index])
+            for travel, index in zip(
+                raw_game_travel, GAME_BUTTON_INDICES, strict=True
+            )
+        )
+        raw_total = sum(contributions)
+        command_ready = metrics.get("command_ready", 1.0) >= 0.5
+        applied_total = raw_total if command_ready else 0.0
+
+        sensor = self._wrapped_env.scene.sensors["feet_ground_contact"]
+        force = sensor.data.force[0].detach().cpu()
+        if force.ndim == 1:
+            force = force.reshape(1, 3)
+        if force.shape[0] != 2:
+            raise RuntimeError(
+                "Mario diagnostics expected left/right contact-force vectors"
+            )
+        foot_forces = tuple(tuple(float(value) for value in row) for row in force)
+        return MarioFrameDiagnostics(
+            joint_state=state,
+            decoded=decoded,
+            unrequested_travel=contributions,
+            unrequested_raw_total=raw_total,
+            unrequested_applied_total=applied_total,
+            unrequested_weighted=applied_total * float(reward_cfg.weight),
+            foot_forces=foot_forces,
+        )
+
     def _record_frame(self) -> None:
         if self._wrapped_env.render_mode != "rgb_array":
             return
@@ -131,10 +259,14 @@ class MarioDebugVideoRecorder(VideoRecorder):
             requested = mdp.mario_nes_requested_buttons(self._wrapped_env)[0]
             activation = mdp.mario_nes_activation(self._wrapped_env)[0]
             progress = mdp.mario_nes_progress(self._wrapped_env)[0]
+            joint_state = mdp.mario_nes_joint_state(self._wrapped_env)[0]
+        metrics = self._metric_values()
+        diagnostics = self._frame_diagnostics(requested, joint_state, metrics)
         lines = mario_overlay_lines(
             requested.detach().cpu().tolist(),
             activation.detach().cpu().tolist(),
             progress.detach().cpu().tolist(),
-            self._metric_values(),
+            metrics,
+            diagnostics,
         )
         self.current_video_frames.append(annotate_mario_frame(rgb_frame, lines))
