@@ -6,12 +6,12 @@
 # partition below is the department's V100-backed gorman-gpu partition.
 #
 # Smoke test first:
-#   MARIO_CONTROLLER_RUN_TAG=nes-v2-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
+#   MARIO_CONTROLLER_RUN_TAG=nes-selfcenter-v3-smoke NUM_ENVS=64 TARGET_ITERATIONS=5 \
 #     ITERATIONS_PER_JOB=5 CHECKPOINT_INTERVAL=5 MAX_JOBS=1 \
 #     ./slurm_mario_controller.sh
 #
-# Full training from scratch:
-#   ./slurm_mario_controller.sh
+# Full training from scratch (new tag: old rocker checkpoints are incompatible):
+#   MARIO_CONTROLLER_RUN_TAG=nes-selfcenter-v3 ./slurm_mario_controller.sh
 #
 # Optional actor-only warm start, when a proven 61D checkpoint exists:
 #   MARIO_BALANCE_CHECKPOINT=/path/to/proven/model_N.pt ./slurm_mario_controller.sh
@@ -57,7 +57,7 @@ NUM_ENVS="${NUM_ENVS:-2048}"
 TARGET_ITERATIONS="${TARGET_ITERATIONS:-5000}"
 ITERATIONS_PER_JOB="${ITERATIONS_PER_JOB:-4000}"
 CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
-MARIO_CONTROLLER_RUN_TAG="${MARIO_CONTROLLER_RUN_TAG:-default}"
+MARIO_CONTROLLER_RUN_TAG="${MARIO_CONTROLLER_RUN_TAG:-nes-selfcenter-v3}"
 MARIO_BALANCE_CHECKPOINT="${MARIO_BALANCE_CHECKPOINT:-}"
 MARIO_VIDEO_ONLY="${MARIO_VIDEO_ONLY:-0}"
 MARIO_SLURM_PARTITION="${MARIO_SLURM_PARTITION:-gpu}"

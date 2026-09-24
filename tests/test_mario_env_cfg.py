@@ -60,6 +60,7 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     assert params["chord_release_travel"] == 0.0005
     assert params["chord_press_travel"] == 0.0007
     assert params["use_chord"] is False
+    assert rewards["foot_anchor"].func is microduck_mdp.mario_commanded_foot_anchor_cost
 
 
 def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
@@ -160,6 +161,46 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
 
 
+def test_mario_combo_stage_waits_for_active_single_button_success():
+    stages = make_microduck_mario_env_cfg().curriculum[
+        "mario_command_stage"
+    ].params["weight_stages"]
+    term = SimpleNamespace(
+        cfg=SimpleNamespace(category_weights=stages[0]["weights"])
+    )
+    commands = torch.tensor(
+        [[0.0, 0.0, 0.0], [-1.0, 0.0, 0.0],
+         [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]]
+    )
+    metrics = SimpleNamespace(
+        active_terms=["requested_button_success", "command_ready"],
+        _step_values=torch.tensor(
+            [[1.0, 1.0], [0.2, 1.0], [0.8, 1.0], [0.8, 1.0]]
+        ),
+    )
+    env = SimpleNamespace(
+        common_step_counter=2_500 * 24,
+        device=torch.device("cpu"),
+        command_manager=SimpleNamespace(
+            get_term=lambda _name: term,
+            get_command=lambda _name: commands,
+        ),
+        metrics_manager=metrics,
+    )
+    stage = microduck_mdp.mario_command_category_curriculum(
+        env, torch.arange(4), "twist", stages
+    )
+    assert stage.item() == 0.0
+    assert term.cfg.category_weights == stages[0]["weights"]
+    env.common_step_counter += 250
+    metrics._step_values[1:, 0] = 0.9
+    stage = microduck_mdp.mario_command_category_curriculum(
+        env, torch.arange(4), "twist", stages
+    )
+    assert stage.item() == 1.0
+    assert term.cfg.category_weights == stages[1]["weights"]
+
+
 def test_mario_command_grace_tracks_time_since_resample():
     term = object.__new__(microduck_mdp.MarioNesCommand)
     term.command_age = torch.tensor([0.05, 0.20])
@@ -191,7 +232,7 @@ def test_unloaded_controller_settles_inside_all_release_thresholds():
     assert press_travel < 0.0007
 
 
-def test_chord_slide_rejects_standing_load_but_accepts_weight_shift():
+def test_legacy_chord_slide_is_compliant_but_ignored_by_mario():
     path = (
         Path(__file__).parents[1]
         / "src/mjlab_microduck/robot/microduck/controller_nes.xml"
@@ -487,7 +528,74 @@ def test_unrequested_button_cost_keeps_growing_past_activation():
         ),
     )
     cost = microduck_mdp.mario_unrequested_button_cost(env)
-    assert cost[1] == pytest.approx(2.0 * cost[0])
+    assert cost.tolist() == pytest.approx([1.0, 2.5], abs=1e-5)
+
+
+def test_unrequested_button_cost_ignores_motion_inside_release_deadband():
+    names = list(microduck_mdp._MARIO_NES_JOINTS)
+
+    class FakeController:
+        data = SimpleNamespace(
+            joint_pos=torch.tensor(
+                [
+                    [-math.radians(0.19), 0.0, 0.0, 0.0],
+                    [-math.radians(0.30), 0.0, 0.0, 0.0],
+                ]
+            )
+        )
+
+        @staticmethod
+        def find_joints(patterns):
+            name = patterns[0].removeprefix("^").removesuffix("$")
+            return [names.index(name)], [name]
+
+    env = SimpleNamespace(
+        num_envs=2,
+        device=torch.device("cpu"),
+        scene={"nes_controller": FakeController()},
+        command_manager=SimpleNamespace(
+            get_command=lambda _name: torch.zeros(2, 3)
+        ),
+    )
+    cost = microduck_mdp.mario_unrequested_button_cost(env)
+    assert cost.tolist() == pytest.approx([0.0, 0.25], abs=1e-5)
+
+
+def test_calibrated_foot_targets_drive_only_requested_mario_axes():
+    from mjlab_microduck.tasks.microduck_mario_env_cfg import (
+        FOOT_LATERAL_OFFSET,
+        FOOT_POSITION_OFFSET,
+        LEFT_NEUTRAL_FOOT_X,
+        LEFT_NEUTRAL_FOOT_Y,
+        RIGHT_NEUTRAL_FOOT_X,
+        RIGHT_NEUTRAL_FOOT_Y,
+    )
+
+    commands = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],  # neutral
+            [-1.0, 0.0, 0.0],  # LEFT
+            [1.0, 0.0, 0.0],  # RIGHT
+            [0.0, 0.0, 1.0],  # A
+            [1.0, 0.0, 1.0],  # RIGHT+A
+        ]
+    )
+    target = microduck_mdp._mario_commanded_foot_target_xy(
+        commands,
+        FOOT_POSITION_OFFSET,
+        FOOT_LATERAL_OFFSET,
+        LEFT_NEUTRAL_FOOT_X,
+        LEFT_NEUTRAL_FOOT_Y,
+        RIGHT_NEUTRAL_FOOT_X,
+        RIGHT_NEUTRAL_FOOT_Y,
+    )
+    assert target[0, 0].tolist() == pytest.approx([0.007, -0.0012])
+    assert target[1, 0, 1] == pytest.approx(-0.0012 + 0.018)
+    assert target[2, 0, 1] == pytest.approx(-0.0012 - 0.018)
+    assert target[3, 1, 0] == pytest.approx(0.006 + 0.012)
+    assert target[4, 0].tolist() == pytest.approx(target[2, 0].tolist())
+    assert target[4, 1].tolist() == pytest.approx(target[3, 1].tolist())
+    assert torch.all(torch.linalg.vector_norm(target, dim=-1) < 0.025)
 
 
 def _resolved_cfg(name, *, site_ids=None, body_ids=None):
@@ -621,7 +729,7 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
     left_roll = math.radians(-5.0)
     right_roll = math.radians(5.0)
     commands = torch.tensor(
-        [[0.0, 0.0, 0.0], [1.0, 0.0, -1.0]]  # neutral, RIGHT+B
+        [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0]]  # neutral, RIGHT
     )
 
     def quat_from_roll_pitch(roll: float, pitch: float) -> list[float]:
@@ -632,7 +740,7 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
     foot_pos = torch.tensor(
         [
             [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-            [[0.0, -position_offset, 0.0], [-position_offset, 0.0, 0.0]],
+            [[0.0, -position_offset, 0.0], [0.0, 0.0, 0.0]],
         ]
     )
     foot_quat = torch.tensor(
@@ -643,7 +751,7 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
             ],
             [
                 quat_from_roll_pitch(left_roll + target_tilt, 0.0),
-                quat_from_roll_pitch(right_roll, -target_tilt),
+                quat_from_roll_pitch(right_roll, 0.0),
             ],
         ]
     )

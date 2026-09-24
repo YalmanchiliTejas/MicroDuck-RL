@@ -6,15 +6,16 @@
 
       Left foot: passive_dpad_y pitches fore/aft (UP/DOWN), while nested
       passive_dpad_x rolls laterally (RIGHT/LEFT). Right foot:
-      passive_ab_rocker pitches fore/aft (A/B). A nested 2 mm vertical travel
-      axis, passive_ab_press, produces the otherwise mechanically impossible
-      A+B chord when the right foot shifts more weight downward. Angular axes
-      have a 2 degree hard stop, 6 N m/rad centering spring, and
-      0.25 N m s/rad damping. The high damping suppresses ringing after a
-      command transition, while the stronger spring makes each uncommanded
-      axis return decisively to neutral. A deliberate weight shift still has
-      ample torque to reach 0.6 degrees. At the plate edge, 1 degree is about
-      0.9 mm of travel.
+      passive_ab_rocker pitches fore/aft (A only). A nested 2 mm vertical
+      travel axis, passive_ab_press, is retained for compatibility but ignored
+      by Mario: RUN/B is selected in software, never by a vertical chord.
+      The rocker pivots sit under their measured HOME sole contact centroids
+      (left x=-7 mm; right x=-6 mm); the old x=+7 mm pivots put those
+      centroids about 11-14 mm behind the hinges. The right hinge is A-only:
+      B/RUN is virtual, so negative rocker travel serves no game input.
+      Angular axes have a 2 degree stop (A is unilateral). Main centering
+      springs are 3 N m/rad; the lateral spring is 1.5 N m/rad. A 4 N foot
+      load shifted 10 mm can cross the 0.6 degree activation threshold.
 
       These XML values are intentionally easy to tune. Python activation and
       release thresholds live in mjlab_microduck.controller and default to
@@ -24,7 +25,17 @@
     <default>
         <default class="nes_hinge">
             <joint type="hinge" limited="true" range="-0.034906585 0.034906585"
-                   stiffness="6.0" damping="0.25" springref="0"
+                   stiffness="3.0" damping="0.25" springref="0"
+                   armature="0.00002"/>
+        </default>
+        <default class="nes_a_hinge">
+            <joint type="hinge" limited="true" range="0 0.034906585"
+                   stiffness="3.0" damping="0.25" springref="0"
+                   armature="0.00002"/>
+        </default>
+        <default class="nes_dpad_x_hinge">
+            <joint type="hinge" limited="true" range="-0.034906585 0.034906585"
+                   stiffness="1.5" damping="0.15" springref="0"
                    armature="0.00002"/>
         </default>
         <default class="nes_surface">
@@ -45,19 +56,19 @@
            surfaces as a subtree without silently selecting only one geom. -->
       <body name="controller_root">
         <!-- Recessed fixed housings sit below the two moving top surfaces. -->
-        <geom name="dpad_housing" type="box" pos="0.007 0.041 0.004"
+        <geom name="dpad_housing" type="box" pos="-0.007 0.043 0.004"
               size="0.059 0.039 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
-        <geom name="ab_housing" type="box" pos="0.007 -0.041 0.004"
+        <geom name="ab_housing" type="box" pos="-0.006 -0.041 0.004"
               size="0.059 0.039 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
 
         <!-- LEFT FOOT: outer pitch hinge, then nested roll hinge. -->
-        <body name="dpad_pitch_gimbal" pos="0.007 0.041 0.009">
+        <body name="dpad_pitch_gimbal" pos="-0.007 0.043 0.009">
             <joint name="passive_dpad_y" class="nes_hinge" axis="0 1 0"/>
             <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
             <body name="dpad_platform">
-                <joint name="passive_dpad_x" class="nes_hinge" axis="1 0 0"/>
+                <joint name="passive_dpad_x" class="nes_dpad_x_hinge" axis="1 0 0"/>
                 <inertial pos="0 0 0" mass="0.035" diaginertia="2.2e-5 5.0e-5 6.3e-5"/>
                 <geom name="dpad_surface" class="nes_surface" rgba="0.12 0.15 0.21 1"/>
 
@@ -87,18 +98,15 @@
             </body>
         </body>
 
-        <!-- RIGHT FOOT: fore/aft rocker plus a tiny vertical A+B chord press.
-             10000 N/m keeps ordinary two-foot standing below the 0.5 mm
-             release point.  A deliberate near-full-body weight shift reaches
-             the 0.7 mm chord threshold.  The old 3000 N/m spring sat at about
-             1 mm under ordinary load and therefore held A+B almost constantly. -->
-        <body name="ab_press_carriage" pos="0.007 -0.041 0.009">
+        <!-- RIGHT FOOT: A-only fore/aft rocker. The unused chord slide remains
+             in the joint layout for critic compatibility but Mario ignores it. -->
+        <body name="ab_press_carriage" pos="-0.006 -0.041 0.009">
             <joint name="passive_ab_press" type="slide" axis="0 0 1"
                    limited="true" range="-0.002 0" springref="0"
                    stiffness="10000" damping="30.0" armature="0.00002"/>
             <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
             <body name="ab_rocker_platform">
-                <joint name="passive_ab_rocker" class="nes_hinge" axis="0 1 0"/>
+                <joint name="passive_ab_rocker" class="nes_a_hinge" axis="0 1 0"/>
                 <inertial pos="0 0 0" mass="0.035" diaginertia="2.2e-5 5.0e-5 6.3e-5"/>
                 <geom name="ab_surface" class="nes_surface" rgba="0.18 0.12 0.16 1"/>
                 <geom name="button_a_visual" class="nes_visual" type="cylinder"

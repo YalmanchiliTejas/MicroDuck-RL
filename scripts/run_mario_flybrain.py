@@ -171,7 +171,7 @@ def main() -> int:
             str(robot_executable),
             str(ROOT / "scripts/infer_policy.py"),
             "--scene",
-            str(ROOT / "src/mjlab_microduck/robot/microduck/scene_controller_pads.xml"),
+            str(ROOT / "src/mjlab_microduck/robot/microduck/scene_controller_nes.xml"),
             "--walking",
             str(args.policy.resolve()),
             "--new-cmd-obs",

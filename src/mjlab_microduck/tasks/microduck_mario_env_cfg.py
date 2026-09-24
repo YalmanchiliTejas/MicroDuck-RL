@@ -57,10 +57,16 @@ MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
 FULL_LEG_POSE_ERROR = 0.16
 MAX_LEG_POSE_ERROR = 0.40
-FOOT_POSITION_OFFSET = 0.010
+FOOT_POSITION_OFFSET = 0.012
+FOOT_LATERAL_OFFSET = 0.018
+# Pad-local HOME sole-site coordinates measured from the recentered pivots.
+LEFT_NEUTRAL_FOOT_X = 0.007
+LEFT_NEUTRAL_FOOT_Y = -0.0012
+RIGHT_NEUTRAL_FOOT_X = 0.006
+RIGHT_NEUTRAL_FOOT_Y = -0.0008
 FOOT_TARGET_TILT = math.radians(1.0)
-FOOT_POSITION_STD = 0.008
-FOOT_ANGLE_STD = math.radians(2.0)
+FOOT_POSITION_STD = 0.012
+FOOT_ANGLE_STD = math.radians(4.0)
 LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
 RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
 
@@ -347,6 +353,11 @@ def make_microduck_mario_env_cfg(play: bool = False):
     foot_pose_params = {
         "command_name": "twist",
         "position_offset": FOOT_POSITION_OFFSET,
+        "lateral_offset": FOOT_LATERAL_OFFSET,
+        "left_neutral_x": LEFT_NEUTRAL_FOOT_X,
+        "left_neutral_y": LEFT_NEUTRAL_FOOT_Y,
+        "right_neutral_x": RIGHT_NEUTRAL_FOOT_X,
+        "right_neutral_y": RIGHT_NEUTRAL_FOOT_Y,
         "target_tilt": FOOT_TARGET_TILT,
         "position_std": FOOT_POSITION_STD,
         "angle_std": FOOT_ANGLE_STD,
@@ -370,18 +381,21 @@ def make_microduck_mario_env_cfg(play: bool = False):
         },
     )
     cfg.rewards["foot_anchor"] = RewardTermCfg(
-        func=microduck_mdp.mario_foot_anchor_cost,
+        func=microduck_mdp.mario_commanded_foot_anchor_cost,
         weight=-4.0,
         params={
-            "deadzone": 0.008,
+            **{
+                key: foot_pose_params[key]
+                for key in (
+                    "command_name", "position_offset", "lateral_offset",
+                    "left_neutral_x", "left_neutral_y",
+                    "right_neutral_x", "right_neutral_y",
+                )
+            },
+            "deadzone": 0.006,
             "scale": 0.020,
-            "robot_cfg": SceneEntityCfg(
-                "robot", site_names=("left_foot", "right_foot")
-            ),
-            "controller_cfg": SceneEntityCfg(
-                "nes_controller",
-                body_names=("dpad_platform", "ab_rocker_platform"),
-            ),
+            "robot_cfg": feet_cfg,
+            "controller_cfg": platforms_cfg,
         },
     )
     cfg.rewards["foot_planar_speed"] = RewardTermCfg(
@@ -483,6 +497,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             func=microduck_mdp.mario_command_category_curriculum,
             params={
                 "command_name": "twist",
+                "combo_unlock_success": 0.65,
                 "weight_stages": [
                     {"step": 0, "weights": SINGLE_BUTTON_WEIGHTS},
                     {"step": 2_500 * 24, "weights": TWO_BUTTON_WEIGHTS},

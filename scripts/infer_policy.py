@@ -6,6 +6,7 @@ import csv
 import math
 import os
 import pickle
+from pathlib import Path
 import queue
 import select
 import sys
@@ -823,7 +824,7 @@ def main():
     parser.add_argument("--roller", action="store_true", help="Use roller skate robot XML (robot_walk_rollers.xml)")
     parser.add_argument("--scene", type=str, default=None, help="Path to a scene XML, overriding the default pick (e.g. src/mjlab_microduck/robot/microduck/scene_allcollisions.xml)")
     parser.add_argument("--flybrain-requests", action="store_true",
-                        help="receive flybrain button requests and send measured controller-pad levels")
+                        help="receive Flybrain requests and decode physical NES rocker levels")
     parser.add_argument("--flybrain-host", default="127.0.0.1")
     parser.add_argument("--flybrain-port", type=int, default=55356)
     parser.add_argument("--mario-host", default="127.0.0.1")
@@ -912,6 +913,11 @@ def main():
     # 14-servo layout works, e.g. scene_allcollisions.xml).
     if args.scene:
         xml_path = args.scene
+    elif args.flybrain_requests:
+        xml_path = str(
+            Path(__file__).resolve().parents[1]
+            / "src/mjlab_microduck/robot/microduck/scene_controller_nes.xml"
+        )
     elif args.roller:
         xml_path = MICRODUCK_ROLLERS_XML
     elif args.kick_left or args.kick_right:
@@ -1017,7 +1023,7 @@ def main():
     if args.roller:
         spawn_height = 0.1385  # rollers add 13.5 mm height
     elif args.flybrain_requests:
-        spawn_height = 0.12  # matches microduck_mario_env_cfg fixed spawn
+        spawn_height = 0.135  # matches microduck_mario_env_cfg reset pose
     else:
         spawn_height = 0.125
     data.qpos[qpos_adr + 2] = spawn_height
@@ -1114,14 +1120,19 @@ def main():
 
     flybrain_receiver = None
     mario_client = None
-    mario_pads = None
-    mario_pad_qpos = None
+    mario_decoder = None
+    mario_joint_qpos = None
     mario_frame_subscriber = None
     mario_monitor = None
     mario_frame_sequence = -1
     mario_frame_wait_reported = False
     if args.flybrain_requests:
-        from mjlab_microduck.controller_game import Button, PadBank
+        from mjlab_microduck.controller import (
+            ABRockerCalibration,
+            NESController,
+            NESControllerCalibration,
+        )
+        from mjlab_microduck.controller_game import ControllerFrame
         from mjlab_microduck.mario_monitor import (
             MarioFrameSubscriber,
             MarioMonitorTexture,
@@ -1136,22 +1147,33 @@ def main():
             port=args.flybrain_port,
         )
         mario_client = SuperMarioUdpClient(host=args.mario_host, port=args.mario_port)
-        mario_pads = PadBank()
-        mario_pad_qpos = {}
-        for button in Button:
-            name = f"passive_{button.value}_pad"
+        mario_decoder = NESController(
+            NESControllerCalibration(
+                ab=ABRockerCalibration(
+                    chord_press_travel=0.003,
+                    chord_release_travel=0.0025,
+                )
+            )
+        )
+        mario_joint_qpos = {}
+        for name in (
+            NESController.DPAD_X_JOINT,
+            NESController.DPAD_Y_JOINT,
+            NESController.AB_JOINT,
+            NESController.AB_PRESS_JOINT,
+        ):
             joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if joint_id < 0:
                 parser.error(
-                    "--flybrain-requests requires the controller scene; add "
-                    "--scene src/mjlab_microduck/robot/microduck/scene_controller_pads.xml"
+                    "--flybrain-requests requires scene_controller_nes.xml "
+                    f"with {name}"
                 )
-            mario_pad_qpos[button] = int(model.jnt_qposadr[joint_id])
+            mario_joint_qpos[name] = int(model.jnt_qposadr[joint_id])
         mario_frame_subscriber = MarioFrameSubscriber(args.mario_frame_shm)
         mario_monitor = MarioMonitorTexture(model)
         print(
             f"Flybrain requests: udp://{args.flybrain_host}:{args.flybrain_port}; "
-            f"measured pads -> udp://{args.mario_host}:{args.mario_port}"
+            f"measured NES rockers -> udp://{args.mario_host}:{args.mario_port}"
         )
         print(
             f'Mario display: shared memory "{args.mario_frame_shm}" -> '
@@ -1457,11 +1479,20 @@ def main():
                     mujoco.mj_step(model, data)
 
                 if mario_client is not None:
-                    travel = {
-                        button: -float(data.qpos[address])
-                        for button, address in mario_pad_qpos.items()
-                    }
-                    mario_client.send(mario_pads.update(travel).controller)
+                    state = mario_decoder.update(
+                        *(
+                            float(data.qpos[mario_joint_qpos[name]])
+                            for name in (
+                                NESController.DPAD_X_JOINT,
+                                NESController.DPAD_Y_JOINT,
+                                NESController.AB_JOINT,
+                            )
+                        ),
+                        -float(data.qpos[mario_joint_qpos[NESController.AB_PRESS_JOINT]]),
+                    )
+                    mario_client.send(
+                        ControllerFrame(left=state.left, right=state.right, jump=state.a)
+                    )
 
                 # The NES emulator lives in the Python 3.13 sidecar while this
                 # MuJoCo/BAM process is Python 3.12. Copy its newest complete

@@ -11,7 +11,11 @@ import torch
 from mjlab.utils.wrappers import VideoRecorder
 from PIL import Image, ImageDraw, ImageFont
 
-from mjlab_microduck.controller import NESController
+from mjlab_microduck.controller import (
+    ABRockerCalibration,
+    NESController,
+    NESControllerCalibration,
+)
 from mjlab_microduck.tasks import mdp
 
 GAME_BUTTON_INDICES = (2, 3, 4)
@@ -195,7 +199,17 @@ class MarioDebugVideoRecorder(VideoRecorder):
         metrics: dict[str, float],
     ) -> MarioFrameDiagnostics:
         if not hasattr(self, "_mario_nes_decoder"):
-            self._mario_nes_decoder = NESController()
+            # The legacy chord slide is retained for critic compatibility but
+            # is physically disabled in Mario. Keep the overlay's decoder in
+            # sync with that game-side contract.
+            self._mario_nes_decoder = NESController(
+                NESControllerCalibration(
+                    ab=ABRockerCalibration(
+                        chord_press_travel=0.003,
+                        chord_release_travel=0.0025,
+                    )
+                )
+            )
         state = joint_state.detach().cpu().tolist()
         decoded_state = self._mario_nes_decoder.update(*state)
         decoded_dict = decoded_state.as_dict()
@@ -207,15 +221,17 @@ class MarioDebugVideoRecorder(VideoRecorder):
             "unrequested_button"
         )
         activate_angle = float(reward_cfg.params["activate_angle"])
+        release_angle = float(reward_cfg.params["release_angle"])
         enabled = reward_cfg.params.get("enabled_buttons")
         if enabled is None:
             enabled = (True,) * 6
         requested_values = requested.detach().cpu().tolist()
         x_angle, _, ab_angle, _ = state
+        span = max(activate_angle - release_angle, 1e-6)
         raw_game_travel = (
-            max(-x_angle, 0.0) / activate_angle,
-            max(x_angle, 0.0) / activate_angle,
-            max(ab_angle, 0.0) / activate_angle,
+            max(-x_angle - release_angle, 0.0) / span,
+            max(x_angle - release_angle, 0.0) / span,
+            max(ab_angle - release_angle, 0.0) / span,
         )
         contributions = tuple(
             travel * (1.0 - requested_values[index]) * float(enabled[index])

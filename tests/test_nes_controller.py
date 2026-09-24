@@ -2,6 +2,7 @@ from math import radians
 from pathlib import Path
 
 import mujoco
+import numpy as np
 import pytest
 
 from mjlab_microduck.controller import NESController
@@ -25,12 +26,15 @@ def test_physical_controller_compiles_with_four_passive_limited_axes():
     assert actual == expected
     for name in expected - {"passive_ab_press"}:
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        lower = 0.0 if name == "passive_ab_rocker" else -radians(2)
         assert tuple(model.jnt_range[joint_id]) == pytest.approx(
-            (-radians(2), radians(2))
+            (lower, radians(2))
         )
-        assert model.jnt_stiffness[joint_id] == pytest.approx(6.0)
+        stiffness = 1.5 if name == "passive_dpad_x" else 3.0
+        assert model.jnt_stiffness[joint_id] == pytest.approx(stiffness)
         dof_id = model.jnt_dofadr[joint_id]
-        assert model.dof_damping[dof_id] == pytest.approx(0.25)
+        damping = 0.15 if name == "passive_dpad_x" else 0.25
+        assert model.dof_damping[dof_id] == pytest.approx(damping)
 
     for name in ("dpad_surface", "ab_surface"):
         geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
@@ -45,6 +49,55 @@ def test_full_scene_places_each_foot_over_its_controller():
     for body_name in ("dpad_platform", "ab_rocker_platform", "mario_monitor"):
         assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name) >= 0
     assert model.nq > 3
+
+
+def test_single_foot_loads_can_click_each_mario_axis_without_false_neutral():
+    """A 4 N sole load at the calibrated pressure point must cross 0.6°."""
+
+    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
+    left_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "dpad_platform")
+    right_body = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_BODY, "ab_rocker_platform"
+    )
+
+    def settled_angles(
+        left_xy: tuple[float, float], right_xy: tuple[float, float]
+    ) -> tuple[float, float, float]:
+        data = mujoco.MjData(model)
+        for _ in range(500):
+            data.qfrc_applied[:] = 0.0
+            mujoco.mj_forward(model, data)
+            for body_id, (x, y) in (
+                (left_body, left_xy), (right_body, right_xy)
+            ):
+                point = data.xpos[body_id].copy() + np.array([x, y, 0.0])
+                mujoco.mj_applyFT(
+                    model,
+                    data,
+                    np.array([0.0, 0.0, -4.0]),
+                    np.zeros(3),
+                    point,
+                    body_id,
+                    data.qfrc_applied,
+                )
+            mujoco.mj_step(model, data)
+        result = []
+        for name in ("passive_dpad_x", "passive_dpad_y", "passive_ab_rocker"):
+            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+            result.append(float(data.qpos[model.jnt_qposadr[joint_id]]))
+        return tuple(result)
+
+    # Sole *sites* sit a few millimetres ahead of their actual pressure
+    # centroids. Apply these forces at pressure centroids, not at site targets.
+    neutral = settled_angles((0.0, 0.0), (0.0, 0.0))
+    assert all(abs(value) < radians(0.2) for value in neutral)
+    left = settled_angles((0.0, 0.018), (0.0, 0.0))
+    right = settled_angles((0.0, -0.018), (0.0, 0.0))
+    jump = settled_angles((0.0, 0.0), (0.012, 0.0))
+    assert left[0] < -radians(0.6)
+    assert right[0] > radians(0.6)
+    assert jump[2] > radians(0.6)
+    assert abs(jump[0]) < radians(0.2)
 
 
 @pytest.mark.parametrize(

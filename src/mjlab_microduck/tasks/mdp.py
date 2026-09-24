@@ -5832,20 +5832,47 @@ def mario_command_category_curriculum(
     env_ids: torch.Tensor,
     command_name: str,
     weight_stages: list[dict],
+    combo_unlock_success: float = 0.65,
 ) -> torch.Tensor:
-    """Stage Mario requests from singles to combinations.
+    """Stage Mario requests from singles to combinations after competence.
 
     Each stage is ``{"step": int, "weights": tuple[float, ...]}`` in the
     command table order.  The live command term is mutated so subsequent
-    resamples immediately use the selected distribution.
+    resamples immediately use the selected distribution. The combo stage is
+    never forced merely because the clock advanced: active single-button
+    requests must already be clean, planted, and camera-ready.
     """
 
     del env_ids
+    if not 0.0 < combo_unlock_success <= 1.0:
+        raise ValueError("combo_unlock_success must be in (0, 1]")
     stage_index = 0
     for index, stage in enumerate(weight_stages):
         if env.common_step_counter >= stage["step"]:
             stage_index = index
     term = env.command_manager.get_term(command_name)
+    if stage_index > 0:
+        last_check = getattr(term, "_mario_combo_last_check_step", -250)
+        if (
+            not getattr(term, "_mario_combo_unlocked", False)
+            and env.common_step_counter - last_check >= 250
+        ):
+            term._mario_combo_last_check_step = env.common_step_counter
+            metrics = env.metrics_manager
+            success_idx = metrics.active_terms.index("requested_button_success")
+            ready_idx = metrics.active_terms.index("command_ready")
+            command = env.command_manager.get_command(command_name)
+            # Neutral success cannot unlock combinations; neither can command
+            # transition frames, which still reflect the previous request.
+            active = (command[:, 0] != 0.0) | (command[:, 1] != 0.0) | (
+                command[:, 2] > 0.5
+            )
+            valid = active & (metrics._step_values[:, ready_idx] > 0.5)
+            if valid.any():
+                success = metrics._step_values[valid, success_idx].mean()
+                if success >= combo_unlock_success:
+                    term._mario_combo_unlocked = True
+        stage_index = int(getattr(term, "_mario_combo_unlocked", False))
     weights = tuple(weight_stages[stage_index]["weights"])
     if len(weights) != len(term.cfg.category_weights):
         raise ValueError("Mario command curriculum weight count is invalid")
@@ -6224,9 +6251,10 @@ def mario_unrequested_button_cost(
 
     Activation deliberately clamps at one after the physical threshold, which
     is correct for reporting a button press but gives PPO no slope when a wrong
-    button is held farther into its stop.  This cost instead uses raw directed
-    controller travel normalized by the activation thresholds.  Consequently
-    the policy is always paid to unload a wrongly held rocker/chord.
+    button is held farther into its stop. This cost ignores the release
+    deadband and then uses unsaturated directed travel normalized by the
+    release-to-activation interval. Thus a wrong held rocker keeps a useful
+    unloading gradient without charging harmless subthreshold motion.
     """
 
     if activate_angle <= 0.0 or (use_chord and chord_press_travel <= 0.0):
@@ -6234,16 +6262,19 @@ def mario_unrequested_button_cost(
     requested = mario_nes_requested_buttons(env, command_name)
     enabled = _mario_enabled_button_mask(requested, enabled_buttons)
     requested = requested * enabled
-    del release_angle, chord_release_travel
     state = mario_nes_joint_state(env, asset_name)
-    right = torch.relu(state[:, 0]) / activate_angle
-    left = torch.relu(-state[:, 0]) / activate_angle
-    up = torch.relu(state[:, 1]) / activate_angle
-    down = torch.relu(-state[:, 1]) / activate_angle
-    a_tilt = torch.relu(state[:, 2]) / activate_angle
-    b_tilt = torch.relu(-state[:, 2]) / activate_angle
+    # Ignore harmless motion inside the decoder's release deadband. Beyond it,
+    # retain an unsaturated gradient even when the wrong switch is fully on.
+    angle_span = max(activate_angle - release_angle, 1e-6)
+    right = torch.relu(state[:, 0] - release_angle) / angle_span
+    left = torch.relu(-state[:, 0] - release_angle) / angle_span
+    up = torch.relu(state[:, 1] - release_angle) / angle_span
+    down = torch.relu(-state[:, 1] - release_angle) / angle_span
+    a_tilt = torch.relu(state[:, 2] - release_angle) / angle_span
+    b_tilt = torch.relu(-state[:, 2] - release_angle) / angle_span
     chord = (
-        state[:, 3] / chord_press_travel
+        torch.relu(state[:, 3] - chord_release_travel)
+        / max(chord_press_travel - chord_release_travel, 1e-6)
         if use_chord
         else torch.zeros_like(state[:, 3])
     )
@@ -6463,6 +6494,76 @@ def mario_foot_anchor_cost(
     return torch.clamp(excess / max(scale, 1e-6), max=1.0).mean(dim=-1)
 
 
+def _mario_commanded_foot_target_xy(
+    command: torch.Tensor,
+    position_offset: float,
+    lateral_offset: float,
+    left_neutral_x: float,
+    left_neutral_y: float,
+    right_neutral_x: float,
+    right_neutral_y: float,
+) -> torch.Tensor:
+    """Pad-local foot-site targets, calibrated against the HOME stance."""
+
+    dpad_x, dpad_y, ab = command[:, 0], command[:, 1], command[:, 2]
+    # Mario's physical right rocker has only A. B/RUN is game-side virtual.
+    a_request = (ab > 0.5).to(dtype=command.dtype)
+    return torch.stack(
+        (
+            torch.stack(
+                (
+                    left_neutral_x + position_offset * dpad_y,
+                    left_neutral_y - lateral_offset * dpad_x,
+                ),
+                dim=-1,
+            ),
+            torch.stack(
+                (
+                    right_neutral_x + position_offset * a_request,
+                    torch.full_like(ab, right_neutral_y),
+                ),
+                dim=-1,
+            ),
+        ),
+        dim=1,
+    )
+
+
+def mario_commanded_foot_anchor_cost(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    position_offset: float,
+    lateral_offset: float,
+    left_neutral_x: float,
+    left_neutral_y: float,
+    right_neutral_x: float,
+    right_neutral_y: float,
+    deadzone: float,
+    scale: float,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Penalize displacement from the requested pressure points, not pad centers."""
+
+    from mjlab.utils.lab_api.math import quat_apply_inverse
+
+    robot: Entity = env.scene[robot_cfg.name]
+    controller: Entity = env.scene[controller_cfg.name]
+    foot_pos = robot.data.site_pos_w[:, robot_cfg.site_ids]
+    pad_pos = controller.data.body_link_pos_w[:, controller_cfg.body_ids]
+    pad_quat = controller.data.body_link_quat_w[:, controller_cfg.body_ids]
+    local_delta = quat_apply_inverse(
+        pad_quat.reshape(-1, 4), (foot_pos - pad_pos).reshape(-1, 3)
+    ).reshape(foot_pos.shape)
+    target = _mario_commanded_foot_target_xy(
+        env.command_manager.get_command(command_name),
+        position_offset, lateral_offset,
+        left_neutral_x, left_neutral_y, right_neutral_x, right_neutral_y,
+    )
+    error = torch.linalg.vector_norm(local_delta[:, :, :2] - target, dim=-1)
+    return torch.clamp((error - deadzone) / max(scale, 1e-6), max=1.0).mean(dim=-1)
+
+
 def mario_commanded_foot_pose_reward(
     env: ManagerBasedRlEnv,
     command_name: str,
@@ -6474,14 +6575,17 @@ def mario_commanded_foot_pose_reward(
     right_nominal_roll: float,
     robot_cfg: SceneEntityCfg,
     controller_cfg: SceneEntityCfg,
+    lateral_offset: float | None = None,
+    left_neutral_x: float = 0.0,
+    left_neutral_y: float = 0.0,
+    right_neutral_x: float = 0.0,
+    right_neutral_y: float = 0.0,
 ) -> torch.Tensor:
     """Track command-specific foot position and sole orientation on each pad.
 
-    The left foot moves its pressure point fore/aft for UP/DOWN and laterally
-    for LEFT/RIGHT.  The right foot moves fore/aft for A/B.  A+B keeps the
-    right sole centered and level because the chord is produced by vertical
-    load rather than rocker tilt.  Explicitly targeting the unused axes at
-    neutral prevents the cross-axis presses that a radius-only anchor permits.
+    The left foot moves fore/aft for UP/DOWN and laterally for LEFT/RIGHT;
+    the right foot moves forward only for A. Neutral targets match measured
+    HOME contact centroids relative to the controller pivots.
     """
 
     if position_std <= 0.0 or angle_std <= 0.0:
@@ -6500,16 +6604,11 @@ def mario_commanded_foot_pose_reward(
     local_delta = quat_apply_inverse(
         pad_quat.reshape(-1, 4), (foot_pos - pad_pos).reshape(-1, 3)
     ).reshape(foot_pos.shape)
-    target_xy = torch.stack(
-        (
-            torch.stack(
-                (position_offset * dpad_y, -position_offset * dpad_x), dim=-1
-            ),
-            torch.stack(
-                (position_offset * ab_direction, torch.zeros_like(ab)), dim=-1
-            ),
-        ),
-        dim=1,
+    target_xy = _mario_commanded_foot_target_xy(
+        command,
+        position_offset,
+        position_offset if lateral_offset is None else lateral_offset,
+        left_neutral_x, left_neutral_y, right_neutral_x, right_neutral_y,
     )
     position_error = local_delta[:, :, :2] - target_xy
 
@@ -6545,7 +6644,9 @@ def mario_commanded_foot_pose_reward(
     angle_score = torch.exp(
         -torch.square(angle_error / angle_std).mean(dim=(1, 2))
     )
-    return position_score * angle_score
+    # A strict product made the term nearly zero when orientation was slightly
+    # off, removing the position gradient needed to find the button.
+    return 0.8 * position_score + 0.2 * angle_score
 
 
 def mario_foot_planar_speed_cost(
