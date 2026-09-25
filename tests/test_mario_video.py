@@ -44,7 +44,7 @@ def test_mario_overlay_separates_raw_travel_from_decoded_buttons():
         progress=[0, 0, 0.48, 0, 0, 0],
         metrics={"command_ready": 1.0},
         diagnostics=MarioFrameDiagnostics(
-            joint_state=[-0.00503, 0.0, 0.0, 0.0002],
+            joint_state=[0.0, 0.0, 0.0005, 0.0, 0.0, 0.0],
             decoded=[False, False, False, False, False, False],
             unrequested_travel=[0.48, 0.0, 0.0],
             unrequested_raw_total=0.48,
@@ -54,7 +54,7 @@ def test_mario_overlay_separates_raw_travel_from_decoded_buttons():
         ),
     )
     text = "\n".join(line for line, _ in lines)
-    assert "X:-0.29" in text
+    assert "L:0.50" in text
     assert "LEFT:0" in text
     assert "RAW:0.48" in text
     assert "APPLIED:0.48" in text
@@ -69,7 +69,7 @@ def test_mario_overlay_shows_grace_masking_raw_wrong_travel():
         progress=[0] * 6,
         metrics={"command_ready": 0.0},
         diagnostics=MarioFrameDiagnostics(
-            joint_state=[0.0] * 4,
+            joint_state=[0.0] * 6,
             decoded=[False] * 6,
             unrequested_travel=[0.4, 0.0, 0.0],
             unrequested_raw_total=0.4,

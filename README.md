@@ -94,12 +94,12 @@ Keyboard-driven (velocity commands, `G` ground pick, `Y` sit/stand, `R` roulade,
 
 ### Physical NES controller
 
-The Mario controller is a pair of physical, spring-centered surfaces. The
-left foot stays planted on the horizontal axis of a D-pad and the right foot
-uses the positive side of a rocker as JUMP/A. The other rocker axes are not
-game inputs; RUN/B is selected virtually by the high-level flybrain. Every
-moving joint uses the required `passive_*` prefix. Emulator code remains
-separate from the physical asset and decoder.
+The Mario controller has two fixed neutral foot rests and four independent,
+spring-loaded keys: LEFT/RIGHT under the left foot and A/B under the right.
+Each key moves vertically by at most 2 mm, activates at 0.7 mm, and releases
+at 0.3 mm. The neutral rests sit 2 mm above the unpressed keys, so the duck
+must lift and reposition a foot instead of leaning on a shared rocker. Every
+moving joint uses the required `passive_*` prefix.
 
 Render the combined robot-and-controller MuJoCo scene to a PNG with:
 
@@ -119,11 +119,12 @@ follow `[horizontal, 0, jump]` requests in the existing 3D twist slot:
 
 - Horizontal uses `-1=left`, `0=neutral`, `+1=right`.
 - Jump uses `0=neutral`, `+1=A`.
-- NES B is a virtual run modifier selected by the flybrain. It is not a
-  physical robot command or controller-success signal.
+- B exists physically and counts as a wrong key, but the current Mario command
+  curriculum does not request it.
 
-The actor stays 61D; only the critic receives the four physical controller
-joint values. Smoke-test it before any long run:
+The actor stays 61D; only the critic receives the six-slot logical controller
+state (zero-padded UP/DOWN plus the four physical key travels). Smoke-test it
+before any long run:
 
 ```bash
 uv run train Mjlab-MarioController-Flat-MicroDuck \

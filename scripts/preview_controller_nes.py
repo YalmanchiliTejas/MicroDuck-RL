@@ -38,7 +38,7 @@ def set_home_pose(model: mujoco.MjModel, data: mujoco.MjData) -> None:
         model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint"
     )
     root_adr = model.jnt_qposadr[root_id]
-    # Neutral controller top is 15 mm above the floor.
+    # Keys top out at 13 mm; neutral foot rests are 15 mm above the floor.
     data.qpos[root_adr : root_adr + 7] = (0.0, 0.0, 0.135, 1.0, 0.0, 0.0, 0.0)
     for name, value in HOME_JOINTS.items():
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
@@ -70,7 +70,7 @@ def annotate(image: Image.Image, telemetry: str) -> None:
     draw.text((49, 40), "MicroDuck Physical NES Controller", font=title_font, fill="white")
     draw.text(
         (49, 79),
-        "Left foot: 4-way D-pad  |  Right foot: A/B rocker",
+        "Four independent keys: LEFT / RIGHT / A / B",
         font=label_font,
         fill=(205, 218, 238),
     )
@@ -85,16 +85,16 @@ def annotate(image: Image.Image, telemetry: str) -> None:
         y += 23
     draw.text(
         (panel[0] + 22, panel[3] - 38),
-        "ON  1.0 deg  |  OFF  0.5 deg",
+        "ON  0.7 mm  |  OFF  0.3 mm",
         font=mono_font,
         fill=(255, 205, 95),
     )
 
     legend = [
-        (32, 365, "D-PAD: UP / DOWN / LEFT / RIGHT", (64, 184, 255)),
+        (32, 365, "D-PAD: LEFT / RIGHT", (64, 184, 255)),
         (410, 200, "A: forward", (242, 46, 51)),
         (622, 220, "B: backward", (242, 163, 31)),
-        (854, 260, "A+B: firm press", (199, 77, 209)),
+        (854, 260, "A+B: independent", (199, 77, 209)),
     ]
     y = image.height - 60
     for x, width, text, color in legend:
@@ -124,8 +124,7 @@ def main() -> None:
 
     controller = NESController()
     addresses = controller.joint_qpos_addresses(model)
-    raw = tuple(float(data.qpos[address]) for address in addresses)
-    values = (raw[0], raw[1], raw[2], -raw[3])
+    values = tuple(-float(data.qpos[address]) for address in addresses)
     state = controller.update(*values)
     telemetry = controller.debug_text(state, *values)
     print(telemetry)

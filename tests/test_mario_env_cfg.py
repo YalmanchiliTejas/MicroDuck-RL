@@ -55,11 +55,14 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
         assert name not in rewards
     params = rewards["requested_button"].params
     assert params["release_angle"] < params["activate_angle"]
-    assert params["activate_angle"] == pytest.approx(math.radians(0.4))
-    assert params["release_angle"] == pytest.approx(math.radians(0.15))
+    assert params["activate_angle"] == pytest.approx(0.0007)
+    assert params["release_angle"] == pytest.approx(0.0003)
     assert params["chord_release_travel"] == 0.0005
     assert params["chord_press_travel"] == 0.0007
     assert params["use_chord"] is False
+    assert params["enabled_buttons"] == (
+        False, False, True, True, True, True
+    )
     assert rewards["foot_anchor"].func is microduck_mdp.mario_commanded_foot_anchor_cost
 
 
@@ -83,6 +86,10 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert pose_params["std_walking"] == pose_params["std_standing"]
     assert pose_params["std_running"] == pose_params["std_standing"]
     assert rewards["commanded_trunk_offset"].weight > 0.0
+    assert rewards["commanded_trunk_offset"].params["forward_offset"] == 0.0
+    assert rewards["commanded_trunk_offset"].params["lateral_offset"] == 0.0
+    assert rewards["commanded_trunk_offset"].params["transition_grace_s"] > 0.0
+    assert rewards["upright"].params["lean_angle"] == 0.0
     assert rewards["standing_height"].params["target_height"] == 0.130
     assert rewards["camera_crouch"].weight < 0.0
     assert rewards["camera_crouch"].params["trunk_floor"] == 0.128
@@ -94,10 +101,21 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     )
     assert rewards["foot_anchor"].weight < 0.0
     assert rewards["foot_planar_speed"].weight < 0.0
+    assert rewards["commanded_foot_clearance"].weight > 0.0
+    assert rewards["commanded_foot_clearance"].params["lift_height"] == (
+        pytest.approx(0.003)
+    )
+    assert (
+        rewards["foot_contact_loss"].func
+        is microduck_mdp.mario_transition_contact_loss_cost
+    )
+    assert rewards["foot_planar_speed"].params["sensor_name"] == (
+        "feet_ground_contact"
+    )
     foot_pose = rewards["commanded_foot_pose"].params
-    assert foot_pose["position_offset"] == pytest.approx(0.007)
-    assert foot_pose["lateral_offset"] == pytest.approx(0.007)
-    assert foot_pose["target_tilt"] == pytest.approx(math.radians(0.5))
+    assert foot_pose["position_offset"] == pytest.approx(0.018)
+    assert foot_pose["lateral_offset"] == pytest.approx(0.016)
+    assert foot_pose["target_tilt"] == pytest.approx(0.0)
 
 
 def test_mario_runner_reduces_entropy_pressure_for_stationary_control():
@@ -153,7 +171,7 @@ def test_button_rewards_are_gated_by_both_foot_anchors():
         assert params["robot_cfg"].site_names == ("left_foot", "right_foot")
         assert params["controller_cfg"].body_names == (
             "dpad_platform",
-            "ab_rocker_platform",
+            "ab_platform",
         )
 
 
@@ -252,6 +270,36 @@ def test_mario_command_grace_tracks_time_since_resample():
     assert ready.tolist() == [0.0, 1.0]
 
 
+def test_transition_contact_cost_allows_one_lift_but_never_zero_support():
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term.command_age = torch.tensor([0.10, 0.10, 0.10, 0.30, 0.30, 0.30])
+    term._command = torch.zeros(6, 3)
+    sensor = SimpleNamespace(
+        data=SimpleNamespace(
+            found=torch.tensor(
+                [
+                    [1.0, 1.0],
+                    [1.0, 0.0],
+                    [0.0, 0.0],
+                    [1.0, 1.0],
+                    [1.0, 0.0],
+                    [0.0, 0.0],
+                ]
+            )
+        )
+    )
+    env = SimpleNamespace(
+        scene=SimpleNamespace(sensors={"feet": sensor}),
+        command_manager=SimpleNamespace(get_term=lambda _name: term),
+    )
+
+    cost = microduck_mdp.mario_transition_contact_loss_cost(
+        env, sensor_name="feet", transition_grace_s=0.25
+    )
+
+    assert cost.tolist() == pytest.approx([0.0, 0.0, 1.0, 0.0, 0.5, 1.0])
+
+
 def test_unloaded_controller_settles_inside_all_release_thresholds():
     path = (
         Path(__file__).parents[1]
@@ -261,38 +309,24 @@ def test_unloaded_controller_settles_inside_all_release_thresholds():
     data = mujoco.MjData(model)
     for _ in range(2_000):
         mujoco.mj_step(model, data)
-    for name in ("passive_dpad_x", "passive_dpad_y", "passive_ab_rocker"):
+    for name in microduck_mdp._MARIO_NES_JOINTS:
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-        angle = abs(float(data.qpos[model.jnt_qposadr[joint_id]]))
-        assert angle < math.radians(0.5)
-    press_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "passive_ab_press")
-    press_travel = -float(data.qpos[model.jnt_qposadr[press_id]])
-    assert press_travel < 0.0007
+        travel = -float(data.qpos[model.jnt_qposadr[joint_id]])
+        assert travel < 0.0003
 
 
-def test_legacy_chord_slide_is_compliant_but_ignored_by_mario():
+def test_controller_contains_no_shared_rocker_or_chord_joint():
     path = (
         Path(__file__).parents[1]
         / "src/mjlab_microduck/robot/microduck/controller_nes.xml"
     )
     model = mujoco.MjModel.from_xml_path(str(path))
-    press_id = mujoco.mj_name2id(
-        model, mujoco.mjtObj.mjOBJ_JOINT, "passive_ab_press"
-    )
-    body_id = mujoco.mj_name2id(
-        model, mujoco.mjtObj.mjOBJ_BODY, "ab_press_carriage"
-    )
-
-    def settled_travel(force: float) -> float:
-        data = mujoco.MjData(model)
-        data.xfrc_applied[body_id, 2] = -force
-        for _ in range(2_000):
-            mujoco.mj_step(model, data)
-        return -float(data.qpos[model.jnt_qposadr[press_id]])
-
-    # Roughly half versus all of an 800 g robot's weight on the right plate.
-    assert settled_travel(4.0) < 0.0005
-    assert settled_travel(8.0) > 0.0007
+    joint_names = {
+        mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, index)
+        for index in range(model.njnt)
+    }
+    assert joint_names == set(microduck_mdp._MARIO_NES_JOINTS)
+    assert not any("rocker" in name or "press" in name for name in joint_names)
 
 
 def test_compact_command_decodes_all_six_buttons_and_chords():
@@ -317,12 +351,12 @@ def test_compact_command_decodes_all_six_buttons_and_chords():
     ]
 
 
-def test_legacy_chord_slide_does_not_activate_game_jump():
+def test_independent_a_key_does_not_activate_b():
     names = list(microduck_mdp._MARIO_NES_JOINTS)
 
     class FakeController:
         data = SimpleNamespace(
-            joint_pos=torch.tensor([[0.0, 0.0, 0.0, -0.0010]])
+            joint_pos=torch.tensor([[0.0, 0.0, -0.0010, 0.0]])
         )
 
         @staticmethod
@@ -336,11 +370,9 @@ def test_legacy_chord_slide_does_not_activate_game_jump():
         scene={"nes_controller": FakeController()},
     )
     game_activation = microduck_mdp.mario_nes_activation(env)
-    legacy_activation = microduck_mdp.mario_nes_activation(env, use_chord=True)
     game_progress = microduck_mdp.mario_nes_progress(env)
-    assert game_activation[0, 4:].tolist() == [0.0, 0.0]
-    assert game_progress[0, 4:].tolist() == [0.0, 0.0]
-    assert legacy_activation[0, 4:].tolist() == [1.0, 1.0]
+    assert game_activation[0, 4:].tolist() == [1.0, 0.0]
+    assert game_progress[0, 4:].tolist() == [1.0, 0.0]
 
 
 def test_foot_sensor_targets_controller_surfaces_not_floor():
@@ -372,7 +404,7 @@ def test_requested_button_has_dense_progress_before_activation():
 
     class FakeController:
         data = SimpleNamespace(
-            joint_pos=torch.tensor([[math.radians(0.1), 0.0, 0.0, 0.0]])
+            joint_pos=torch.tensor([[0.0, -0.0002, 0.0, 0.0]])
         )
 
         @staticmethod
@@ -402,9 +434,7 @@ def test_requested_button_requires_wrong_buttons_to_be_released():
     class FakeController:
         data = SimpleNamespace(
             # RIGHT is requested and fully active, but A is active too.
-            joint_pos=torch.tensor(
-                [[math.radians(0.6), 0.0, math.radians(0.6), 0.0]]
-            )
+            joint_pos=torch.tensor([[0.0, -0.0007, -0.0007, 0.0]])
         )
 
         @staticmethod
@@ -465,7 +495,7 @@ def test_clean_success_thresholds_readiness_components_not_their_product(
 
     class FakeController:
         data = SimpleNamespace(
-            joint_pos=torch.tensor([[math.radians(0.6), 0.0, 0.0, 0.0]])
+            joint_pos=torch.tensor([[0.0, -0.0007, 0.0, 0.0]])
         )
 
         @staticmethod
@@ -500,16 +530,13 @@ def test_clean_success_thresholds_readiness_components_not_their_product(
     assert success.item() == 1.0
 
 
-def test_game_button_mask_ignores_virtual_b_and_unused_dpad_axes():
+def test_all_physical_keys_participate_in_wrong_button_exclusivity():
     names = list(microduck_mdp._MARIO_NES_JOINTS)
 
     class FakeController:
         data = SimpleNamespace(
-            # RIGHT is requested and active. DOWN and physical B also move,
-            # but neither is consumed by the three-signal Mario bridge.
-            joint_pos=torch.tensor(
-                [[math.radians(0.6), -math.radians(0.6), -math.radians(0.6), 0.0]]
-            )
+            # RIGHT is requested and active, but B is active too.
+            joint_pos=torch.tensor([[0.0, -0.0007, 0.0, -0.0007]])
         )
 
         @staticmethod
@@ -525,15 +552,15 @@ def test_game_button_mask_ignores_virtual_b_and_unused_dpad_axes():
             get_command=lambda _name: torch.tensor([[1.0, 0.0, 0.0]])
         ),
     )
-    enabled = (False, False, True, True, True, False)
+    enabled = (True, True, True, True, True, True)
     score = microduck_mdp.mario_requested_button_reward(
         env, require_exclusive=True, enabled_buttons=enabled
     )
     wrong_cost = microduck_mdp.mario_unrequested_button_cost(
         env, enabled_buttons=enabled
     )
-    assert score.item() == pytest.approx(1.0)
-    assert wrong_cost.item() == pytest.approx(0.0)
+    assert score.item() < 1e-6
+    assert wrong_cost.item() == pytest.approx(1.0)
 
 
 def test_unrequested_button_cost_keeps_growing_past_activation():
@@ -543,8 +570,8 @@ def test_unrequested_button_cost_keeps_growing_past_activation():
         data = SimpleNamespace(
             joint_pos=torch.tensor(
                 [
-                    [0.0, 0.0, math.radians(0.6), 0.0],
-                    [0.0, 0.0, math.radians(1.2), 0.0],
+                    [0.0, 0.0, -0.0007, 0.0],
+                    [0.0, 0.0, -0.0013, 0.0],
                 ]
             )
         )
@@ -576,8 +603,8 @@ def test_unrequested_button_cost_ignores_motion_inside_release_deadband():
         data = SimpleNamespace(
             joint_pos=torch.tensor(
                 [
-                    [-math.radians(0.19), 0.0, 0.0, 0.0],
-                    [-math.radians(0.30), 0.0, 0.0, 0.0],
+                    [-0.0002, 0.0, 0.0, 0.0],
+                    [-0.0004, 0.0, 0.0, 0.0],
                 ]
             )
         )
@@ -615,6 +642,7 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
             [-1.0, 0.0, 0.0],  # LEFT
             [1.0, 0.0, 0.0],  # RIGHT
             [0.0, 0.0, 1.0],  # A
+            [0.0, 0.0, -1.0],  # B
             [1.0, 0.0, 1.0],  # RIGHT+A
         ]
     )
@@ -627,7 +655,7 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
         RIGHT_NEUTRAL_FOOT_X,
         RIGHT_NEUTRAL_FOOT_Y,
     )
-    assert target[0, 0].tolist() == pytest.approx([0.007, -0.0012])
+    assert target[0, 0].tolist() == pytest.approx([0.0, 0.0])
     assert target[1, 0, 1] == pytest.approx(
         LEFT_NEUTRAL_FOOT_Y + FOOT_LATERAL_OFFSET
     )
@@ -637,8 +665,11 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
     assert target[3, 1, 0] == pytest.approx(
         RIGHT_NEUTRAL_FOOT_X + FOOT_POSITION_OFFSET
     )
-    assert target[4, 0].tolist() == pytest.approx(target[2, 0].tolist())
-    assert target[4, 1].tolist() == pytest.approx(target[3, 1].tolist())
+    assert target[4, 1, 0] == pytest.approx(
+        RIGHT_NEUTRAL_FOOT_X - FOOT_POSITION_OFFSET
+    )
+    assert target[5, 0].tolist() == pytest.approx(target[2, 0].tolist())
+    assert target[5, 1].tolist() == pytest.approx(target[3, 1].tolist())
     assert torch.all(torch.linalg.vector_norm(target, dim=-1) < 0.025)
 
 
@@ -651,8 +682,7 @@ def _resolved_cfg(name, *, site_ids=None, body_ids=None):
     return cfg
 
 
-def test_commanded_trunk_and_tilt_targets_encode_stationary_directional_lean():
-    angle = math.radians(6.0)
+def test_mario_commands_keep_trunk_centered_and_upright():
     commands = torch.tensor(
         [
             [0.0, 0.0, 0.0],  # neutral
@@ -660,20 +690,11 @@ def test_commanded_trunk_and_tilt_targets_encode_stationary_directional_lean():
             [1.0, 0.0, 0.0],  # right: robot-frame -Y CoM, +roll
         ]
     )
-    half = angle / 2.0
-    quats = torch.tensor(
-        [
-            [1.0, 0.0, 0.0, 0.0],
-            [math.cos(half), 0.0, math.sin(half), 0.0],
-            [math.cos(half), math.sin(half), 0.0, 0.0],
-        ]
-    )
+    quats = torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 3)
     robot = SimpleNamespace(
         data=SimpleNamespace(
             site_pos_w=torch.zeros(3, 2, 3),
-            root_link_pos_w=torch.tensor(
-                [[0.0, 0.0, 0.13], [0.012, 0.0, 0.13], [0.0, -0.010, 0.13]]
-            ),
+            root_link_pos_w=torch.tensor([[0.0, 0.0, 0.13]] * 3),
             root_link_quat_w=quats,
         )
     )
@@ -683,9 +704,9 @@ def test_commanded_trunk_and_tilt_targets_encode_stationary_directional_lean():
     )
     robot_cfg = _resolved_cfg("robot", site_ids=[0, 1])
     trunk_score = microduck_mdp.mario_commanded_trunk_offset_reward(
-        env, robot_cfg=robot_cfg
+        env, forward_offset=0.0, lateral_offset=0.0, robot_cfg=robot_cfg
     )
-    lean_score = microduck_mdp.mario_commanded_lean_reward(env)
+    lean_score = microduck_mdp.mario_commanded_lean_reward(env, lean_angle=0.0)
     assert torch.allclose(trunk_score, torch.ones(3))
     assert torch.allclose(lean_score, torch.ones(3), atol=1e-6)
 
@@ -698,7 +719,9 @@ def test_button_reward_drops_to_zero_when_either_foot_leaves_its_pad():
 
     class FakeController:
         data = SimpleNamespace(
-            joint_pos=torch.tensor([[math.radians(0.6), 0.0, 0.0, 0.0]] * 3),
+            joint_pos=torch.tensor(
+                [[0.0, -0.0007, 0.0, 0.0]] * 3
+            ),
             body_link_pos_w=pad_centers,
         )
 
@@ -739,7 +762,7 @@ def test_button_reward_drops_to_zero_when_either_foot_leaves_its_pad():
     assert score.tolist() == pytest.approx([1.0, 0.0, 0.0])
 
 
-def test_foot_anchor_and_planar_speed_costs_penalize_walking():
+def test_foot_anchor_and_contact_conditioned_speed_costs_penalize_sliding():
     pad_centers = torch.tensor([[[0.0, 0.04, 0.0], [0.0, -0.04, 0.0]]])
     feet = pad_centers.clone()
     feet[:, 0, 0] += 0.028
@@ -750,7 +773,17 @@ def test_foot_anchor_and_planar_speed_costs_penalize_walking():
         )
     )
     controller = SimpleNamespace(data=SimpleNamespace(body_link_pos_w=pad_centers))
-    env = SimpleNamespace(scene={"robot": robot, "nes_controller": controller})
+
+    class FakeScene(dict):
+        def __init__(self):
+            super().__init__(robot=robot, nes_controller=controller)
+            self.sensors = {
+                "feet_ground_contact": SimpleNamespace(
+                    data=SimpleNamespace(found=torch.tensor([[1.0, 0.0]]))
+                )
+            }
+
+    env = SimpleNamespace(scene=FakeScene())
     robot_cfg = _resolved_cfg("robot", site_ids=[0, 1])
     controller_cfg = _resolved_cfg("nes_controller", body_ids=[0, 1])
     anchor = microduck_mdp.mario_foot_anchor_cost(
@@ -827,6 +860,51 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
         controller_cfg=_resolved_cfg("nes_controller", body_ids=[0, 1]),
     )
     assert score.tolist() == pytest.approx([1.0, 1.0], abs=1e-6)
+
+
+def test_commanded_foot_clearance_lifts_while_misplaced_then_lands_at_target():
+    commands = torch.tensor([[1.0, 0.0, 0.0]] * 3)  # RIGHT moves left foot in -Y.
+    foot_pos = torch.tensor(
+        [
+            [[0.0, 0.0, 0.006], [0.0, 0.0, 0.006]],  # misplaced, dragging
+            [[0.0, 0.0, 0.009], [0.0, 0.0, 0.006]],  # misplaced, 3 mm lift
+            [[0.0, -0.007, 0.006], [0.0, 0.0, 0.006]],  # arrived and landed
+        ]
+    )
+    robot = SimpleNamespace(data=SimpleNamespace(site_pos_w=foot_pos))
+    controller = SimpleNamespace(
+        data=SimpleNamespace(
+            body_link_pos_w=torch.zeros(3, 2, 3),
+            body_link_quat_w=torch.tensor(
+                [[[1.0, 0.0, 0.0, 0.0]] * 2] * 3
+            ),
+        )
+    )
+    env = SimpleNamespace(
+        scene={"robot": robot, "nes_controller": controller},
+        command_manager=SimpleNamespace(get_command=lambda _name: commands),
+    )
+
+    score = microduck_mdp.mario_commanded_foot_clearance_reward(
+        env,
+        command_name="twist",
+        position_offset=0.007,
+        lateral_offset=0.007,
+        left_neutral_x=0.0,
+        left_neutral_y=0.0,
+        right_neutral_x=0.0,
+        right_neutral_y=0.0,
+        contact_height=0.006,
+        lift_height=0.003,
+        full_lift_error=0.005,
+        height_std=0.0015,
+        robot_cfg=_resolved_cfg("robot", site_ids=[0, 1]),
+        controller_cfg=_resolved_cfg("nes_controller", body_ids=[0, 1]),
+    )
+
+    assert score[1].item() > score[0].item()
+    assert score[1].item() == pytest.approx(1.0)
+    assert score[2].item() == pytest.approx(1.0)
 
 
 def test_standing_pose_gate_and_l1_cost_reject_folded_legs():

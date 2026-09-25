@@ -36,20 +36,22 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (0.75, 1.50)
 BUTTON_TRANSITION_GRACE_S = 0.25
-# A shallow switch point lets a planted foot register a button without the
-# large whole-body weight transfer seen in the 3000-iteration rollout.  Keep
-# appreciable hysteresis so normal support-force noise does not flicker inputs.
-ACTIVATE_ANGLE = math.radians(0.4)
-RELEASE_ANGLE = math.radians(0.15)
+# Legacy names are retained in reward params, but these values are now vertical
+# slider travel in metres: 0.7 mm activates, 0.3 mm releases.
+ACTIVATE_ANGLE = 0.0007
+RELEASE_ANGLE = 0.0003
 CHORD_PRESS_TRAVEL = 0.0007
 CHORD_RELEASE_TRAVEL = 0.0005
 BUTTON_ACTIVATION_WEIGHT = 5.0
 BUTTON_PROGRESS_WEIGHT = 2.0
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.025
-COM_FORWARD_OFFSET = 0.012
-COM_LATERAL_OFFSET = 0.010
-COMMAND_LEAN_ANGLE = math.radians(6.0)
+# Presses come from a short foot reposition, not from throwing the trunk in
+# the requested direction. Directional lean/offset caused the gradual walking
+# drift visible in the 1000-iteration rollout.
+COM_FORWARD_OFFSET = 0.0
+COM_LATERAL_OFFSET = 0.0
+COMMAND_LEAN_ANGLE = 0.0
 MIN_TRUNK_HEIGHT = 0.115
 FULL_TRUNK_HEIGHT = 0.128
 MIN_CAMERA_HEIGHT = 0.200
@@ -60,25 +62,23 @@ MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
 FULL_LEG_POSE_ERROR = 0.16
 MAX_LEG_POSE_ERROR = 0.40
-# These targets only need enough moment to cross the 0.4 degree switch point.
-# The former 12/18 mm targets drove the rockers deep into their stops and taught
-# the policy to throw its mass across the controller instead of pressing gently.
-FOOT_POSITION_OFFSET = 0.007
-FOOT_LATERAL_OFFSET = 0.007
-# Pad-local HOME sole-site coordinates measured from the recentered pivots.
-LEFT_NEUTRAL_FOOT_X = 0.007
-LEFT_NEUTRAL_FOOT_Y = -0.0012
-RIGHT_NEUTRAL_FOOT_X = 0.006
-RIGHT_NEUTRAL_FOOT_Y = -0.0008
-FOOT_TARGET_TILT = math.radians(0.5)
+# Pad-local centers of the independent keys. Neutral is the fixed center
+# pedestal; LEFT/RIGHT are 16 mm lateral and A/B are 18 mm fore/aft.
+FOOT_POSITION_OFFSET = 0.018
+FOOT_LATERAL_OFFSET = 0.016
+LEFT_NEUTRAL_FOOT_X = 0.0
+LEFT_NEUTRAL_FOOT_Y = 0.0
+RIGHT_NEUTRAL_FOOT_X = 0.0
+RIGHT_NEUTRAL_FOOT_Y = 0.0
+FOOT_TARGET_TILT = 0.0
 FOOT_POSITION_STD = 0.012
 FOOT_ANGLE_STD = math.radians(4.0)
 LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
 RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
 
 # The command sampler retains its historical 14-entry table, but Mario only
-# needs neutral, L, R, jump/A, L+jump, and R+jump. B/run is selected virtually
-# by the flybrain and never requires another physical foot input.
+# needs neutral, L, R, jump/A, L+jump, and R+jump. B is physical and penalized
+# when pressed accidentally, but it is not sampled by the current curriculum.
 # Table order: neutral, L, R, U, D, A, B, A+B,
 # L+A, L+B, L+A+B, R+A, R+B, R+A+B.
 SINGLE_BUTTON_WEIGHTS = (
@@ -93,7 +93,9 @@ FULL_COMMAND_WEIGHTS = TWO_BUTTON_WEIGHTS
 
 # Activation tensor order is UP, DOWN, LEFT, RIGHT, A, B. Only the physical
 # signals consumed by the Mario bridge participate in success/exclusivity.
-GAME_BUTTON_MASK = (False, False, True, True, True, False)
+# Every physical key participates in exclusivity, even B, which is not sampled
+# by the current Mario command table. UP/DOWN have no physical switch.
+GAME_BUTTON_MASK = (False, False, True, True, True, True)
 
 
 def make_microduck_mario_env_cfg(play: bool = False):
@@ -162,7 +164,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "asset_cfg": SceneEntityCfg("nes_controller"),
         },
     )
-    # Reset the passive rockers too; otherwise their previous episode state is
+    # Reset the passive keys too; otherwise their previous episode state is
     # inherited after the robot and mocap root are reset.
     cfg.events["reset_nes_controller_joints"] = EventTermCfg(
         func=mdp.reset_joints_by_offset,
@@ -194,7 +196,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
         )
 
     # The actor cannot sense controller joint state on hardware. The asymmetric
-    # critic gets all four physical axes, not decoded emulator button state.
+    # critic gets a six-slot logical state: zero UP/DOWN plus four physical
+    # key travels. The actor observation remains the shared 61D layout.
     cfg.observations["critic"].terms["nes_controller_state"] = ObservationTermCfg(
         func=microduck_mdp.mario_nes_joint_state,
         params={"asset_name": "nes_controller"},
@@ -240,6 +243,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "forward_offset": COM_FORWARD_OFFSET,
             "lateral_offset": COM_LATERAL_OFFSET,
             "std": 0.008,
+            # Permit the small support transfer needed to lift one foot; once
+            # the transition ends, pull the trunk back over the feet.
+            "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
             "robot_cfg": SceneEntityCfg(
                 "robot", site_names=("left_foot", "right_foot")
             ),
@@ -310,7 +316,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     }
     feet_cfg = SceneEntityCfg("robot", site_names=("left_foot", "right_foot"))
     platforms_cfg = SceneEntityCfg(
-        "nes_controller", body_names=("dpad_platform", "ab_rocker_platform")
+        "nes_controller", body_names=("dpad_platform", "ab_platform")
     )
     anchored_button_params = {
         **controller_activation_params,
@@ -385,13 +391,36 @@ def make_microduck_mario_env_cfg(play: bool = False):
         weight=2.0,
         params=foot_pose_params,
     )
-    # Losing support can make a button press easier in simulation but violates
-    # the physical design. This is a cost (not a constant positive jackpot).
+    cfg.rewards["commanded_foot_clearance"] = RewardTermCfg(
+        func=microduck_mdp.mario_commanded_foot_clearance_reward,
+        weight=1.0,
+        params={
+            **{
+                key: foot_pose_params[key]
+                for key in (
+                    "command_name", "position_offset", "lateral_offset",
+                    "left_neutral_x", "left_neutral_y",
+                    "right_neutral_x", "right_neutral_y",
+                    "robot_cfg", "controller_cfg",
+                )
+            },
+            # Sole sites sit ~6 mm above each platform frame at contact.
+            "contact_height": 0.006,
+            "lift_height": 0.003,
+            "full_lift_error": 0.005,
+            "height_std": 0.0015,
+        },
+    )
+    # During the short command transition, one foot may lift for a tiny
+    # reposition while the other stays planted. Afterwards both contacts are
+    # mandatory, and button credit is gated by the same deadline.
     cfg.rewards["foot_contact_loss"] = RewardTermCfg(
-        func=microduck_mdp.feet_contact_loss_cost,
+        func=microduck_mdp.mario_transition_contact_loss_cost,
         weight=-8.0,
         params={
             "sensor_name": controller_feet_contact.name,
+            "command_name": "twist",
+            "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
         },
     )
     cfg.rewards["foot_anchor"] = RewardTermCfg(
@@ -418,6 +447,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
         params={
             "speed_scale": 0.10,
             "max_cost": 2.0,
+            "sensor_name": controller_feet_contact.name,
             "robot_cfg": SceneEntityCfg(
                 "robot", site_names=("left_foot", "right_foot")
             ),

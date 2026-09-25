@@ -122,7 +122,7 @@ _MARIO_FEET_CFG = SceneEntityCfg(
     "robot", site_names=("left_foot", "right_foot")
 )
 _MARIO_CONTROLLER_PLATFORMS_CFG = SceneEntityCfg(
-    "nes_controller", body_names=("dpad_platform", "ab_rocker_platform")
+    "nes_controller", body_names=("dpad_platform", "ab_platform")
 )
 
 # Name patterns matching the 4 neck/head actuated joints. Used by head_pose
@@ -5733,8 +5733,8 @@ class MarioNesCommand(CommandTerm):
 
     ``dpad_x`` and ``dpad_y`` are signed axes. ``ab_mode`` is -1 for B, +1 for
     A, and +2 for the firm-press A+B chord. This compact encoding fits the
-    shared 3D twist slot while the physical state remains six independent NES
-    button levels.
+    shared 3D twist slot. The logical interface remains six-wide, while this
+    Mario controller physically implements only LEFT, RIGHT, A, and B.
     """
 
     cfg: "MarioNesCommandCfg"
@@ -5896,10 +5896,10 @@ def mario_command_ready(
 
 
 _MARIO_NES_JOINTS = (
-    "passive_dpad_x",
-    "passive_dpad_y",
-    "passive_ab_rocker",
-    "passive_ab_press",
+    "passive_dpad_left",
+    "passive_dpad_right",
+    "passive_button_a",
+    "passive_button_b",
 )
 
 
@@ -5907,7 +5907,12 @@ def mario_nes_joint_state(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",
 ) -> torch.Tensor:
-    """Return ``[dpad_x, dpad_y, ab_angle, positive_press_travel]``."""
+    """Return logical ``[up, down, left, right, A, B]`` depression.
+
+    The physical controller has only LEFT, RIGHT, A, and B keys. UP/DOWN are
+    retained as permanent zero padding so the six-button reward interface and
+    compact command decoder stay stable.
+    """
 
     asset: Entity = env.scene[asset_name]
     cache_name = f"_mario_nes_joint_ids_{asset_name}"
@@ -5920,84 +5925,38 @@ def mario_nes_joint_state(
             ids.append(matched[0])
         setattr(env, cache_name, torch.tensor(ids, device=env.device, dtype=torch.long))
     joint_ids = getattr(env, cache_name)
-    state = asset.data.joint_pos[:, joint_ids].clone()
-    # The chord slide range is [-2 mm, 0], so depression is negative qpos.
-    state[:, 3] = torch.clamp(-state[:, 3], min=0.0, max=0.002)
-    return state
-
-
-def _signed_axis_activation(
-    value: torch.Tensor,
-    activate_threshold: float,
-    release_threshold: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    if release_threshold < 0.0 or activate_threshold <= release_threshold:
-        raise ValueError(
-            "activate_threshold must be greater than non-negative release_threshold"
-        )
-    scale = activate_threshold - release_threshold
-    positive = torch.clamp((value - release_threshold) / scale, 0.0, 1.0)
-    negative = torch.clamp((-value - release_threshold) / scale, 0.0, 1.0)
-    return positive, negative
-
-
-def _signed_axis_progress(
-    value: torch.Tensor,
-    activate_threshold: float,
-) -> tuple[torch.Tensor, torch.Tensor]:
-    """Directional progress from neutral to the physical activation point."""
-
-    if activate_threshold <= 0.0:
-        raise ValueError("activate_threshold must be positive")
-    positive = torch.clamp(value / activate_threshold, 0.0, 1.0)
-    negative = torch.clamp(-value / activate_threshold, 0.0, 1.0)
-    return positive, negative
+    # All four sliders move from 0 toward -2 mm when pressed.
+    physical = torch.clamp(
+        -asset.data.joint_pos[:, joint_ids], min=0.0, max=0.002
+    )
+    zeros = torch.zeros_like(physical[:, :2])
+    return torch.cat((zeros, physical), dim=-1)
 
 
 def mario_nes_activation(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01047198,
-    release_angle: float = 0.00349066,
+    activate_angle: float = 0.0007,
+    release_angle: float = 0.0003,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
     use_chord: bool = False,
 ) -> torch.Tensor:
-    """Continuous ``[up, down, left, right, A, B]`` physical activation.
+    """Continuous activation of four physical keys in a six-slot interface.
 
-    ``use_chord`` is disabled for Mario: RUN/B is virtual, so ordinary support
-    load on the legacy vertical A+B slide must not masquerade as JUMP/A.
+    The legacy argument names are retained so old CLI/config serialization can
+    still load, but ``activate_angle`` and ``release_angle`` now carry metres
+    of vertical travel. Chord arguments are ignored because A and B are
+    independent physical keys.
     """
 
+    del chord_press_travel, chord_release_travel, use_chord
+    if release_angle < 0.0 or activate_angle <= release_angle:
+        raise ValueError("activate travel must exceed non-negative release travel")
     state = mario_nes_joint_state(env, asset_name)
-    right, left = _signed_axis_activation(
-        state[:, 0], activate_angle, release_angle
+    return torch.clamp(
+        (state - release_angle) / (activate_angle - release_angle), 0.0, 1.0
     )
-    up, down = _signed_axis_activation(
-        state[:, 1], activate_angle, release_angle
-    )
-    a_tilt, b_tilt = _signed_axis_activation(
-        state[:, 2], activate_angle, release_angle
-    )
-    if use_chord:
-        if (
-            chord_release_travel < 0.0
-            or chord_press_travel <= chord_release_travel
-        ):
-            raise ValueError(
-                "chord_press_travel must exceed non-negative chord_release_travel"
-            )
-        chord = torch.clamp(
-            (state[:, 3] - chord_release_travel)
-            / (chord_press_travel - chord_release_travel),
-            0.0,
-            1.0,
-        )
-        a = torch.maximum(a_tilt, chord)
-        b = torch.maximum(b_tilt, chord)
-    else:
-        a, b = a_tilt, b_tilt
-    return torch.stack((up, down, left, right, a, b), dim=-1)
 
 
 def mario_normalized_angular_momentum_cost(
@@ -6026,29 +5985,18 @@ def mario_normalized_angular_momentum_cost(
 def mario_nes_progress(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01047198,
+    activate_angle: float = 0.0007,
     chord_press_travel: float = 0.0007,
     use_chord: bool = False,
 ) -> torch.Tensor:
-    """Dense directional progress toward ``[up, down, left, right, A, B]``.
+    """Dense travel progress for four physical keys, beginning at neutral."""
 
-    Unlike physical activation, this begins at neutral. It gives PPO a slope
-    to follow before a rocker reaches its actual activation threshold.
-    """
-
-    if use_chord and chord_press_travel <= 0.0:
-        raise ValueError("chord_press_travel must be positive")
-    state = mario_nes_joint_state(env, asset_name)
-    right, left = _signed_axis_progress(state[:, 0], activate_angle)
-    up, down = _signed_axis_progress(state[:, 1], activate_angle)
-    a_tilt, b_tilt = _signed_axis_progress(state[:, 2], activate_angle)
-    if use_chord:
-        chord = torch.clamp(state[:, 3] / chord_press_travel, 0.0, 1.0)
-        a = torch.maximum(a_tilt, chord)
-        b = torch.maximum(b_tilt, chord)
-    else:
-        a, b = a_tilt, b_tilt
-    return torch.stack((up, down, left, right, a, b), dim=-1)
+    del chord_press_travel, use_chord
+    if activate_angle <= 0.0:
+        raise ValueError("activate travel must be positive")
+    return torch.clamp(
+        mario_nes_joint_state(env, asset_name) / activate_angle, 0.0, 1.0
+    )
 
 
 def mario_nes_requested_buttons(
@@ -6077,8 +6025,8 @@ def mario_requested_button_reward(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01047198,
-    release_angle: float = 0.00349066,
+    activate_angle: float = 0.0007,
+    release_angle: float = 0.0003,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
     use_chord: bool = False,
@@ -6169,9 +6117,9 @@ def mario_requested_button_progress_reward(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01047198,
+    activate_angle: float = 0.0007,
     chord_press_travel: float = 0.0007,
-    release_angle: float = 0.00349066,
+    release_angle: float = 0.0003,
     chord_release_travel: float = 0.0005,
     use_chord: bool = False,
     anchor_radius: float | None = None,
@@ -6262,55 +6210,27 @@ def mario_unrequested_button_cost(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     asset_name: str = "nes_controller",
-    activate_angle: float = 0.01047198,
-    release_angle: float = 0.00349066,
+    activate_angle: float = 0.0007,
+    release_angle: float = 0.0003,
     chord_press_travel: float = 0.0007,
     chord_release_travel: float = 0.0005,
     use_chord: bool = False,
     transition_grace_s: float = 0.0,
     enabled_buttons: tuple[bool, ...] | None = None,
 ) -> torch.Tensor:
-    """Non-negative, non-saturating cost for inputs absent from the request.
+    """Non-saturating cost for independently depressed unrequested keys."""
 
-    Activation deliberately clamps at one after the physical threshold, which
-    is correct for reporting a button press but gives PPO no slope when a wrong
-    button is held farther into its stop. This cost ignores the release
-    deadband and then uses unsaturated directed travel normalized by the
-    release-to-activation interval. Thus a wrong held rocker keeps a useful
-    unloading gradient without charging harmless subthreshold motion.
-    """
-
-    if activate_angle <= 0.0 or (use_chord and chord_press_travel <= 0.0):
-        raise ValueError("activation angle and chord press travel must be positive")
+    del chord_press_travel, chord_release_travel, use_chord
+    if activate_angle <= release_angle or release_angle < 0.0:
+        raise ValueError("activate travel must exceed non-negative release travel")
     requested = mario_nes_requested_buttons(env, command_name)
     enabled = _mario_enabled_button_mask(requested, enabled_buttons)
     requested = requested * enabled
     state = mario_nes_joint_state(env, asset_name)
     # Ignore harmless motion inside the decoder's release deadband. Beyond it,
     # retain an unsaturated gradient even when the wrong switch is fully on.
-    angle_span = max(activate_angle - release_angle, 1e-6)
-    right = torch.relu(state[:, 0] - release_angle) / angle_span
-    left = torch.relu(-state[:, 0] - release_angle) / angle_span
-    up = torch.relu(state[:, 1] - release_angle) / angle_span
-    down = torch.relu(-state[:, 1] - release_angle) / angle_span
-    a_tilt = torch.relu(state[:, 2] - release_angle) / angle_span
-    b_tilt = torch.relu(-state[:, 2] - release_angle) / angle_span
-    chord = (
-        torch.relu(state[:, 3] - chord_release_travel)
-        / max(chord_press_travel - chord_release_travel, 1e-6)
-        if use_chord
-        else torch.zeros_like(state[:, 3])
-    )
-    travel = torch.stack(
-        (
-            up,
-            down,
-            left,
-            right,
-            torch.maximum(a_tilt, chord),
-            torch.maximum(b_tilt, chord),
-        ),
-        dim=-1,
+    travel = torch.relu(state - release_angle) / max(
+        activate_angle - release_angle, 1e-6
     )
     cost = (travel * (1.0 - requested) * enabled).sum(dim=-1)
     if transition_grace_s > 0.0:
@@ -6340,6 +6260,29 @@ def feet_contact_loss_cost(
     """Non-negative 0/0.5/1 cost when zero/one/two feet lose support."""
 
     return 1.0 - feet_grounded_reward(env, sensor_name)
+
+
+def mario_transition_contact_loss_cost(
+    env: ManagerBasedRlEnv,
+    sensor_name: str = "feet_ground_contact",
+    command_name: str = "twist",
+    transition_grace_s: float = 0.25,
+) -> torch.Tensor:
+    """Allow one-foot repositioning briefly, then require both feet planted.
+
+    During the post-command grace window, losing both contacts costs one but a
+    single planted support foot is valid. Once button credit becomes available,
+    this becomes the ordinary 0/0.5/1 two-foot contact cost.
+    """
+
+    found = env.scene.sensors[sensor_name].data.found
+    if found.dim() == 3:
+        found = found.any(dim=-1)
+    contact_count = (found > 0).to(dtype=torch.float32).sum(dim=-1)
+    settled_cost = 1.0 - torch.clamp(contact_count, 0.0, 2.0) / 2.0
+    transition_cost = (contact_count == 0.0).to(dtype=settled_cost.dtype)
+    ready = mario_command_ready(env, command_name, transition_grace_s)
+    return torch.where(ready.bool(), settled_cost, transition_cost)
 
 
 def _mario_height_and_tilt(
@@ -6490,10 +6433,10 @@ def _mario_foot_anchor_errors(
     """Per-foot horizontal error from its assigned controller platform.
 
     ``robot_cfg`` must resolve ``[left_foot, right_foot]`` and
-    ``controller_cfg`` must resolve ``[dpad_platform, ab_rocker_platform]`` in
+    ``controller_cfg`` must resolve ``[dpad_platform, ab_platform]`` in
     the same order.  Measuring against the moving platform bodies (rather than
-    reset-time world coordinates) keeps the metric correct while the rockers
-    tilt and across vectorized environment origins.
+    reset-time world coordinates) keeps the metric correct across vectorized
+    environment origins.
     """
 
     robot: Entity = env.scene[robot_cfg.name]
@@ -6529,8 +6472,10 @@ def _mario_commanded_foot_target_xy(
     """Pad-local foot-site targets, calibrated against the HOME stance."""
 
     dpad_x, dpad_y, ab = command[:, 0], command[:, 1], command[:, 2]
-    # Mario's physical right rocker has only A. B/RUN is game-side virtual.
-    a_request = (ab > 0.5).to(dtype=command.dtype)
+    # A is forward and B is backward on the right-foot key pair. Values above
+    # one are legacy A+B commands and resolve to the A target; that category is
+    # disabled because one foot cannot press both separated keys cleanly.
+    ab_target = torch.clamp(ab, min=-1.0, max=1.0)
     return torch.stack(
         (
             torch.stack(
@@ -6542,7 +6487,7 @@ def _mario_commanded_foot_target_xy(
             ),
             torch.stack(
                 (
-                    right_neutral_x + position_offset * a_request,
+                    right_neutral_x + position_offset * ab_target,
                     torch.full_like(ab, right_neutral_y),
                 ),
                 dim=-1,
@@ -6585,6 +6530,63 @@ def mario_commanded_foot_anchor_cost(
     )
     error = torch.linalg.vector_norm(local_delta[:, :, :2] - target, dim=-1)
     return torch.clamp((error - deadzone) / max(scale, 1e-6), max=1.0).mean(dim=-1)
+
+
+def mario_commanded_foot_clearance_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    position_offset: float,
+    lateral_offset: float,
+    left_neutral_x: float,
+    left_neutral_y: float,
+    right_neutral_x: float,
+    right_neutral_y: float,
+    contact_height: float,
+    lift_height: float,
+    full_lift_error: float,
+    height_std: float,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Lift a misplaced foot slightly, then lower it as XY error vanishes.
+
+    This is state-based rather than clock-based: horizontal error smoothly
+    requests up to ``lift_height`` clearance, while arriving at the requested
+    pressure point requests zero clearance. Thus holding a foot in the air
+    cannot farm the term, and neutral commands use the same return behavior.
+    """
+
+    if lift_height < 0.0 or full_lift_error <= 0.0 or height_std <= 0.0:
+        raise ValueError("foot-clearance scales must be positive")
+    from mjlab.utils.lab_api.math import quat_apply_inverse
+
+    robot: Entity = env.scene[robot_cfg.name]
+    controller: Entity = env.scene[controller_cfg.name]
+    foot_pos = robot.data.site_pos_w[:, robot_cfg.site_ids]
+    pad_pos = controller.data.body_link_pos_w[:, controller_cfg.body_ids]
+    pad_quat = controller.data.body_link_quat_w[:, controller_cfg.body_ids]
+    local_delta = quat_apply_inverse(
+        pad_quat.reshape(-1, 4), (foot_pos - pad_pos).reshape(-1, 3)
+    ).reshape(foot_pos.shape)
+    target_xy = _mario_commanded_foot_target_xy(
+        env.command_manager.get_command(command_name),
+        position_offset,
+        lateral_offset,
+        left_neutral_x,
+        left_neutral_y,
+        right_neutral_x,
+        right_neutral_y,
+    )
+    xy_error = torch.linalg.vector_norm(
+        local_delta[:, :, :2] - target_xy, dim=-1
+    )
+    t = torch.clamp(xy_error / full_lift_error, 0.0, 1.0)
+    lift_blend = t.square() * (3.0 - 2.0 * t)
+    desired_clearance = lift_height * lift_blend
+    clearance = local_delta[:, :, 2] - contact_height
+    return torch.exp(
+        -torch.square((clearance - desired_clearance) / height_std)
+    ).mean(dim=-1)
 
 
 def mario_commanded_foot_pose_reward(
@@ -6676,14 +6678,26 @@ def mario_foot_planar_speed_cost(
     env: ManagerBasedRlEnv,
     speed_scale: float = 0.10,
     max_cost: float = 2.0,
+    sensor_name: str = "feet_ground_contact",
     robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
 ) -> torch.Tensor:
-    """Cost planar foot motion, catching both planted slip and swing motion."""
+    """Cost planar motion only while a sole touches the controller.
+
+    The former all-motion cost made a short lifted reposition just as expensive
+    as dragging a planted sole, so PPO learned to shuffle. Airborne movement is
+    free here; the transition contact term still requires a support foot and
+    requires both feet down before button credit begins.
+    """
 
     robot: Entity = env.scene[robot_cfg.name]
     velocity_xy = robot.data.site_lin_vel_w[:, robot_cfg.site_ids, :2]
     speed = torch.linalg.vector_norm(velocity_xy, dim=-1)
-    return torch.clamp(speed / max(speed_scale, 1e-6), max=max_cost).mean(dim=-1)
+    found = env.scene.sensors[sensor_name].data.found
+    if found.dim() == 3:
+        found = found.any(dim=-1)
+    planted = (found > 0).to(dtype=speed.dtype)
+    slip = torch.clamp(speed / max(speed_scale, 1e-6), max=max_cost) * planted
+    return slip.mean(dim=-1)
 
 
 def mario_commanded_trunk_offset_reward(
@@ -6692,6 +6706,7 @@ def mario_commanded_trunk_offset_reward(
     forward_offset: float = 0.012,
     lateral_offset: float = 0.010,
     std: float = 0.008,
+    transition_grace_s: float = 0.0,
     robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
 ) -> torch.Tensor:
     """Track a command-conditioned trunk offset relative to planted feet.
@@ -6725,7 +6740,12 @@ def mario_commanded_trunk_offset_reward(
     y_score = torch.exp(-((y_body - target_y) / std) ** 2)
     # A product prevents the policy from collecting half-credit by matching
     # the easy neutral axis while ignoring the requested directional shift.
-    return x_score * y_score
+    score = x_score * y_score
+    if transition_grace_s > 0.0:
+        score = score * mario_command_ready(
+            env, command_name, transition_grace_s
+        )
+    return score
 
 
 def mario_commanded_lean_reward(
@@ -6823,8 +6843,8 @@ def mario_clean_button_success(
     activation = mario_nes_activation(
         env,
         reward_params.get("asset_name", "nes_controller"),
-        reward_params.get("activate_angle", 0.01047198),
-        reward_params.get("release_angle", 0.00349066),
+        reward_params.get("activate_angle", 0.0007),
+        reward_params.get("release_angle", 0.0003),
         reward_params.get("chord_press_travel", 0.0007),
         reward_params.get("chord_release_travel", 0.0005),
         reward_params.get("use_chord", False),

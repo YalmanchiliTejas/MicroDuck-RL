@@ -1,93 +1,81 @@
-"""Combined physical controller decoder; contains no emulator-specific code."""
+"""Decoder for the simulation-first four-key Mario controller."""
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
-from .ab_rocker import ABRockerCalibration, ABRockerDecoder
-from .dpad import DPadCalibration, DPadDecoder
 from .input_state import NESInputState
 
 
 @dataclass(frozen=True, slots=True)
 class NESControllerCalibration:
-    dpad: DPadCalibration = field(default_factory=DPadCalibration)
-    ab: ABRockerCalibration = field(default_factory=ABRockerCalibration)
+    activate_travel: float = 0.0007
+    release_travel: float = 0.0003
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.release_travel < self.activate_travel:
+            raise ValueError("release travel must be below activation travel")
 
 
 class NESController:
-    """Expose a stable NES state from the three passive controller joints."""
+    """Hysteretic decoder for LEFT, RIGHT, A, and B vertical keys."""
 
-    DPAD_X_JOINT = "passive_dpad_x"
-    DPAD_Y_JOINT = "passive_dpad_y"
-    AB_JOINT = "passive_ab_rocker"
-    AB_PRESS_JOINT = "passive_ab_press"
+    BUTTON_JOINTS = (
+        "passive_dpad_left",
+        "passive_dpad_right",
+        "passive_button_a",
+        "passive_button_b",
+    )
 
     def __init__(self, calibration: NESControllerCalibration | None = None) -> None:
         self.calibration = calibration or NESControllerCalibration()
-        self.dpad = DPadDecoder(self.calibration.dpad)
-        self.ab = ABRockerDecoder(self.calibration.ab)
+        self._active = [False] * 4
 
     def reset(self) -> None:
-        self.dpad.reset()
-        self.ab.reset()
+        self._active = [False] * 4
 
-    def update(
-        self,
-        dpad_x: float,
-        dpad_y: float,
-        ab_angle: float,
-        ab_press_travel: float = 0.0,
-    ) -> NESInputState:
-        up, down, left, right = self.dpad.update(dpad_x, dpad_y)
-        a, b = self.ab.update(ab_angle, ab_press_travel)
-        return NESInputState(up=up, down=down, left=left, right=right, a=a, b=b)
+    def update(self, *travels: float) -> NESInputState:
+        if len(travels) != 4:
+            raise ValueError(f"expected four button travels, got {len(travels)}")
+        for index, raw in enumerate(travels):
+            travel = float(raw)
+            threshold = (
+                self.calibration.release_travel
+                if self._active[index]
+                else self.calibration.activate_travel
+            )
+            self._active[index] = travel >= threshold
+        left, right, button_a, button_b = self._active
+        return NESInputState(False, False, left, right, button_a, button_b)
 
     @classmethod
-    def joint_qpos_addresses(cls, model: Any) -> tuple[int, int, int, int]:
-        """Resolve joint names once for use in a per-step simulation loop."""
+    def joint_qpos_addresses(cls, model: Any) -> tuple[int, ...]:
+        """Resolve the four slider qpos addresses once per simulation."""
 
         import mujoco
 
         addresses = []
-        for name in (
-            cls.DPAD_X_JOINT,
-            cls.DPAD_Y_JOINT,
-            cls.AB_JOINT,
-            cls.AB_PRESS_JOINT,
-        ):
+        for name in cls.BUTTON_JOINTS:
             joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if joint_id < 0:
                 raise ValueError(f"controller joint not found: {name}")
             addresses.append(int(model.jnt_qposadr[joint_id]))
-        return tuple(addresses)  # type: ignore[return-value]
+        return tuple(addresses)
 
     def update_from_qpos(
-        self, qpos: Any, addresses: tuple[int, int, int, int]
+        self, qpos: Any, addresses: tuple[int, ...]
     ) -> NESInputState:
-        x_adr, y_adr, ab_adr, press_adr = addresses
-        # The physical slide moves in negative Z, but decoder travel is positive.
-        return self.update(
-            qpos[x_adr], qpos[y_adr], qpos[ab_adr], -qpos[press_adr]
-        )
+        return self.update(*(-float(qpos[address]) for address in addresses))
 
-    def debug_text(
-        self,
-        state: NESInputState,
-        dpad_x: float,
-        dpad_y: float,
-        ab_angle: float,
-        ab_press_travel: float = 0.0,
-    ) -> str:
-        dpad_active = "+".join(b.value for b in state.active if b.value in {"UP", "DOWN", "LEFT", "RIGHT"}) or "NEUTRAL"
-        ab_active = "+".join(b.value for b in state.active if b.value in {"A", "B"}) or "NEUTRAL"
-        values = state.as_dict()
-        lines = [
-            f"DPAD: x={dpad_x:+.3f} y={dpad_y:+.3f} rad -> {dpad_active}",
-            f"AB: angle={ab_angle:+.3f} rad press={ab_press_travel * 1e3:.1f} mm -> {ab_active}",
-            "",
-            "NES:",
-        ]
-        lines.extend(f"{name:<5} = {int(active)}" for name, active in values.items())
+    def debug_text(self, state: NESInputState, *travels: float) -> str:
+        if len(travels) != 4:
+            raise ValueError(f"expected four button travels, got {len(travels)}")
+        names = ("LEFT", "RIGHT", "A", "B")
+        active_values = (state.left, state.right, state.a, state.b)
+        lines = ["BUTTON TRAVEL:"]
+        lines.extend(
+            f"{name:<5} {travel * 1e3:4.2f} mm -> {int(active)}"
+            for name, travel, active in zip(names, travels, active_values)
+        )
         return "\n".join(lines)

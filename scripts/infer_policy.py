@@ -824,7 +824,7 @@ def main():
     parser.add_argument("--roller", action="store_true", help="Use roller skate robot XML (robot_walk_rollers.xml)")
     parser.add_argument("--scene", type=str, default=None, help="Path to a scene XML, overriding the default pick (e.g. src/mjlab_microduck/robot/microduck/scene_allcollisions.xml)")
     parser.add_argument("--flybrain-requests", action="store_true",
-                        help="receive Flybrain requests and decode physical NES rocker levels")
+                        help="receive Flybrain requests and decode physical NES key levels")
     parser.add_argument("--flybrain-host", default="127.0.0.1")
     parser.add_argument("--flybrain-port", type=int, default=55356)
     parser.add_argument("--mario-host", default="127.0.0.1")
@@ -1128,9 +1128,7 @@ def main():
     mario_frame_wait_reported = False
     if args.flybrain_requests:
         from mjlab_microduck.controller import (
-            ABRockerCalibration,
             NESController,
-            NESControllerCalibration,
         )
         from mjlab_microduck.controller_game import ControllerFrame
         from mjlab_microduck.mario_monitor import (
@@ -1147,21 +1145,9 @@ def main():
             port=args.flybrain_port,
         )
         mario_client = SuperMarioUdpClient(host=args.mario_host, port=args.mario_port)
-        mario_decoder = NESController(
-            NESControllerCalibration(
-                ab=ABRockerCalibration(
-                    chord_press_travel=0.003,
-                    chord_release_travel=0.0025,
-                )
-            )
-        )
+        mario_decoder = NESController()
         mario_joint_qpos = {}
-        for name in (
-            NESController.DPAD_X_JOINT,
-            NESController.DPAD_Y_JOINT,
-            NESController.AB_JOINT,
-            NESController.AB_PRESS_JOINT,
-        ):
+        for name in NESController.BUTTON_JOINTS:
             joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
             if joint_id < 0:
                 parser.error(
@@ -1173,7 +1159,7 @@ def main():
         mario_monitor = MarioMonitorTexture(model)
         print(
             f"Flybrain requests: udp://{args.flybrain_host}:{args.flybrain_port}; "
-            f"measured NES rockers -> udp://{args.mario_host}:{args.mario_port}"
+            f"measured NES keys -> udp://{args.mario_host}:{args.mario_port}"
         )
         print(
             f'Mario display: shared memory "{args.mario_frame_shm}" -> '
@@ -1481,14 +1467,9 @@ def main():
                 if mario_client is not None:
                     state = mario_decoder.update(
                         *(
-                            float(data.qpos[mario_joint_qpos[name]])
-                            for name in (
-                                NESController.DPAD_X_JOINT,
-                                NESController.DPAD_Y_JOINT,
-                                NESController.AB_JOINT,
-                            )
-                        ),
-                        -float(data.qpos[mario_joint_qpos[NESController.AB_PRESS_JOINT]]),
+                            -float(data.qpos[mario_joint_qpos[name]])
+                            for name in NESController.BUTTON_JOINTS
+                        )
                     )
                     mario_client.send(
                         ControllerFrame(left=state.left, right=state.right, jump=state.a)

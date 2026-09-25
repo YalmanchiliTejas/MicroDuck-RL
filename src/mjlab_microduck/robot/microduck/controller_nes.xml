@@ -1,124 +1,65 @@
 <mujoco model="microduck_nes_controller">
     <compiler angle="radian" autolimits="true"/>
 
-    <!--
-      Tiny-motion physical NES controller.
-
-      Left foot: passive_dpad_y pitches fore/aft (UP/DOWN), while nested
-      passive_dpad_x rolls laterally (RIGHT/LEFT). Right foot:
-      passive_ab_rocker pitches fore/aft (A only). A nested 2 mm vertical
-      travel axis, passive_ab_press, is retained for compatibility but ignored
-      by Mario: RUN/B is selected in software, never by a vertical chord.
-      The rocker pivots sit under their measured HOME sole contact centroids
-      (left x=-7 mm; right x=-6 mm); the old x=+7 mm pivots put those
-      centroids about 11-14 mm behind the hinges. The right hinge is A-only:
-      B/RUN is virtual, so negative rocker travel serves no game input.
-      Angular axes have a 2 degree stop (A is unilateral). Main centering
-      springs are 3 N m/rad; the lateral spring is 1.5 N m/rad. A 3 N foot
-      load shifted 7 mm can cross the 0.4 degree activation threshold without
-      requiring a large whole-body weight transfer.
-
-      These XML values are intentionally easy to tune. Python activation and
-      release thresholds live in mjlab_microduck.controller and default to
-      20% / 7.5% of the same 2 degree range.
-    -->
-
+    <!-- Simulation-first controller with four independent vertical keys. -->
     <default>
-        <default class="nes_hinge">
-            <joint type="hinge" limited="true" range="-0.034906585 0.034906585"
-                   stiffness="3.0" damping="0.25" springref="0"
+        <default class="nes_button_joint">
+            <joint type="slide" axis="0 0 1" limited="true" range="-0.002 0"
+                   stiffness="1200" damping="2.0" springref="0"
                    armature="0.00002"/>
         </default>
-        <default class="nes_a_hinge">
-            <joint type="hinge" limited="true" range="0 0.034906585"
-                   stiffness="3.0" damping="0.25" springref="0"
-                   armature="0.00002"/>
-        </default>
-        <default class="nes_dpad_x_hinge">
-            <joint type="hinge" limited="true" range="-0.034906585 0.034906585"
-                   stiffness="1.5" damping="0.15" springref="0"
-                   armature="0.00002"/>
-        </default>
-        <default class="nes_surface">
-            <!-- Priority 2 makes these firm contact parameters win over the
-                 robot foot geoms (priority 1). The 12 mm plate prevents a
-                 fast foot from crossing the whole surface in one substep. -->
-            <geom type="box" size="0.053 0.033 0.006"
+        <default class="nes_button">
+            <geom type="box" size="0.006 0.005 0.003"
                   friction="1.6 0.02 0.002" condim="3" priority="2"
                   solref="0.005 1" solimp="0.98 0.999 0.0005"/>
-        </default>
-        <default class="nes_visual">
-            <geom contype="0" conaffinity="0" group="2"/>
         </default>
     </default>
 
     <worldbody>
-      <!-- A named common root lets one contact sensor match both moving
-           surfaces as a subtree without silently selecting only one geom. -->
       <body name="controller_root">
-        <!-- Recessed fixed housings sit below the two moving top surfaces. -->
         <geom name="dpad_housing" type="box" pos="-0.007 0.043 0.004"
-              size="0.059 0.039 0.004" rgba="0.025 0.030 0.045 1"
+              size="0.038 0.033 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
         <geom name="ab_housing" type="box" pos="-0.006 -0.041 0.004"
-              size="0.059 0.039 0.004" rgba="0.025 0.030 0.045 1"
+              size="0.034 0.027 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
 
-        <!-- LEFT FOOT: outer pitch hinge, then nested roll hinge. -->
-        <body name="dpad_pitch_gimbal" pos="-0.007 0.043 0.009">
-            <joint name="passive_dpad_y" class="nes_hinge" axis="0 1 0"/>
-            <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
-            <body name="dpad_platform">
-                <joint name="passive_dpad_x" class="nes_dpad_x_hinge" axis="1 0 0"/>
-                <inertial pos="0 0 0" mass="0.035" diaginertia="2.2e-5 5.0e-5 6.3e-5"/>
-                <geom name="dpad_surface" class="nes_surface" rgba="0.12 0.15 0.21 1"/>
-
-                <!-- Cross-shaped top graphic; the dark full plate is the real
-                     collision surface so the entire sole remains supported. -->
-                <geom name="dpad_cross_long" class="nes_visual" type="box"
-                      pos="0 0 0.00605" size="0.049 0.011 0.00005"
-                      rgba="0.25 0.30 0.40 1"/>
-                <geom name="dpad_cross_wide" class="nes_visual" type="box"
-                      pos="0 0 0.00606" size="0.011 0.029 0.00005"
-                      rgba="0.25 0.30 0.40 1"/>
-                <geom name="dpad_up" class="nes_visual" type="box"
-                      pos="0.039 0 0.00608" size="0.009 0.009 0.00005"
+        <!-- Fixed frames double as per-foot anchor references. -->
+        <body name="dpad_platform" pos="-0.007 0.043 0.007">
+            <!-- Neutral rest is 2 mm above the unpressed keys. A sole must
+                 leave this rest and move over one key before it can press. -->
+            <geom name="dpad_neutral_support" type="box" pos="0 0 0.005"
+                  size="0.007 0.006 0.003" rgba="0.18 0.22 0.30 1"
+                  friction="1.6 0.02 0.002" condim="3" priority="2"/>
+            <body name="dpad_left_key" pos="0 0.016 0">
+                <joint name="passive_dpad_left" class="nes_button_joint"/>
+                <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
+                <geom name="dpad_left_surface" class="nes_button" pos="0 0 0.003"
                       rgba="0.25 0.72 1 1"/>
-                <geom name="dpad_down" class="nes_visual" type="box"
-                      pos="-0.039 0 0.00608" size="0.009 0.009 0.00005"
+            </body>
+            <body name="dpad_right_key" pos="0 -0.016 0">
+                <joint name="passive_dpad_right" class="nes_button_joint"/>
+                <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
+                <geom name="dpad_right_surface" class="nes_button" pos="0 0 0.003"
                       rgba="0.25 0.72 1 1"/>
-                <geom name="dpad_left" class="nes_visual" type="box"
-                      pos="0 0.024 0.00608" size="0.009 0.007 0.00005"
-                      rgba="0.25 0.72 1 1"/>
-                <geom name="dpad_right" class="nes_visual" type="box"
-                      pos="0 -0.024 0.00608" size="0.009 0.007 0.00005"
-                      rgba="0.25 0.72 1 1"/>
-                <geom name="dpad_neutral" class="nes_visual" type="cylinder"
-                      pos="0 0 0.00608" size="0.006 0.00005"
-                      rgba="0.7 0.78 0.88 1"/>
             </body>
         </body>
 
-        <!-- RIGHT FOOT: A-only fore/aft rocker. The unused chord slide remains
-             in the joint layout for critic compatibility but Mario ignores it. -->
-        <body name="ab_press_carriage" pos="-0.006 -0.041 0.009">
-            <joint name="passive_ab_press" type="slide" axis="0 0 1"
-                   limited="true" range="-0.002 0" springref="0"
-                   stiffness="10000" damping="30.0" armature="0.00002"/>
-            <inertial pos="0 0 0" mass="0.012" diaginertia="1.2e-5 2.6e-5 3.6e-5"/>
-            <body name="ab_rocker_platform">
-                <joint name="passive_ab_rocker" class="nes_a_hinge" axis="0 1 0"/>
-                <inertial pos="0 0 0" mass="0.035" diaginertia="2.2e-5 5.0e-5 6.3e-5"/>
-                <geom name="ab_surface" class="nes_surface" rgba="0.18 0.12 0.16 1"/>
-                <geom name="button_a_visual" class="nes_visual" type="cylinder"
-                      pos="0.033 0 0.00608" size="0.015 0.00005"
+        <body name="ab_platform" pos="-0.006 -0.041 0.007">
+            <geom name="ab_neutral_support" type="box" pos="0 0 0.005"
+                  size="0.007 0.006 0.003" rgba="0.22 0.17 0.22 1"
+                  friction="1.6 0.02 0.002" condim="3" priority="2"/>
+            <body name="button_a_key" pos="0.018 0 0">
+                <joint name="passive_button_a" class="nes_button_joint"/>
+                <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
+                <geom name="button_a_surface" class="nes_button" pos="0 0 0.003"
                       rgba="0.95 0.18 0.20 1"/>
-                <geom name="button_b_visual" class="nes_visual" type="cylinder"
-                      pos="-0.033 0 0.00608" size="0.015 0.00005"
+            </body>
+            <body name="button_b_key" pos="-0.018 0 0">
+                <joint name="passive_button_b" class="nes_button_joint"/>
+                <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
+                <geom name="button_b_surface" class="nes_button" pos="0 0 0.003"
                       rgba="0.95 0.64 0.12 1"/>
-                <geom name="ab_chord_visual" class="nes_visual" type="box"
-                      pos="0 0 0.00608" size="0.008 0.025 0.00005"
-                      rgba="0.78 0.30 0.82 1"/>
             </body>
         </body>
       </body>

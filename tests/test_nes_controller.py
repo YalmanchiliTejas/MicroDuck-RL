@@ -1,8 +1,6 @@
-from math import radians
 from pathlib import Path
 
 import mujoco
-import numpy as np
 import pytest
 
 from mjlab_microduck.controller import NESController
@@ -11,132 +9,138 @@ from mjlab_microduck.controller import NESController
 ROBOT_DIR = Path(__file__).parents[1] / "src/mjlab_microduck/robot/microduck"
 
 
-def test_physical_controller_compiles_with_four_passive_limited_axes():
+def test_physical_controller_compiles_with_four_independent_slider_keys():
     model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
-    expected = {
-        "passive_dpad_x",
-        "passive_dpad_y",
-        "passive_ab_rocker",
-        "passive_ab_press",
-    }
+    expected = set(NESController.BUTTON_JOINTS)
     actual = {
         mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_JOINT, index)
         for index in range(model.njnt)
     }
     assert actual == expected
-    for name in expected - {"passive_ab_press"}:
+    for name in expected:
         joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-        lower = 0.0 if name == "passive_ab_rocker" else -radians(2)
-        assert tuple(model.jnt_range[joint_id]) == pytest.approx(
-            (lower, radians(2))
-        )
-        stiffness = 1.5 if name == "passive_dpad_x" else 3.0
-        assert model.jnt_stiffness[joint_id] == pytest.approx(stiffness)
+        assert tuple(model.jnt_range[joint_id]) == pytest.approx((-0.002, 0.0))
+        assert model.jnt_stiffness[joint_id] == pytest.approx(1200.0)
         dof_id = model.jnt_dofadr[joint_id]
-        damping = 0.15 if name == "passive_dpad_x" else 0.25
-        assert model.dof_damping[dof_id] == pytest.approx(damping)
+        assert model.dof_damping[dof_id] == pytest.approx(2.0)
 
-    for name in ("dpad_surface", "ab_surface"):
+    for name in (
+        "dpad_left_surface",
+        "dpad_right_surface",
+        "button_a_surface",
+        "button_b_surface",
+    ):
         geom_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, name)
         assert model.geom_priority[geom_id] == 2
-        assert model.geom_size[geom_id, 2] == pytest.approx(0.006)
+        assert model.geom_size[geom_id, 2] == pytest.approx(0.003)
 
 
 def test_full_scene_places_each_foot_over_its_controller():
-    model = mujoco.MjModel.from_xml_path(
-        str(ROBOT_DIR / "scene_controller_nes.xml")
-    )
-    for body_name in ("dpad_platform", "ab_rocker_platform", "mario_monitor"):
+    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "scene_controller_nes.xml"))
+    for body_name in ("dpad_platform", "ab_platform", "mario_monitor"):
         assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name) >= 0
-    assert model.nq > 3
+    assert model.nq > 4
 
 
-def test_single_foot_loads_can_click_each_mario_axis_without_false_neutral():
-    """A gentle 3 N load shifted 7 mm must cross the 0.4° switch point."""
-
-    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
-    left_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "dpad_platform")
-    right_body = mujoco.mj_name2id(
-        model, mujoco.mjtObj.mjOBJ_BODY, "ab_rocker_platform"
+def test_home_stance_does_not_preload_any_button():
+    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "scene_controller_nes.xml"))
+    data = mujoco.MjData(model)
+    root_id = mujoco.mj_name2id(
+        model, mujoco.mjtObj.mjOBJ_JOINT, "trunk_base_freejoint"
     )
+    root_adr = model.jnt_qposadr[root_id]
+    data.qpos[root_adr : root_adr + 7] = (0, 0, 0.135, 1, 0, 0, 0)
+    home = {
+        "left_hip_yaw": 0.0,
+        "left_hip_roll": -0.0872664626,
+        "left_hip_pitch": -0.457924,
+        "left_knee": -0.004940,
+        "left_ankle": 0.452984,
+        "neck_pitch": 0.3490658504,
+        "head_pitch": 0.3490658504,
+        "head_yaw": 0.0,
+        "head_roll": 0.0,
+        "right_hip_yaw": 0.0,
+        "right_hip_roll": 0.0872664626,
+        "right_hip_pitch": 0.457924,
+        "right_knee": 0.004940,
+        "right_ankle": -0.452984,
+    }
+    for name, value in home.items():
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        actuator_id = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_ACTUATOR, name
+        )
+        data.qpos[model.jnt_qposadr[joint_id]] = value
+        data.ctrl[actuator_id] = value
+    mujoco.mj_forward(model, data)
+    for _ in range(50):
+        mujoco.mj_step(model, data)
 
-    def settled_angles(
-        left_xy: tuple[float, float], right_xy: tuple[float, float]
-    ) -> tuple[float, float, float]:
-        data = mujoco.MjData(model)
-        for _ in range(500):
-            data.qfrc_applied[:] = 0.0
-            mujoco.mj_forward(model, data)
-            for body_id, (x, y) in (
-                (left_body, left_xy), (right_body, right_xy)
-            ):
-                point = data.xpos[body_id].copy() + np.array([x, y, 0.0])
-                mujoco.mj_applyFT(
-                    model,
-                    data,
-                    np.array([0.0, 0.0, -3.0]),
-                    np.zeros(3),
-                    point,
-                    body_id,
-                    data.qfrc_applied,
-                )
-            mujoco.mj_step(model, data)
-        result = []
-        for name in ("passive_dpad_x", "passive_dpad_y", "passive_ab_rocker"):
-            joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
-            result.append(float(data.qpos[model.jnt_qposadr[joint_id]]))
-        return tuple(result)
-
-    # Sole *sites* sit a few millimetres ahead of their actual pressure
-    # centroids. Apply these forces at pressure centroids, not at site targets.
-    neutral = settled_angles((0.0, 0.0), (0.0, 0.0))
-    assert all(abs(value) < radians(0.15) for value in neutral)
-    left = settled_angles((0.0, 0.007), (0.0, 0.0))
-    right = settled_angles((0.0, -0.007), (0.0, 0.0))
-    jump = settled_angles((0.0, 0.0), (0.007, 0.0))
-    assert left[0] < -radians(0.4)
-    assert right[0] > radians(0.4)
-    assert jump[2] > radians(0.4)
-    assert abs(jump[0]) < radians(0.15)
+    for address in NESController.joint_qpos_addresses(model):
+        assert -float(data.qpos[address]) < 0.0003
 
 
 @pytest.mark.parametrize(
-    ("x", "y", "ab", "press", "expected"),
+    "joint_name,body_name",
     [
-        (-1, 0, 0, 0.0, {"LEFT"}),
-        (1, 0, 0, 0.0, {"RIGHT"}),
-        (0, 1, 0, 0.0, {"UP"}),
-        (0, -1, 0, 0.0, {"DOWN"}),
-        (0, 0, 1, 0.0, {"A"}),
-        (0, 0, -1, 0.0, {"B"}),
-        (1, 0, 1, 0.0, {"RIGHT", "A"}),
-        (1, 0, -1, 0.0, {"RIGHT", "B"}),
-        (1, 0, 0, 0.002, {"RIGHT", "A", "B"}),
-        (-1, 0, 1, 0.0, {"LEFT", "A"}),
+        ("passive_dpad_left", "dpad_left_key"),
+        ("passive_dpad_right", "dpad_right_key"),
+        ("passive_button_a", "button_a_key"),
+        ("passive_button_b", "button_b_key"),
     ],
 )
-def test_requested_single_and_combined_inputs(x, y, ab, press, expected):
-    controller = NESController()
-    state = controller.update(
-        radians(2) * x, radians(2) * y, radians(2) * ab, press
+def test_each_key_can_be_pressed_without_mechanically_moving_others(
+    joint_name, body_name
+):
+    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
+    data = mujoco.MjData(model)
+    body_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, body_name)
+    data.xfrc_applied[body_id, 2] = -1.0
+    for _ in range(1_000):
+        mujoco.mj_step(model, data)
+
+    travels = {}
+    for name in NESController.BUTTON_JOINTS:
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, name)
+        travels[name] = -float(data.qpos[model.jnt_qposadr[joint_id]])
+    assert travels[joint_name] > 0.0007
+    assert all(
+        travel < 0.00015
+        for name, travel in travels.items()
+        if name != joint_name
     )
+
+
+@pytest.mark.parametrize(
+    "travels,expected",
+    [
+        ((0.001, 0, 0, 0), {"LEFT"}),
+        ((0, 0.001, 0, 0), {"RIGHT"}),
+        ((0, 0, 0.001, 0), {"A"}),
+        ((0, 0, 0, 0.001), {"B"}),
+        ((0.001, 0, 0.001, 0), {"LEFT", "A"}),
+    ],
+)
+def test_decoder_maps_each_independent_travel(travels, expected):
+    state = NESController().update(*travels)
     assert {button.value for button in state.active} == expected
 
 
-def test_dpad_and_ab_hysteresis_prevent_threshold_flicker():
+def test_each_key_has_activation_and_release_hysteresis():
     controller = NESController()
-    assert controller.update(radians(0.5), 0, radians(0.5)).right
-    held = controller.update(radians(0.2), 0, radians(0.2))
+    assert controller.update(0, 0.0008, 0.0008, 0).right
+    held = controller.update(0, 0.0005, 0.0005, 0)
     assert held.right and held.a
-    released = controller.update(radians(0.1), 0, radians(0.1))
+    released = controller.update(0, 0.0002, 0.0002, 0)
     assert not released.right and not released.a
 
 
-def test_ab_chord_press_has_its_own_hysteresis():
-    controller = NESController()
-    chord = controller.update(0, 0, 0, 0.0012)
-    assert chord.a and chord.b
-    held = controller.update(0, 0, 0, 0.0008)
-    assert held.a and held.b
-    released = controller.update(0, 0, 0, 0.0005)
-    assert not released.a and not released.b
+def test_decoder_reads_negative_slider_qpos_as_positive_travel():
+    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
+    data = mujoco.MjData(model)
+    addresses = NESController.joint_qpos_addresses(model)
+    data.qpos[addresses[2]] = -0.001
+    state = NESController().update_from_qpos(data.qpos, addresses)
+    assert state.a
+    assert not state.b

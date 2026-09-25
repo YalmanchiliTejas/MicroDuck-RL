@@ -33,8 +33,8 @@ MICRODUCK_BALL_XML: Path = _ROBOT_DIR / "ball.xml"
 MICRODUCK_GRAPE_XML: Path = _ROBOT_DIR / "grape.xml"
 # Three spring-loaded floor buttons used by the controller-game prototype.
 MICRODUCK_CONTROLLER_PADS_XML: Path = _ROBOT_DIR / "controller_pads.xml"
-# Low-travel NES controller: a two-axis D-pad under the left foot and an A/B
-# rocker under the right foot.
+# Low-travel controller: independent LEFT/RIGHT keys under the left foot and
+# independent A/B keys under the right foot.
 MICRODUCK_NES_CONTROLLER_XML: Path = _ROBOT_DIR / "controller_nes.xml"
 # World-fixed display whose texture is fed by the Super Mario sidecar.
 MICRODUCK_MARIO_MONITOR_XML: Path = _ROBOT_DIR / "mario_monitor.xml"

@@ -11,11 +11,7 @@ import torch
 from mjlab.utils.wrappers import VideoRecorder
 from PIL import Image, ImageDraw, ImageFont
 
-from mjlab_microduck.controller import (
-    ABRockerCalibration,
-    NESController,
-    NESControllerCalibration,
-)
+from mjlab_microduck.controller import NESController, NESControllerCalibration
 from mjlab_microduck.tasks import mdp
 
 GAME_BUTTON_INDICES = (2, 3, 4)
@@ -26,7 +22,7 @@ GAME_BUTTON_NAMES = ("LEFT", "RIGHT", "JUMP")
 class MarioFrameDiagnostics:
     """Physical controller details that disambiguate travel from a real click."""
 
-    # [dpad_x, dpad_y, A/B rocker, downward chord travel].
+    # Positive depression of [UP, DOWN, LEFT, RIGHT, A, B], in metres.
     joint_state: Sequence[float]
     # Stateful hysteretic decoder in [UP, DOWN, LEFT, RIGHT, A, B] order.
     decoded: Sequence[bool]
@@ -85,7 +81,7 @@ def mario_overlay_lines(
         (f"progress    {progress_text}", (185, 215, 255)),
     ]
     if diagnostics is not None:
-        dpad_x, dpad_y, ab_angle, press_travel = diagnostics.joint_state
+        up, down, left, right, button_a, button_b = diagnostics.joint_state
         decoded_names = ("UP", "DOWN", "LEFT", "RIGHT", "A", "B")
         decoded_text = "  ".join(
             f"{name}:{int(active)}"
@@ -105,11 +101,10 @@ def mario_overlay_lines(
         lines.extend(
             (
                 (
-                    "joints(deg)  "
-                    f"X:{math.degrees(dpad_x):+.2f}  "
-                    f"Y:{math.degrees(dpad_y):+.2f}  "
-                    f"AB:{math.degrees(ab_angle):+.2f}  "
-                    f"PRESS:{press_travel * 1e3:.2f}mm",
+                    "travel(mm)  "
+                    f"U:{up * 1e3:.2f} D:{down * 1e3:.2f}  "
+                    f"L:{left * 1e3:.2f} R:{right * 1e3:.2f}  "
+                    f"A:{button_a * 1e3:.2f} B:{button_b * 1e3:.2f}",
                     (205, 205, 255),
                 ),
                 (
@@ -199,19 +194,17 @@ class MarioDebugVideoRecorder(VideoRecorder):
         metrics: dict[str, float],
     ) -> MarioFrameDiagnostics:
         if not hasattr(self, "_mario_nes_decoder"):
-            # The legacy chord slide is retained for critic compatibility but
-            # is physically disabled in Mario. Keep the overlay's decoder in
-            # sync with that game-side contract.
+            reward_cfg = self._wrapped_env.reward_manager.get_term_cfg(
+                "unrequested_button"
+            )
             self._mario_nes_decoder = NESController(
                 NESControllerCalibration(
-                    ab=ABRockerCalibration(
-                        chord_press_travel=0.003,
-                        chord_release_travel=0.0025,
-                    )
+                    activate_travel=float(reward_cfg.params["activate_angle"]),
+                    release_travel=float(reward_cfg.params["release_angle"]),
                 )
             )
         state = joint_state.detach().cpu().tolist()
-        decoded_state = self._mario_nes_decoder.update(*state)
+        decoded_state = self._mario_nes_decoder.update(*state[2:6])
         decoded_dict = decoded_state.as_dict()
         decoded = tuple(
             decoded_dict[name] for name in ("UP", "DOWN", "LEFT", "RIGHT", "A", "B")
@@ -226,12 +219,12 @@ class MarioDebugVideoRecorder(VideoRecorder):
         if enabled is None:
             enabled = (True,) * 6
         requested_values = requested.detach().cpu().tolist()
-        x_angle, _, ab_angle, _ = state
+        left_travel, right_travel, jump_travel = state[2], state[3], state[4]
         span = max(activate_angle - release_angle, 1e-6)
         raw_game_travel = (
-            max(-x_angle - release_angle, 0.0) / span,
-            max(x_angle - release_angle, 0.0) / span,
-            max(ab_angle - release_angle, 0.0) / span,
+            max(left_travel - release_angle, 0.0) / span,
+            max(right_travel - release_angle, 0.0) / span,
+            max(jump_travel - release_angle, 0.0) / span,
         )
         contributions = tuple(
             travel * (1.0 - requested_values[index]) * float(enabled[index])
