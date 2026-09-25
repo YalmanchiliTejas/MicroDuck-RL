@@ -42,7 +42,8 @@ ACTIVATE_ANGLE = 0.0007
 RELEASE_ANGLE = 0.0003
 CHORD_PRESS_TRAVEL = 0.0007
 CHORD_RELEASE_TRAVEL = 0.0005
-BUTTON_ACTIVATION_WEIGHT = 8.0
+BUTTON_ACTIVATION_WEIGHT = 6.0
+LEG_BUTTON_ACTIVATION_WEIGHT = 1.0
 BUTTON_PROGRESS_WEIGHT = 0.5
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.060
@@ -370,6 +371,22 @@ def make_microduck_mario_env_cfg(play: bool = False):
         weight=-3.0,
         params=controller_activation_params,
     )
+    # Independent discovery signals: a missing left press must not erase the
+    # right foot's learning signal (or vice versa). The larger complete-request
+    # reward above still requires EVERY requested key, so half a combo earns
+    # only 1.25 at most, versus 8.5 for the complete combination.
+    progress_params = cfg.rewards.pop("requested_button_progress").params
+    for leg in ("left", "right"):
+        cfg.rewards[f"{leg}_requested_button"] = RewardTermCfg(
+            func=microduck_mdp.mario_requested_button_reward,
+            weight=LEG_BUTTON_ACTIVATION_WEIGHT,
+            params={**cfg.rewards["requested_button"].params, "leg": leg},
+        )
+        cfg.rewards[f"{leg}_button_progress"] = RewardTermCfg(
+            func=microduck_mdp.mario_requested_button_progress_reward,
+            weight=BUTTON_PROGRESS_WEIGHT / 2,
+            params={**progress_params, "leg": leg},
+        )
     foot_pose_params = {
         "command_name": "twist",
         "position_offset": FOOT_POSITION_OFFSET,
@@ -392,15 +409,16 @@ def make_microduck_mario_env_cfg(play: bool = False):
         weight=0.0,
         params=foot_pose_params,
     )
-    cfg.rewards["foot_approach"] = RewardTermCfg(
-        func=microduck_mdp.mario_foot_approach_reward,
-        weight=2.0,
-        params={key: foot_pose_params[key] for key in (
-            "command_name", "position_offset", "lateral_offset",
-            "left_neutral_x", "left_neutral_y", "right_neutral_x",
-            "right_neutral_y", "robot_cfg", "controller_cfg",
-        )},
-    )
+    for leg in ("left", "right"):
+        cfg.rewards[f"{leg}_foot_approach"] = RewardTermCfg(
+            func=microduck_mdp.mario_foot_approach_reward,
+            weight=1.0,
+            params={"leg": leg, **{key: foot_pose_params[key] for key in (
+                "command_name", "position_offset", "lateral_offset",
+                "left_neutral_x", "left_neutral_y", "right_neutral_x",
+                "right_neutral_y", "robot_cfg", "controller_cfg",
+            )}},
+        )
     cfg.rewards["commanded_foot_clearance"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_clearance_reward,
         weight=0.0,
@@ -515,6 +533,15 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 **camera_ready_params,
                 **standing_pose_params,
             },
+        )
+    for leg in ("left", "right"):
+        cfg.metrics[f"{leg}_button_success"] = MetricsTermCfg(
+            func=microduck_mdp.mario_active_success_rate,
+            params={"leg": leg, **cfg.metrics["requested_button_success"].params},
+        )
+        cfg.metrics[f"{leg}_button_clean"] = MetricsTermCfg(
+            func=microduck_mdp.mario_requested_button_reward,
+            params={"leg": leg, **cfg.metrics["requested_button_clean"].params},
         )
     cfg.metrics["feet_anchored"] = MetricsTermCfg(
         func=microduck_mdp.mario_feet_anchored,

@@ -6027,6 +6027,16 @@ def mario_nes_requested_buttons(
     ).to(dtype=command.dtype)
 
 
+def _mario_leg_requests(requested: torch.Tensor, leg: str | None) -> torch.Tensor:
+    """Select a foot's requested switches without changing global exclusivity."""
+    if leg is None:
+        return requested
+    if leg not in ("left", "right"):
+        raise ValueError("leg must be left, right, or None")
+    mask = (0, 0, 1, 1, 0, 0) if leg == "left" else (0, 0, 0, 0, 1, 1)
+    return requested * requested.new_tensor(mask)
+
+
 def mario_requested_button_reward(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
@@ -6055,6 +6065,7 @@ def mario_requested_button_reward(
     require_exclusive: bool = False,
     transition_grace_s: float = 0.0,
     enabled_buttons: tuple[bool, ...] | None = None,
+    leg: str | None = None,
 ) -> torch.Tensor:
     """Reward requested activation only with planted feet and a usable camera."""
 
@@ -6070,11 +6081,12 @@ def mario_requested_button_reward(
         chord_release_travel,
         use_chord,
     )
-    requested_count = requested.sum(dim=-1)
+    selected = _mario_leg_requests(requested, leg)
+    requested_count = selected.sum(dim=-1)
     # A combination only pays as well as its weakest requested switch. One
     # held button can no longer collect half the full task reward forever.
     score = torch.where(
-        requested.bool(), activation, torch.ones_like(activation)
+        selected.bool(), activation, torch.ones_like(activation)
     ).amin(dim=-1)
     score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
     if require_exclusive:
@@ -6148,6 +6160,7 @@ def mario_requested_button_progress_reward(
     require_exclusive: bool = False,
     transition_grace_s: float = 0.0,
     enabled_buttons: tuple[bool, ...] | None = None,
+    leg: str | None = None,
 ) -> torch.Tensor:
     """Dense button progress only while planted and camera-ready."""
 
@@ -6161,9 +6174,10 @@ def mario_requested_button_progress_reward(
         chord_press_travel,
         use_chord,
     )
-    requested_count = requested.sum(dim=-1)
+    selected = _mario_leg_requests(requested, leg)
+    requested_count = selected.sum(dim=-1)
     score = torch.where(
-        requested.bool(), progress, torch.ones_like(progress)
+        selected.bool(), progress, torch.ones_like(progress)
     ).prod(dim=-1)
     score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
     if require_exclusive:
@@ -6549,6 +6563,7 @@ def mario_foot_approach_reward(
     right_neutral_y: float,
     robot_cfg: SceneEntityCfg,
     controller_cfg: SceneEntityCfg,
+    leg: str | None = None,
 ) -> torch.Tensor:
     """Pay only new best approach to a key during the current request.
 
@@ -6575,8 +6590,15 @@ def mario_foot_approach_reward(
              / scale).clamp(max=1.0)
     active = torch.stack((command[:, 0].abs() > 0.5,
                           command[:, 2].abs() > 0.5), dim=-1)
+    if leg not in (None, "left", "right"):
+        raise ValueError("leg must be left, right, or None")
+    if leg is not None:
+        active = active & active.new_tensor((leg == "left", leg == "right"))
     age = term.command_age
-    cache = getattr(env, "_mario_approach_cache", None)
+    # Each reward term owns its history. Calling left then right in the same
+    # step must not consume the other term's improvement or reset its baseline.
+    cache_name = f"_mario_approach_cache_{leg or 'both'}"
+    cache = getattr(env, cache_name, None)
     if cache is None:
         gain = torch.zeros_like(error)
         best = error
@@ -6587,7 +6609,7 @@ def mario_foot_approach_reward(
         best = torch.where(reset[:, None], error, previous_best)
         gain = (best - error).clamp(min=0.0)
         best = torch.minimum(best, error)
-    env._mario_approach_cache = (best.detach().clone(), age.clone(), command.clone())
+    setattr(env, cache_name, (best.detach().clone(), age.clone(), command.clone()))
     rate = (gain / env.step_dt).clamp(max=2.0)
     return (rate * active).sum(dim=-1) / active.sum(dim=-1).clamp(min=1)
 
@@ -6926,15 +6948,19 @@ def mario_clean_button_success(
         reward_params.get("chord_release_travel", 0.0005),
         reward_params.get("use_chord", False),
     )
-    requested_count = requested.sum(dim=-1)
+    selected = _mario_leg_requests(requested, reward_params.get("leg"))
+    requested_count = selected.sum(dim=-1)
     requested_min = torch.where(
-        requested.bool(), activation, torch.ones_like(activation)
+        selected.bool(), activation, torch.ones_like(activation)
     ).amin(dim=-1)
     requested_ok = (requested_count == 0.0) | (
         requested_min >= success_threshold
     )
     wrong_max = (activation * (1.0 - requested) * enabled).amax(dim=-1)
     success = requested_ok & (wrong_max <= wrong_threshold)
+    if reward_params.get("leg") is not None:
+        # An idle foot is not a successful requested press.
+        success &= requested_count > 0
 
     anchor_gate = _mario_foot_anchor_gate(
         env,
@@ -6990,8 +7016,15 @@ def mario_active_success_rate(
     """
     command_name = reward_params.get("command_name", "twist")
     requested = mario_nes_requested_buttons(env, command_name)
+    requested = requested * _mario_enabled_button_mask(
+        requested, reward_params.get("enabled_buttons")
+    )
+    full_count = requested.sum(dim=-1)
+    requested = _mario_leg_requests(requested, reward_params.get("leg"))
     count = requested.sum(dim=-1)
-    selected = count >= (2 if combinations_only else 1)
+    selected = count >= 1
+    if combinations_only:
+        selected &= full_count >= 2
     grace = reward_params.get("transition_grace_s", 0.0)
     if grace > 0:
         selected &= mario_command_ready(env, command_name, grace).bool()

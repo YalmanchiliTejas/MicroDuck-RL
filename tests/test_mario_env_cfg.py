@@ -48,7 +48,8 @@ def test_controller_state_is_privileged_and_not_added_to_actor():
 def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     rewards = make_microduck_mario_env_cfg().rewards
     assert rewards["requested_button"].weight > 0.0
-    assert rewards["requested_button_progress"].weight > 0.0
+    assert rewards["left_button_progress"].weight > 0.0
+    assert rewards["right_button_progress"].weight > 0.0
     assert rewards["unrequested_button"].weight < 0.0
     assert rewards["foot_contact_loss"].weight < 0.0
     for name in ("track_linear_velocity", "air_time", "foot_clearance"):
@@ -73,7 +74,9 @@ def test_task_reward_dominates_idle_posture_credit():
         "neutral_head_pose",
     ))
     assert idle_budget <= 2.0
-    assert rewards["requested_button"].weight >= 4 * idle_budget
+    assert sum(rewards[name].weight for name in (
+        "requested_button", "left_requested_button", "right_requested_button"
+    )) >= 4 * idle_budget
     assert rewards["upright"].func is microduck_mdp.mario_commanded_lean_reward
     assert rewards["foot_contact_loss"].weight <= -8.0
     assert rewards["body_ang_vel"].weight == -0.40
@@ -156,7 +159,8 @@ def test_mario_never_inherits_velocity_pushes_even_in_play():
 
 def test_button_rewards_are_gated_by_both_foot_anchors():
     rewards = make_microduck_mario_env_cfg().rewards
-    for name in ("requested_button", "requested_button_progress"):
+    for name in ("requested_button", "left_requested_button", "right_requested_button",
+                 "left_button_progress", "right_button_progress"):
         params = rewards[name].params
         assert params["anchor_radius"] > 0.0
         assert params["anchor_sensor_name"] == "feet_ground_contact"

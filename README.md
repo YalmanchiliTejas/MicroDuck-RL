@@ -107,15 +107,22 @@ The previous 16/18 mm spacing left the full sole overlapping the raised rest.
 each key, and cross-foot combinations to check travel and switch isolation.
 This is a constrained contact test, not evidence of a balanced learned policy.
 
-The task reward pays up to 8 for all requested switches together; a missing
-switch makes a combination earn zero activation credit. Independent posture
+The complete-request reward pays up to 6 for all requested switches together;
+a missing switch makes that term zero. Each leg also has an independent
+activation term (weight 1) and travel-progress term (weight 0.25), so the
+left foot can learn without its signal being multiplied by the right foot's
+progress. On a combination request, one correct foot earns at most 1.25 from
+these terms, versus 8.5 when both are correct. Wrong keys block both leg terms;
+an idle foot earns no requested-press credit. Independent posture
 rewards total at most 2. Foot-position, HOME-pose, and clearance rewards have
-zero weight. Approach shaping pays only a new best distance during a request,
+zero weight. Separate left/right approach terms each pay only a new best distance during a request,
 so holding a pose or moving away and back cannot repeatedly collect it. Raw
 unloaded switch sag earns no progress. LEFT+A and RIGHT+A are sampled from the
 first iteration; the later stage increases their frequency after competence.
 Use `active_button_success` and `combination_success` to judge training:
 these batch success rates exclude neutral requests and transition frames.
+`left_button_success` and `right_button_success` use only ready requests for
+that leg; their clean scores and reward traces expose one-sided learning.
 The older `requested_button_success` still includes neutral release.
 
 Render the combined robot-and-controller MuJoCo scene to a PNG with:
