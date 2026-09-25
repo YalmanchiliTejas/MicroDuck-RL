@@ -52,7 +52,7 @@ def test_full_scene_places_each_foot_over_its_controller():
 
 
 def test_single_foot_loads_can_click_each_mario_axis_without_false_neutral():
-    """A 4 N sole load at the calibrated pressure point must cross 0.6°."""
+    """A gentle 3 N load shifted 7 mm must cross the 0.4° switch point."""
 
     model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
     left_body = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_BODY, "dpad_platform")
@@ -74,7 +74,7 @@ def test_single_foot_loads_can_click_each_mario_axis_without_false_neutral():
                 mujoco.mj_applyFT(
                     model,
                     data,
-                    np.array([0.0, 0.0, -4.0]),
+                    np.array([0.0, 0.0, -3.0]),
                     np.zeros(3),
                     point,
                     body_id,
@@ -90,14 +90,14 @@ def test_single_foot_loads_can_click_each_mario_axis_without_false_neutral():
     # Sole *sites* sit a few millimetres ahead of their actual pressure
     # centroids. Apply these forces at pressure centroids, not at site targets.
     neutral = settled_angles((0.0, 0.0), (0.0, 0.0))
-    assert all(abs(value) < radians(0.2) for value in neutral)
-    left = settled_angles((0.0, 0.018), (0.0, 0.0))
-    right = settled_angles((0.0, -0.018), (0.0, 0.0))
-    jump = settled_angles((0.0, 0.0), (0.012, 0.0))
-    assert left[0] < -radians(0.6)
-    assert right[0] > radians(0.6)
-    assert jump[2] > radians(0.6)
-    assert abs(jump[0]) < radians(0.2)
+    assert all(abs(value) < radians(0.15) for value in neutral)
+    left = settled_angles((0.0, 0.007), (0.0, 0.0))
+    right = settled_angles((0.0, -0.007), (0.0, 0.0))
+    jump = settled_angles((0.0, 0.0), (0.007, 0.0))
+    assert left[0] < -radians(0.4)
+    assert right[0] > radians(0.4)
+    assert jump[2] > radians(0.4)
+    assert abs(jump[0]) < radians(0.15)
 
 
 @pytest.mark.parametrize(
@@ -125,8 +125,8 @@ def test_requested_single_and_combined_inputs(x, y, ab, press, expected):
 
 def test_dpad_and_ab_hysteresis_prevent_threshold_flicker():
     controller = NESController()
-    assert controller.update(radians(0.7), 0, radians(0.7)).right
-    held = controller.update(radians(0.3), 0, radians(0.3))
+    assert controller.update(radians(0.5), 0, radians(0.5)).right
+    held = controller.update(radians(0.2), 0, radians(0.2))
     assert held.right and held.a
     released = controller.update(radians(0.1), 0, radians(0.1))
     assert not released.right and not released.a

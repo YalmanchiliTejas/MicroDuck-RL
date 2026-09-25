@@ -55,8 +55,8 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
         assert name not in rewards
     params = rewards["requested_button"].params
     assert params["release_angle"] < params["activate_angle"]
-    assert params["activate_angle"] == pytest.approx(math.radians(0.6))
-    assert params["release_angle"] == pytest.approx(math.radians(0.2))
+    assert params["activate_angle"] == pytest.approx(math.radians(0.4))
+    assert params["release_angle"] == pytest.approx(math.radians(0.15))
     assert params["chord_release_travel"] == 0.0005
     assert params["chord_press_travel"] == 0.0007
     assert params["use_chord"] is False
@@ -71,8 +71,8 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert rewards["upright"].weight > total_button_weight
     assert rewards["upright"].func is microduck_mdp.mario_commanded_lean_reward
     assert rewards["foot_contact_loss"].weight < -total_button_weight
-    assert rewards["body_ang_vel"].weight == -0.15
-    assert rewards["angular_momentum"].weight == -0.05
+    assert rewards["body_ang_vel"].weight == -0.40
+    assert rewards["angular_momentum"].weight == -0.15
     assert rewards["pose"].weight == 2.0
     pose_params = rewards["pose"].params
     assert pose_params["std_walking"] == pose_params["std_standing"]
@@ -89,6 +89,10 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     )
     assert rewards["foot_anchor"].weight < 0.0
     assert rewards["foot_planar_speed"].weight < 0.0
+    foot_pose = rewards["commanded_foot_pose"].params
+    assert foot_pose["position_offset"] == pytest.approx(0.007)
+    assert foot_pose["lateral_offset"] == pytest.approx(0.007)
+    assert foot_pose["target_tilt"] == pytest.approx(math.radians(0.5))
 
 
 def test_mario_never_inherits_velocity_pushes_even_in_play():
@@ -590,9 +594,15 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
         RIGHT_NEUTRAL_FOOT_Y,
     )
     assert target[0, 0].tolist() == pytest.approx([0.007, -0.0012])
-    assert target[1, 0, 1] == pytest.approx(-0.0012 + 0.018)
-    assert target[2, 0, 1] == pytest.approx(-0.0012 - 0.018)
-    assert target[3, 1, 0] == pytest.approx(0.006 + 0.012)
+    assert target[1, 0, 1] == pytest.approx(
+        LEFT_NEUTRAL_FOOT_Y + FOOT_LATERAL_OFFSET
+    )
+    assert target[2, 0, 1] == pytest.approx(
+        LEFT_NEUTRAL_FOOT_Y - FOOT_LATERAL_OFFSET
+    )
+    assert target[3, 1, 0] == pytest.approx(
+        RIGHT_NEUTRAL_FOOT_X + FOOT_POSITION_OFFSET
+    )
     assert target[4, 0].tolist() == pytest.approx(target[2, 0].tolist())
     assert target[4, 1].tolist() == pytest.approx(target[3, 1].tolist())
     assert torch.all(torch.linalg.vector_norm(target, dim=-1) < 0.025)

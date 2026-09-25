@@ -14,12 +14,13 @@
       centroids about 11-14 mm behind the hinges. The right hinge is A-only:
       B/RUN is virtual, so negative rocker travel serves no game input.
       Angular axes have a 2 degree stop (A is unilateral). Main centering
-      springs are 3 N m/rad; the lateral spring is 1.5 N m/rad. A 4 N foot
-      load shifted 10 mm can cross the 0.6 degree activation threshold.
+      springs are 3 N m/rad; the lateral spring is 1.5 N m/rad. A 3 N foot
+      load shifted 7 mm can cross the 0.4 degree activation threshold without
+      requiring a large whole-body weight transfer.
 
       These XML values are intentionally easy to tune. Python activation and
       release thresholds live in mjlab_microduck.controller and default to
-      30% / 10% of the same 2 degree range.
+      20% / 7.5% of the same 2 degree range.
     -->
 
     <default>

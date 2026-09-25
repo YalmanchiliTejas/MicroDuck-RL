@@ -8,8 +8,10 @@ from dataclasses import dataclass
 @dataclass(frozen=True, slots=True)
 class ABRockerCalibration:
     max_tilt: float = 0.034906585  # 2 degrees
-    activate_ratio: float = 0.3
-    release_ratio: float = 0.1
+    # Match the training reward decoder: a gentle 0.4 degree tilt activates,
+    # while 0.15 degree release hysteresis prevents contact-noise flicker.
+    activate_ratio: float = 0.2
+    release_ratio: float = 0.075
     chord_press_travel: float = 0.0007
     chord_release_travel: float = 0.0005
 

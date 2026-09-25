@@ -36,8 +36,11 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (0.75, 1.50)
 BUTTON_TRANSITION_GRACE_S = 0.25
-ACTIVATE_ANGLE = math.radians(0.6)
-RELEASE_ANGLE = math.radians(0.2)
+# A shallow switch point lets a planted foot register a button without the
+# large whole-body weight transfer seen in the 3000-iteration rollout.  Keep
+# appreciable hysteresis so normal support-force noise does not flicker inputs.
+ACTIVATE_ANGLE = math.radians(0.4)
+RELEASE_ANGLE = math.radians(0.15)
 CHORD_PRESS_TRAVEL = 0.0007
 CHORD_RELEASE_TRAVEL = 0.0005
 BUTTON_ACTIVATION_WEIGHT = 5.0
@@ -57,14 +60,17 @@ MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
 FULL_LEG_POSE_ERROR = 0.16
 MAX_LEG_POSE_ERROR = 0.40
-FOOT_POSITION_OFFSET = 0.012
-FOOT_LATERAL_OFFSET = 0.018
+# These targets only need enough moment to cross the 0.4 degree switch point.
+# The former 12/18 mm targets drove the rockers deep into their stops and taught
+# the policy to throw its mass across the controller instead of pressing gently.
+FOOT_POSITION_OFFSET = 0.007
+FOOT_LATERAL_OFFSET = 0.007
 # Pad-local HOME sole-site coordinates measured from the recentered pivots.
 LEFT_NEUTRAL_FOOT_X = 0.007
 LEFT_NEUTRAL_FOOT_Y = -0.0012
 RIGHT_NEUTRAL_FOOT_X = 0.006
 RIGHT_NEUTRAL_FOOT_Y = -0.0008
-FOOT_TARGET_TILT = math.radians(1.0)
+FOOT_TARGET_TILT = math.radians(0.5)
 FOOT_POSITION_STD = 0.012
 FOOT_ANGLE_STD = math.radians(4.0)
 LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
@@ -280,8 +286,12 @@ def make_microduck_mario_env_cfg(play: bool = False):
             ),
         },
     )
-    cfg.rewards["body_ang_vel"].weight = -0.15
-    cfg.rewards["angular_momentum"].weight = -0.05
+    # Stationary manipulation should be quasi-static.  The old values were
+    # inherited-scale regularizers: too small beside +7 of button credit, so a
+    # fast weight throw could pay before its resulting sway was charged.  The
+    # easier switch point above means the policy no longer needs that momentum.
+    cfg.rewards["body_ang_vel"].weight = -0.40
+    cfg.rewards["angular_momentum"].weight = -0.15
 
     controller_activation_params = {
         "command_name": "twist",
