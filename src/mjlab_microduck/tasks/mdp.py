@@ -6000,6 +6000,29 @@ def mario_nes_activation(
     return torch.stack((up, down, left, right, a, b), dim=-1)
 
 
+def mario_normalized_angular_momentum_cost(
+    env: ManagerBasedRlEnv,
+    sensor_name: str,
+    reference: float = 0.01,
+) -> torch.Tensor:
+    """Dimensionless whole-body angular-momentum cost for controller balance.
+
+    The stock cost returns ``||L||^2`` in SI units.  Microduck's measured
+    momentum is only around 0.008 N m s even while visibly swaying, so that raw
+    square is about 6e-5 and remains inert at ordinary reward weights.  Scaling
+    by a robot-sized reference keeps the weight readable and makes the logged
+    term respond to the motion visible in rollout videos.
+    """
+
+    if reference <= 0.0:
+        raise ValueError("angular-momentum reference must be positive")
+    angular_momentum = env.scene.sensors[sensor_name].data
+    magnitude_sq = torch.sum(torch.square(angular_momentum), dim=-1)
+    magnitude = torch.sqrt(magnitude_sq)
+    env.extras["log"]["Metrics/angular_momentum_mean"] = torch.mean(magnitude)
+    return magnitude_sq / (reference * reference)
+
+
 def mario_nes_progress(
     env: ManagerBasedRlEnv,
     asset_name: str = "nes_controller",

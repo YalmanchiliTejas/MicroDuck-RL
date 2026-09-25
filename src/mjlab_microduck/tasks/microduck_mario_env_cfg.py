@@ -291,7 +291,11 @@ def make_microduck_mario_env_cfg(play: bool = False):
     # fast weight throw could pay before its resulting sway was charged.  The
     # easier switch point above means the policy no longer needs that momentum.
     cfg.rewards["body_ang_vel"].weight = -0.40
+    cfg.rewards["angular_momentum"].func = (
+        microduck_mdp.mario_normalized_angular_momentum_cost
+    )
     cfg.rewards["angular_momentum"].weight = -0.15
+    cfg.rewards["angular_momentum"].params["reference"] = 0.01
 
     controller_activation_params = {
         "command_name": "twist",
@@ -487,9 +491,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
     cfg.rewards["action_rate_l2"].weight = -0.02
     cfg.curriculum["action_rate_weight"].params["weight_stages"] = [
         {"step": 0, "weight": -0.02},
-        {"step": 500 * 24, "weight": -0.05},
-        {"step": 1_000 * 24, "weight": -0.10},
-        {"step": 2_000 * 24, "weight": -0.20},
+        {"step": 500 * 24, "weight": -0.08},
+        {"step": 1_000 * 24, "weight": -0.20},
+        {"step": 2_000 * 24, "weight": -0.30},
     ]
 
     # Remove curricula that reference deleted velocity/head/body command or
@@ -527,3 +531,7 @@ MicroduckMarioRlCfg.max_iterations = 5_000
 # std is deliberately not copied; 0.20 leaves task exploration without the
 # catastrophic first-step thrashing seen in the from-scratch run.
 MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] = 0.20
+# The walking recipe's entropy coefficient drove this stationary controller
+# policy from std=0.20 to 0.65, flooding training with balance-breaking random
+# actions.  Retain modest exploration without continuously rewarding thrash.
+MicroduckMarioRlCfg.algorithm.entropy_coef = 0.002

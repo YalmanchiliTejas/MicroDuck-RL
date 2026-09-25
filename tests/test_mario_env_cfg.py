@@ -73,6 +73,11 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert rewards["foot_contact_loss"].weight < -total_button_weight
     assert rewards["body_ang_vel"].weight == -0.40
     assert rewards["angular_momentum"].weight == -0.15
+    assert (
+        rewards["angular_momentum"].func
+        is microduck_mdp.mario_normalized_angular_momentum_cost
+    )
+    assert rewards["angular_momentum"].params["reference"] == pytest.approx(0.01)
     assert rewards["pose"].weight == 2.0
     pose_params = rewards["pose"].params
     assert pose_params["std_walking"] == pose_params["std_standing"]
@@ -93,6 +98,35 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     assert foot_pose["position_offset"] == pytest.approx(0.007)
     assert foot_pose["lateral_offset"] == pytest.approx(0.007)
     assert foot_pose["target_tilt"] == pytest.approx(math.radians(0.5))
+
+
+def test_mario_runner_reduces_entropy_pressure_for_stationary_control():
+    from mjlab_microduck.tasks.microduck_mario_env_cfg import MicroduckMarioRlCfg
+
+    assert MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] == pytest.approx(0.20)
+    assert MicroduckMarioRlCfg.algorithm.entropy_coef == pytest.approx(0.002)
+
+
+def test_mario_action_smoothing_tightens_after_button_discovery():
+    curriculum = make_microduck_mario_env_cfg().curriculum["action_rate_weight"]
+    stages = curriculum.params["weight_stages"]
+    assert [stage["weight"] for stage in stages] == [-0.02, -0.08, -0.20, -0.30]
+
+
+def test_mario_angular_momentum_is_normalized_to_robot_scale():
+    momentum = torch.tensor([[0.006, 0.008, 0.0], [0.0, 0.0, 0.020]])
+    sensor = SimpleNamespace(data=momentum)
+    scene = SimpleNamespace(sensors={"robot/root_angmom": sensor})
+    env = SimpleNamespace(scene=scene, extras={"log": {}})
+
+    cost = microduck_mdp.mario_normalized_angular_momentum_cost(
+        env, "robot/root_angmom", reference=0.01
+    )
+
+    assert cost.tolist() == pytest.approx([1.0, 4.0])
+    assert env.extras["log"]["Metrics/angular_momentum_mean"] == pytest.approx(
+        0.015
+    )
 
 
 def test_mario_never_inherits_velocity_pushes_even_in_play():
