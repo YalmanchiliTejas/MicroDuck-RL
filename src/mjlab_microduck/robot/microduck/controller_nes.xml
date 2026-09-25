@@ -18,26 +18,27 @@
     <worldbody>
       <body name="controller_root">
         <geom name="dpad_housing" type="box" pos="-0.007 0.043 0.004"
-              size="0.038 0.033 0.004" rgba="0.025 0.030 0.045 1"
+              size="0.038 0.040 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
         <geom name="ab_housing" type="box" pos="-0.006 -0.041 0.004"
-              size="0.034 0.027 0.004" rgba="0.025 0.030 0.045 1"
+              size="0.053 0.027 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
 
         <!-- Fixed frames double as per-foot anchor references. -->
         <body name="dpad_platform" pos="-0.007 0.043 0.007">
-            <!-- Neutral rest is 2 mm above the unpressed keys. A sole must
-                 leave this rest and move over one key before it can press. -->
+            <!-- Neutral rest is 2 mm above the unpressed keys. Key spacing
+                 clears the actual 54 x 41 mm sole; point-load tests alone
+                 cannot detect a sole bridging the rest and blocking travel. -->
             <geom name="dpad_neutral_support" type="box" pos="0 0 0.005"
                   size="0.007 0.006 0.003" rgba="0.18 0.22 0.30 1"
                   friction="1.6 0.02 0.002" condim="3" priority="2"/>
-            <body name="dpad_left_key" pos="0 0.016 0">
+            <body name="dpad_left_key" pos="0 0.032 0">
                 <joint name="passive_dpad_left" class="nes_button_joint"/>
                 <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
                 <geom name="dpad_left_surface" class="nes_button" pos="0 0 0.003"
                       rgba="0.25 0.72 1 1"/>
             </body>
-            <body name="dpad_right_key" pos="0 -0.016 0">
+            <body name="dpad_right_key" pos="0 -0.032 0">
                 <joint name="passive_dpad_right" class="nes_button_joint"/>
                 <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
                 <geom name="dpad_right_surface" class="nes_button" pos="0 0 0.003"
@@ -49,13 +50,13 @@
             <geom name="ab_neutral_support" type="box" pos="0 0 0.005"
                   size="0.007 0.006 0.003" rgba="0.22 0.17 0.22 1"
                   friction="1.6 0.02 0.002" condim="3" priority="2"/>
-            <body name="button_a_key" pos="0.018 0 0">
+            <body name="button_a_key" pos="0.044 0 0">
                 <joint name="passive_button_a" class="nes_button_joint"/>
                 <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
                 <geom name="button_a_surface" class="nes_button" pos="0 0 0.003"
                       rgba="0.95 0.18 0.20 1"/>
             </body>
-            <body name="button_b_key" pos="-0.018 0 0">
+            <body name="button_b_key" pos="-0.044 0 0">
                 <joint name="passive_button_b" class="nes_button_joint"/>
                 <inertial pos="0 0 0" mass="0.010" diaginertia="8e-7 8e-7 8e-7"/>
                 <geom name="button_b_surface" class="nes_button" pos="0 0 0.003"

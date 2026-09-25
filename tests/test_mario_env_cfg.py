@@ -26,9 +26,9 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
     assert sum(cfg.commands["twist"].category_weights) == 1.0
     weights = cfg.commands["twist"].category_weights
     assert [index for index, weight in enumerate(weights) if weight > 0.0] == [
-        0, 1, 2, 5
+        0, 1, 2, 5, 8, 11
     ]
-    assert cfg.commands["twist"].resampling_time_range == (0.75, 1.50)
+    assert cfg.commands["twist"].resampling_time_range == (1.5, 2.5)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
     for group in ("actor", "critic"):
@@ -66,14 +66,16 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
     assert rewards["foot_anchor"].func is microduck_mdp.mario_commanded_foot_anchor_cost
 
 
-def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
+def test_task_reward_dominates_idle_posture_credit():
     rewards = make_microduck_mario_env_cfg().rewards
-    total_button_weight = (
-        rewards["requested_button"].weight + rewards["requested_button_progress"].weight
-    )
-    assert rewards["upright"].weight > total_button_weight
+    idle_budget = sum(rewards[name].weight for name in (
+        "upright", "pose", "commanded_trunk_offset", "standing_height",
+        "neutral_head_pose",
+    ))
+    assert idle_budget <= 2.0
+    assert rewards["requested_button"].weight >= 4 * idle_budget
     assert rewards["upright"].func is microduck_mdp.mario_commanded_lean_reward
-    assert rewards["foot_contact_loss"].weight < -total_button_weight
+    assert rewards["foot_contact_loss"].weight <= -8.0
     assert rewards["body_ang_vel"].weight == -0.40
     assert rewards["angular_momentum"].weight == -0.15
     assert (
@@ -81,7 +83,7 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
         is microduck_mdp.mario_normalized_angular_momentum_cost
     )
     assert rewards["angular_momentum"].params["reference"] == pytest.approx(0.01)
-    assert rewards["pose"].weight == 2.0
+    assert rewards["pose"].weight == 0.0
     pose_params = rewards["pose"].params
     assert pose_params["std_walking"] == pose_params["std_standing"]
     assert pose_params["std_running"] == pose_params["std_standing"]
@@ -101,7 +103,7 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
     )
     assert rewards["foot_anchor"].weight < 0.0
     assert rewards["foot_planar_speed"].weight < 0.0
-    assert rewards["commanded_foot_clearance"].weight > 0.0
+    assert rewards["commanded_foot_clearance"].weight == 0.0
     assert rewards["commanded_foot_clearance"].params["lift_height"] == (
         pytest.approx(0.003)
     )
@@ -113,8 +115,8 @@ def test_balance_reward_dominates_button_reward_and_keeps_standing_pose():
         "feet_ground_contact"
     )
     foot_pose = rewards["commanded_foot_pose"].params
-    assert foot_pose["position_offset"] == pytest.approx(0.018)
-    assert foot_pose["lateral_offset"] == pytest.approx(0.016)
+    assert foot_pose["position_offset"] == pytest.approx(0.044)
+    assert foot_pose["lateral_offset"] == pytest.approx(0.032)
     assert foot_pose["target_tilt"] == pytest.approx(0.0)
 
 
@@ -128,7 +130,7 @@ def test_mario_runner_reduces_entropy_pressure_for_stationary_control():
 def test_mario_action_smoothing_tightens_after_button_discovery():
     curriculum = make_microduck_mario_env_cfg().curriculum["action_rate_weight"]
     stages = curriculum.params["weight_stages"]
-    assert [stage["weight"] for stage in stages] == [-0.02, -0.08, -0.20, -0.30]
+    assert [stage["weight"] for stage in stages] == [-0.02, -0.08, -0.08, -0.08]
 
 
 def test_mario_angular_momentum_is_normalized_to_robot_scale():
@@ -205,7 +207,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[0]["step"] == 0
     assert len(stages) == 2
     assert [i for i, weight in enumerate(stages[0]["weights"]) if weight > 0] == [
-        0, 1, 2, 5
+        0, 1, 2, 5, 8, 11
     ]
     assert stages[1]["step"] == 2_500 * 24
     assert stages[1]["weights"][8] > 0.0
@@ -670,7 +672,7 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
     )
     assert target[5, 0].tolist() == pytest.approx(target[2, 0].tolist())
     assert target[5, 1].tolist() == pytest.approx(target[3, 1].tolist())
-    assert torch.all(torch.linalg.vector_norm(target, dim=-1) < 0.025)
+    assert torch.all(torch.linalg.vector_norm(target, dim=-1) < 0.060)
 
 
 def _resolved_cfg(name, *, site_ids=None, body_ids=None):
@@ -859,7 +861,7 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
         robot_cfg=_resolved_cfg("robot", site_ids=[0, 1]),
         controller_cfg=_resolved_cfg("nes_controller", body_ids=[0, 1]),
     )
-    assert score.tolist() == pytest.approx([1.0, 1.0], abs=1e-6)
+    assert score.tolist() == pytest.approx([0.0, 1.0], abs=1e-6)
 
 
 def test_commanded_foot_clearance_lifts_while_misplaced_then_lands_at_target():

@@ -101,6 +101,23 @@ at 0.3 mm. The neutral rests sit 2 mm above the unpressed keys, so the duck
 must lift and reposition a foot instead of leaning on a shared rocker. Every
 moving joint uses the required `passive_*` prefix.
 
+Key targets are 32 mm laterally for LEFT/RIGHT and 44 mm fore/aft for A/B.
+The previous 16/18 mm spacing left the full sole overlapping the raised rest.
+`tests/test_mario_sole_reach.py` loads the actual collision meshes over neutral,
+each key, and cross-foot combinations to check travel and switch isolation.
+This is a constrained contact test, not evidence of a balanced learned policy.
+
+The task reward pays up to 8 for all requested switches together; a missing
+switch makes a combination earn zero activation credit. Independent posture
+rewards total at most 2. Foot-position, HOME-pose, and clearance rewards have
+zero weight. Approach shaping pays only a new best distance during a request,
+so holding a pose or moving away and back cannot repeatedly collect it. Raw
+unloaded switch sag earns no progress. LEFT+A and RIGHT+A are sampled from the
+first iteration; the later stage increases their frequency after competence.
+Use `active_button_success` and `combination_success` to judge training:
+these batch success rates exclude neutral requests and transition frames.
+The older `requested_button_success` still includes neutral release.
+
 Render the combined robot-and-controller MuJoCo scene to a PNG with:
 
 ```bash

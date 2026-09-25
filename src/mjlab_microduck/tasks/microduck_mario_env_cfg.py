@@ -34,18 +34,18 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 )
 
 EPISODE_LENGTH_S = 20.0
-BUTTON_RESAMPLE_S = (0.75, 1.50)
-BUTTON_TRANSITION_GRACE_S = 0.25
+BUTTON_RESAMPLE_S = (1.5, 2.5)
+BUTTON_TRANSITION_GRACE_S = 0.60
 # Legacy names are retained in reward params, but these values are now vertical
 # slider travel in metres: 0.7 mm activates, 0.3 mm releases.
 ACTIVATE_ANGLE = 0.0007
 RELEASE_ANGLE = 0.0003
 CHORD_PRESS_TRAVEL = 0.0007
 CHORD_RELEASE_TRAVEL = 0.0005
-BUTTON_ACTIVATION_WEIGHT = 5.0
-BUTTON_PROGRESS_WEIGHT = 2.0
+BUTTON_ACTIVATION_WEIGHT = 8.0
+BUTTON_PROGRESS_WEIGHT = 0.5
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
-FOOT_ANCHOR_RADIUS = 0.025
+FOOT_ANCHOR_RADIUS = 0.060
 # Presses come from a short foot reposition, not from throwing the trunk in
 # the requested direction. Directional lean/offset caused the gradual walking
 # drift visible in the 1000-iteration rollout.
@@ -60,18 +60,18 @@ FULL_CAMERA_TILT_DEG = 12.0
 MAX_CAMERA_TILT_DEG = 20.0
 MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
-FULL_LEG_POSE_ERROR = 0.16
-MAX_LEG_POSE_ERROR = 0.40
+FULL_LEG_POSE_ERROR = 0.30
+MAX_LEG_POSE_ERROR = 0.80
 # Pad-local centers of the independent keys. Neutral is the fixed center
-# pedestal; LEFT/RIGHT are 16 mm lateral and A/B are 18 mm fore/aft.
-FOOT_POSITION_OFFSET = 0.018
-FOOT_LATERAL_OFFSET = 0.016
+# pedestal. The full sole must clear its edge before a key can descend.
+FOOT_POSITION_OFFSET = 0.044
+FOOT_LATERAL_OFFSET = 0.032
 LEFT_NEUTRAL_FOOT_X = 0.0
 LEFT_NEUTRAL_FOOT_Y = 0.0
 RIGHT_NEUTRAL_FOOT_X = 0.0
 RIGHT_NEUTRAL_FOOT_Y = 0.0
 FOOT_TARGET_TILT = 0.0
-FOOT_POSITION_STD = 0.012
+FOOT_POSITION_STD = 0.010
 FOOT_ANGLE_STD = math.radians(4.0)
 LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
 RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
@@ -82,8 +82,8 @@ RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
 # Table order: neutral, L, R, U, D, A, B, A+B,
 # L+A, L+B, L+A+B, R+A, R+B, R+A+B.
 SINGLE_BUTTON_WEIGHTS = (
-    0.25, 0.25, 0.25, 0, 0, 0.25, 0,
-    0, 0, 0, 0, 0, 0, 0,
+    0.20, 0.20, 0.20, 0, 0, 0.20, 0,
+    0, 0.10, 0, 0, 0.10, 0, 0,
 )
 TWO_BUTTON_WEIGHTS = (
     0.15, 0.15, 0.15, 0, 0, 0.15, 0,
@@ -220,14 +220,14 @@ def make_microduck_mario_env_cfg(play: bool = False):
     # term normally loosens its leg tolerances whenever twist is non-zero;
     # here that made the robot abandon its standing pose exactly when it was
     # asked to press a button. Keep the standing tolerances for every request
-    # and make balance worth more than a perfect button press.
+    # while allowing the leg excursion needed to reach a separated key.
     pose_params = cfg.rewards["pose"].params
     pose_params["std_walking"] = deepcopy(pose_params["std_standing"])
     pose_params["std_running"] = deepcopy(pose_params["std_standing"])
-    cfg.rewards["pose"].weight = 2.0
+    cfg.rewards["pose"].weight = 0.0
     cfg.rewards["upright"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_lean_reward,
-        weight=8.0,
+        weight=1.0,
         params={
             "command_name": "twist",
             "lean_angle": COMMAND_LEAN_ANGLE,
@@ -237,7 +237,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["commanded_trunk_offset"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_trunk_offset_reward,
-        weight=3.0,
+        weight=0.3,
         params={
             "command_name": "twist",
             "forward_offset": COM_FORWARD_OFFSET,
@@ -253,7 +253,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["standing_height"] = RewardTermCfg(
         func=microduck_mdp.height_target_gaussian,
-        weight=4.0,
+        weight=0.5,
         params={
             "target_height": STAND_HEIGHT,
             "std": 0.012,
@@ -279,12 +279,12 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["leg_pose_l1"] = RewardTermCfg(
         func=microduck_mdp.mario_leg_pose_l1_cost,
-        weight=-3.0,
+        weight=-0.2,
         params={"asset_cfg": leg_pose_cfg, "scale": 0.35, "max_cost": 2.0},
     )
     cfg.rewards["neutral_head_pose"] = RewardTermCfg(
         func=microduck_mdp.mario_selected_pose_reward,
-        weight=1.5,
+        weight=0.2,
         params={
             "std": 0.15,
             "asset_cfg": SceneEntityCfg(
@@ -388,12 +388,22 @@ def make_microduck_mario_env_cfg(play: bool = False):
     }
     cfg.rewards["commanded_foot_pose"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_pose_reward,
-        weight=2.0,
+        # Diagnostic only: a foot hovering over a key is not a button press.
+        weight=0.0,
         params=foot_pose_params,
+    )
+    cfg.rewards["foot_approach"] = RewardTermCfg(
+        func=microduck_mdp.mario_foot_approach_reward,
+        weight=2.0,
+        params={key: foot_pose_params[key] for key in (
+            "command_name", "position_offset", "lateral_offset",
+            "left_neutral_x", "left_neutral_y", "right_neutral_x",
+            "right_neutral_y", "robot_cfg", "controller_cfg",
+        )},
     )
     cfg.rewards["commanded_foot_clearance"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_clearance_reward,
-        weight=1.0,
+        weight=0.0,
         params={
             **{
                 key: foot_pose_params[key]
@@ -425,7 +435,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["foot_anchor"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_anchor_cost,
-        weight=-4.0,
+        # Approach shaping supplies the movement incentive. A large distance
+        # tax made active requests negative before the skill was discovered.
+        weight=-0.5,
         params={
             **{
                 key: foot_pose_params[key]
@@ -492,6 +504,18 @@ def make_microduck_mario_env_cfg(play: bool = False):
             **standing_pose_params,
         },
     )
+    for name, combinations_only in (("active_button_success", False),
+                                    ("combination_success", True)):
+        cfg.metrics[name] = MetricsTermCfg(
+            func=microduck_mdp.mario_active_success_rate,
+            params={
+                "combinations_only": combinations_only,
+                "success_threshold": 0.95,
+                **anchored_button_params,
+                **camera_ready_params,
+                **standing_pose_params,
+            },
+        )
     cfg.metrics["feet_anchored"] = MetricsTermCfg(
         func=microduck_mdp.mario_feet_anchored,
         params={
@@ -517,13 +541,14 @@ def make_microduck_mario_env_cfg(play: bool = False):
         },
     )
 
-    # Small weight shifts should be discovered before smoothness is tightened.
+    # A clock alone is not evidence of skill discovery. Keep the movement tax
+    # modest throughout training; contact/rotation costs still price thrash.
     cfg.rewards["action_rate_l2"].weight = -0.02
     cfg.curriculum["action_rate_weight"].params["weight_stages"] = [
         {"step": 0, "weight": -0.02},
         {"step": 500 * 24, "weight": -0.08},
-        {"step": 1_000 * 24, "weight": -0.20},
-        {"step": 2_000 * 24, "weight": -0.30},
+        {"step": 1_000 * 24, "weight": -0.08},
+        {"step": 2_000 * 24, "weight": -0.08},
     ]
 
     # Remove curricula that reference deleted velocity/head/body command or

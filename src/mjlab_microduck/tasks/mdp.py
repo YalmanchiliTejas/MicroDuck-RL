@@ -5834,12 +5834,12 @@ def mario_command_category_curriculum(
     weight_stages: list[dict],
     combo_unlock_success: float = 0.65,
 ) -> torch.Tensor:
-    """Stage Mario requests from singles to combinations after competence.
+    """Increase the combination fraction after active-request competence.
 
     Each stage is ``{"step": int, "weights": tuple[float, ...]}`` in the
     command table order.  The live command term is mutated so subsequent
     resamples immediately use the selected distribution. The combo stage is
-    never forced merely because the clock advanced: active single-button
+    never forced merely because the clock advanced: active
     requests must already be clean, planted, and camera-ready.
     """
 
@@ -5994,8 +5994,14 @@ def mario_nes_progress(
     del chord_press_travel, use_chord
     if activate_angle <= 0.0:
         raise ValueError("activate travel must be positive")
+    # The unloaded 10 g key sags ~0.082 mm under gravity. Paying raw travel
+    # rewarded untouched switches. Shaping starts only beyond that preload.
+    preload = 0.00015
+    if activate_angle <= preload:
+        raise ValueError("activation must exceed the unloaded-key deadband")
     return torch.clamp(
-        mario_nes_joint_state(env, asset_name) / activate_angle, 0.0, 1.0
+        (mario_nes_joint_state(env, asset_name) - preload)
+        / (activate_angle - preload), 0.0, 1.0
     )
 
 
@@ -6065,10 +6071,11 @@ def mario_requested_button_reward(
         use_chord,
     )
     requested_count = requested.sum(dim=-1)
-    score = (activation * requested).sum(dim=-1) / torch.clamp(
-        requested_count,
-        min=1.0,
-    )
+    # A combination only pays as well as its weakest requested switch. One
+    # held button can no longer collect half the full task reward forever.
+    score = torch.where(
+        requested.bool(), activation, torch.ones_like(activation)
+    ).amin(dim=-1)
     score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
     if require_exclusive:
         # A requested press is only useful to the game if no other direction
@@ -6155,10 +6162,9 @@ def mario_requested_button_progress_reward(
         use_chord,
     )
     requested_count = requested.sum(dim=-1)
-    score = (progress * requested).sum(dim=-1) / torch.clamp(
-        requested_count,
-        min=1.0,
-    )
+    score = torch.where(
+        requested.bool(), progress, torch.ones_like(progress)
+    ).prod(dim=-1)
     score = torch.where(requested_count > 0.0, score, torch.zeros_like(score))
     if require_exclusive:
         activation = mario_nes_activation(
@@ -6532,6 +6538,60 @@ def mario_commanded_foot_anchor_cost(
     return torch.clamp((error - deadzone) / max(scale, 1e-6), max=1.0).mean(dim=-1)
 
 
+def mario_foot_approach_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    position_offset: float,
+    lateral_offset: float,
+    left_neutral_x: float,
+    left_neutral_y: float,
+    right_neutral_x: float,
+    right_neutral_y: float,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Pay only new best approach to a key during the current request.
+
+    Repeated hovering or moving away and back cannot replenish this credit.
+    Reset/resample frames establish a baseline and never earn progress. Credit
+    is normalized by movement range and dt, with at most 2 units/s per foot.
+    """
+    from mjlab.utils.lab_api.math import quat_apply_inverse
+
+    term = env.command_manager.get_term(command_name)
+    command = env.command_manager.get_command(command_name)
+    robot, controller = env.scene[robot_cfg.name], env.scene[controller_cfg.name]
+    feet = robot.data.site_pos_w[:, robot_cfg.site_ids]
+    centers = controller.data.body_link_pos_w[:, controller_cfg.body_ids]
+    quat = controller.data.body_link_quat_w[:, controller_cfg.body_ids]
+    local = quat_apply_inverse(quat.reshape(-1, 4),
+                              (feet - centers).reshape(-1, 3)).reshape(feet.shape)
+    target = _mario_commanded_foot_target_xy(
+        command, position_offset, lateral_offset, left_neutral_x,
+        left_neutral_y, right_neutral_x, right_neutral_y,
+    )
+    scale = target.new_tensor((lateral_offset, position_offset)).clamp(min=1e-6)
+    error = (torch.linalg.vector_norm(local[:, :, :2] - target, dim=-1)
+             / scale).clamp(max=1.0)
+    active = torch.stack((command[:, 0].abs() > 0.5,
+                          command[:, 2].abs() > 0.5), dim=-1)
+    age = term.command_age
+    cache = getattr(env, "_mario_approach_cache", None)
+    if cache is None:
+        gain = torch.zeros_like(error)
+        best = error
+    else:
+        previous_best, previous_age, previous_command = cache
+        reset = ((age <= previous_age) | (env.episode_length_buf <= 1)
+                 | (command != previous_command).any(dim=-1))
+        best = torch.where(reset[:, None], error, previous_best)
+        gain = (best - error).clamp(min=0.0)
+        best = torch.minimum(best, error)
+    env._mario_approach_cache = (best.detach().clone(), age.clone(), command.clone())
+    rate = (gain / env.step_dt).clamp(max=2.0)
+    return (rate * active).sum(dim=-1) / active.sum(dim=-1).clamp(min=1)
+
+
 def mario_commanded_foot_clearance_reward(
     env: ManagerBasedRlEnv,
     command_name: str,
@@ -6609,7 +6669,7 @@ def mario_commanded_foot_pose_reward(
     """Track command-specific foot position and sole orientation on each pad.
 
     The left foot moves fore/aft for UP/DOWN and laterally for LEFT/RIGHT;
-    the right foot moves forward only for A. Neutral targets match measured
+    the right foot moves forward for A and backward for B. Neutral targets match
     HOME contact centroids relative to the controller pivots.
     """
 
@@ -6663,15 +6723,32 @@ def mario_commanded_foot_pose_reward(
     )
     angle_error = torch.stack((roll - target_roll, pitch - target_pitch), dim=-1)
 
+    # Score each requested foot independently: support-foot accuracy must not
+    # dilute the error of the moving foot. Subtract the neutral-position score
+    # so ignoring an active request earns exactly zero, even with perfect tilt.
+    active = torch.stack(
+        ((dpad_x.abs() + dpad_y.abs()) > 0.5, ab.abs() > 0.5), dim=-1
+    )
+    neutral = target_xy.new_tensor(
+        ((left_neutral_x, left_neutral_y),
+         (right_neutral_x, right_neutral_y))
+    )
+    baseline = torch.exp(
+        -torch.square((neutral - target_xy) / position_std).sum(dim=-1)
+    )
     position_score = torch.exp(
-        -torch.square(position_error / position_std).mean(dim=(1, 2))
+        -torch.square(position_error / position_std).sum(dim=-1)
     )
+    position_score = ((position_score - baseline)
+                      / (1.0 - baseline).clamp(min=1e-6)).clamp(0.0, 1.0)
     angle_score = torch.exp(
-        -torch.square(angle_error / angle_std).mean(dim=(1, 2))
+        -torch.square(angle_error / angle_std).sum(dim=-1)
     )
-    # A strict product made the term nearly zero when orientation was slightly
-    # off, removing the position gradient needed to find the button.
-    return 0.8 * position_score + 0.2 * angle_score
+    # Product across requested feet rejects half-completed combinations. This
+    # helper pays nothing for neutral; balance terms already cover idle stance.
+    score = torch.where(active, position_score * angle_score,
+                        torch.ones_like(position_score)).prod(dim=-1)
+    return torch.where(active.any(dim=-1), score, torch.zeros_like(score))
 
 
 def mario_foot_planar_speed_cost(
@@ -6901,6 +6978,26 @@ def mario_clean_button_success(
             env, command_name, transition_grace_s
         ).bool()
     return success.to(dtype=activation.dtype)
+
+
+def mario_active_success_rate(
+    env: ManagerBasedRlEnv, combinations_only: bool = False, **reward_params,
+) -> torch.Tensor:
+    """Batch success fraction for ready active requests, excluding neutral.
+
+    Broadcast for the metrics manager's per-environment interface. Batches
+    without eligible requests report zero rather than a spurious success.
+    """
+    command_name = reward_params.get("command_name", "twist")
+    requested = mario_nes_requested_buttons(env, command_name)
+    count = requested.sum(dim=-1)
+    selected = count >= (2 if combinations_only else 1)
+    grace = reward_params.get("transition_grace_s", 0.0)
+    if grace > 0:
+        selected &= mario_command_ready(env, command_name, grace).bool()
+    success = mario_clean_button_success(env, **reward_params)
+    rate = (success * selected).sum() / selected.sum().clamp(min=1)
+    return rate.expand_as(success)
 
 
 def head_pose_tracking(
