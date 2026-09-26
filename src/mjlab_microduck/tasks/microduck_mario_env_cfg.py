@@ -585,6 +585,13 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
         },
     )
+    cfg.metrics["button_request_debug"] = MetricsTermCfg(
+        func=microduck_mdp.mario_button_request_debug,
+        params={
+            "command_name": "twist",
+            "enabled_buttons": GAME_BUTTON_MASK,
+        },
+    )
 
     # A clock alone is not evidence of skill discovery. Keep the movement tax
     # modest throughout training; contact/rotation costs still price thrash.

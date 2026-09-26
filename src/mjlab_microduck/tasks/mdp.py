@@ -6037,6 +6037,27 @@ def _mario_leg_requests(requested: torch.Tensor, leg: str | None) -> torch.Tenso
     return requested * requested.new_tensor(mask)
 
 
+def mario_button_request_debug(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    enabled_buttons: tuple[bool, ...] | None = None,
+) -> torch.Tensor:
+    """Diagnostic logs for left-vs-right request rates and command distribution."""
+    requested = mario_nes_requested_buttons(env, command_name)
+    enabled = _mario_enabled_button_mask(requested, enabled_buttons)
+    requested = requested * enabled
+    req_mean = requested.mean(dim=0)
+    env.extras["log"]["Debug/req_up"] = req_mean[0]
+    env.extras["log"]["Debug/req_down"] = req_mean[1]
+    env.extras["log"]["Debug/req_left"] = req_mean[2]
+    env.extras["log"]["Debug/req_right"] = req_mean[3]
+    env.extras["log"]["Debug/req_A"] = req_mean[4]
+    env.extras["log"]["Debug/req_B"] = req_mean[5]
+    env.extras["log"]["Debug/left_req_rate"] = requested[:, [2, 3]].mean()
+    env.extras["log"]["Debug/right_req_rate"] = requested[:, [4, 5]].mean()
+    return requested.mean(dim=-1)
+
+
 def mario_requested_button_reward(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
@@ -6129,6 +6150,15 @@ def mario_requested_button_reward(
         score = score * mario_command_ready(
             env, command_name, transition_grace_s
         )
+
+    left_requested = (selected[:, [2, 3]].sum(dim=-1) > 0).float().mean()
+    right_requested = (selected[:, [4, 5]].sum(dim=-1) > 0).float().mean()
+    env.extras["log"]["Debug/left_req_rate"] = left_requested
+    env.extras["log"]["Debug/right_req_rate"] = right_requested
+    env.extras["log"]["Debug/anchor_gate"] = anchor_gate.mean() if anchor_gate is not None else 1.0
+    env.extras["log"]["Debug/camera_gate"] = camera_score.mean() if camera_cfg is not None else 1.0
+    env.extras["log"]["Debug/pose_gate"] = pose_score.mean() if standing_pose_cfg is not None else 1.0
+    env.extras["log"]["Debug/selection_score"] = score.mean()
     return score
 
 
@@ -6223,6 +6253,13 @@ def mario_requested_button_progress_reward(
         score = score * mario_command_ready(
             env, command_name, transition_grace_s
         )
+
+    left_requested = (selected[:, [2, 3]].sum(dim=-1) > 0).float().mean()
+    right_requested = (selected[:, [4, 5]].sum(dim=-1) > 0).float().mean()
+    env.extras["log"]["Debug/left_progress_rate"] = left_requested
+    env.extras["log"]["Debug/right_progress_rate"] = right_requested
+    env.extras["log"]["Debug/left_button_raw_progress"] = score.mean()
+    env.extras["log"]["Debug/right_button_raw_progress"] = score.mean()
     return score
 
 
