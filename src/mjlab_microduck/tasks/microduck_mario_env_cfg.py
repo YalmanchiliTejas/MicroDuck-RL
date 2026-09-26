@@ -408,6 +408,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "robot_cfg": feet_cfg,
         "controller_cfg": platforms_cfg,
     }
+    for k,v in foot_pose_params.items():
+        print(f"{k}: {v}")
     cfg.rewards["commanded_foot_pose"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_pose_reward,
         # Diagnostic only: a foot hovering over a key is not a button press.
