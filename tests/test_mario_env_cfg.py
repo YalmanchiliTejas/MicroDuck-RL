@@ -130,10 +130,10 @@ def test_mario_runner_reduces_entropy_pressure_for_stationary_control():
     assert MicroduckMarioRlCfg.algorithm.entropy_coef == pytest.approx(0.002)
 
 
-def test_mario_action_smoothing_tightens_after_button_discovery():
+def test_mario_action_smoothing_does_not_tighten_on_a_clock():
     curriculum = make_microduck_mario_env_cfg().curriculum["action_rate_weight"]
     stages = curriculum.params["weight_stages"]
-    assert [stage["weight"] for stage in stages] == [-0.02, -0.08, -0.08, -0.08]
+    assert [stage["weight"] for stage in stages] == [-0.02]
 
 
 def test_mario_angular_momentum_is_normalized_to_robot_scale():
@@ -173,7 +173,10 @@ def test_button_rewards_are_gated_by_both_foot_anchors():
         )
         assert params["full_pose_error"] < params["max_pose_error"]
         assert params["require_exclusive"] is True
-        assert params["transition_grace_s"] > 0.0
+        if name.endswith("button_progress"):
+            assert params["transition_grace_s"] == 0.0
+        else:
+            assert params["transition_grace_s"] > 0.0
         assert params["robot_cfg"].site_names == ("left_foot", "right_foot")
         assert params["controller_cfg"].body_names == (
             "dpad_platform",

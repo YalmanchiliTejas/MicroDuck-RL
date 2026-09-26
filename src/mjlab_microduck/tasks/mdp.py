@@ -6564,12 +6564,19 @@ def mario_foot_approach_reward(
     robot_cfg: SceneEntityCfg,
     controller_cfg: SceneEntityCfg,
     leg: str | None = None,
+    contact_height: float = 0.006,
+    lift_height: float = 0.0,
+    full_lift_error: float = 0.005,
+    height_scale: float = 0.003,
 ) -> torch.Tensor:
     """Pay only new best approach to a key during the current request.
 
     Repeated hovering or moving away and back cannot replenish this credit.
     Reset/resample frames establish a baseline and never earn progress. Credit
     is normalized by movement range and dt, with at most 2 units/s per foot.
+    Optional clearance shaping rewards lifting while misplaced and lowering
+    over the key. It shares the best-so-far budget: hovering, lift cycles and
+    changing the desired height cannot replenish already-earned credit.
     """
     from mjlab.utils.lab_api.math import quat_apply_inverse
 
@@ -6586,8 +6593,21 @@ def mario_foot_approach_reward(
         left_neutral_y, right_neutral_x, right_neutral_y,
     )
     scale = target.new_tensor((lateral_offset, position_offset)).clamp(min=1e-6)
-    error = (torch.linalg.vector_norm(local[:, :, :2] - target, dim=-1)
-             / scale).clamp(max=1.0)
+    if lift_height < 0 or full_lift_error <= 0 or height_scale <= 0:
+        raise ValueError("invalid approach clearance scales")
+    xy_error = torch.linalg.vector_norm(local[:, :, :2] - target, dim=-1)
+    distance = xy_error / scale
+    # Unlike clipping at one movement range, this still provides feedback
+    # when switching from one key to the opposite key (two ranges away).
+    # Preserve unit error at one movement range; asymptote at two rather
+    # than flattening immediately outside the nominal neutral-to-key reach.
+    error = 2.0 * distance / (1.0 + distance)
+    if lift_height > 0:
+        blend = (xy_error / full_lift_error).clamp(0.0, 1.0)
+        blend = blend.square() * (3.0 - 2.0 * blend)
+        desired_z = contact_height + lift_height * blend
+        z_error = (local[:, :, 2] - desired_z).abs() / height_scale
+        error = (error + 0.25 * z_error / (1.0 + z_error)) / 1.25
     active = torch.stack((command[:, 0].abs() > 0.5,
                           command[:, 2].abs() > 0.5), dim=-1)
     if leg not in (None, "left", "right"):

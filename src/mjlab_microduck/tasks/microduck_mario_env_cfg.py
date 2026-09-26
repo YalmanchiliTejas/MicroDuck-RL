@@ -45,6 +45,8 @@ CHORD_RELEASE_TRAVEL = 0.0005
 BUTTON_ACTIVATION_WEIGHT = 6.0
 LEG_BUTTON_ACTIVATION_WEIGHT = 1.0
 BUTTON_PROGRESS_WEIGHT = 0.5
+FOOT_APPROACH_WEIGHT = 3.0
+DISCOVERY_ACTION_RATE_WEIGHT = -0.02
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.060
 # Presses come from a short foot reposition, not from throwing the trunk in
@@ -354,7 +356,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     # Keep this separate in the logs: requested_button reports physical
     # activation while planted and camera-ready; this term supplies a gradient
-    # before the hard activation point, subject to the same gates.
+    # before the activation point. Per-leg discovery below keeps posture,
+    # contact and exclusivity gates but also credits transition frames.
     cfg.rewards["requested_button_progress"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_progress_reward,
         weight=BUTTON_PROGRESS_WEIGHT,
@@ -385,7 +388,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
         cfg.rewards[f"{leg}_button_progress"] = RewardTermCfg(
             func=microduck_mdp.mario_requested_button_progress_reward,
             weight=BUTTON_PROGRESS_WEIGHT / 2,
-            params={**progress_params, "leg": leg},
+            # Physical travel during the transition is useful discovery
+            # feedback too. Successful holds retain the full deadline gate.
+            params={**progress_params, "leg": leg, "transition_grace_s": 0.0},
         )
     foot_pose_params = {
         "command_name": "twist",
@@ -412,8 +417,11 @@ def make_microduck_mario_env_cfg(play: bool = False):
     for leg in ("left", "right"):
         cfg.rewards[f"{leg}_foot_approach"] = RewardTermCfg(
             func=microduck_mdp.mario_foot_approach_reward,
-            weight=1.0,
-            params={"leg": leg, **{key: foot_pose_params[key] for key in (
+            weight=FOOT_APPROACH_WEIGHT,
+            params={"leg": leg, "contact_height": 0.006,
+                    "lift_height": 0.003, "full_lift_error": 0.005,
+                    "height_scale": 0.003,
+                    **{key: foot_pose_params[key] for key in (
                 "command_name", "position_offset", "lateral_offset",
                 "left_neutral_x", "left_neutral_y", "right_neutral_x",
                 "right_neutral_y", "robot_cfg", "controller_cfg",
@@ -535,6 +543,14 @@ def make_microduck_mario_env_cfg(play: bool = False):
             },
         )
     for leg in ("left", "right"):
+        cfg.metrics[f"{leg}_button_raw_progress"] = MetricsTermCfg(
+            func=microduck_mdp.mario_requested_button_progress_reward,
+            params={**controller_activation_params, "leg": leg, "transition_grace_s": 0.0},
+        )
+        cfg.metrics[f"{leg}_button_raw_activation"] = MetricsTermCfg(
+            func=microduck_mdp.mario_requested_button_reward,
+            params={**controller_activation_params, "leg": leg, "transition_grace_s": 0.0},
+        )
         cfg.metrics[f"{leg}_button_success"] = MetricsTermCfg(
             func=microduck_mdp.mario_active_success_rate,
             params={"leg": leg, **cfg.metrics["requested_button_success"].params},
@@ -570,12 +586,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
 
     # A clock alone is not evidence of skill discovery. Keep the movement tax
     # modest throughout training; contact/rotation costs still price thrash.
-    cfg.rewards["action_rate_l2"].weight = -0.02
+    cfg.rewards["action_rate_l2"].weight = DISCOVERY_ACTION_RATE_WEIGHT
     cfg.curriculum["action_rate_weight"].params["weight_stages"] = [
-        {"step": 0, "weight": -0.02},
-        {"step": 500 * 24, "weight": -0.08},
-        {"step": 1_000 * 24, "weight": -0.08},
-        {"step": 2_000 * 24, "weight": -0.08},
+        {"step": 0, "weight": DISCOVERY_ACTION_RATE_WEIGHT},
     ]
 
     # Remove curricula that reference deleted velocity/head/body command or

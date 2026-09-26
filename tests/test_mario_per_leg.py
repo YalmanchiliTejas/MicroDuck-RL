@@ -90,3 +90,60 @@ def test_split_reward_budget_and_no_duplicate_aggregate_shaping():
     for leg in ("left", "right"):
         for name in (f"{leg}_requested_button", f"{leg}_button_progress", f"{leg}_foot_approach"):
             assert rewards[name].params["leg"] == leg
+
+
+def test_clearance_and_long_distance_approach_have_bounded_credit():
+    cfg = make_microduck_mario_env_cfg()
+    command = torch.tensor([[1., 0., 0.]])
+    pos = torch.tensor([[[0., .032, .006], [0., 0., .006]]])
+    term = SimpleNamespace(command_age=torch.ones(1))
+    env = SimpleNamespace(
+        step_dt=.02, episode_length_buf=torch.tensor([10]),
+        command_manager=SimpleNamespace(get_command=lambda _: command, get_term=lambda _: term),
+        scene={
+            "robot": SimpleNamespace(data=SimpleNamespace(site_pos_w=pos)),
+            "nes_controller": SimpleNamespace(data=SimpleNamespace(
+                body_link_pos_w=torch.zeros_like(pos),
+                body_link_quat_w=torch.tensor([[[1., 0., 0., 0.]] * 2]))),
+        },
+    )
+    params = cfg.rewards["left_foot_approach"].params
+    params["robot_cfg"].site_ids = [0, 1]
+    params["controller_cfg"].body_ids = [0, 1]
+    def step():
+        term.command_age += env.step_dt
+        return mdp.mario_foot_approach_reward(env, **params).item()
+
+    assert step() == 0
+    # Switching directions starts two movement ranges away. Moving toward
+    # the key must pay before crossing the old clipping boundary.
+    pos[0, 0, 1] -= .002
+    assert step() > 0
+    pos[0, 0, 2] += .001
+    assert step() > 0
+    assert step() == 0  # hovering is not a continuing reward
+    pos[0, 0, 2] -= .001
+    assert step() == 0
+    pos[0, 0, 2] += .001
+    assert step() == 0  # lift cycling cannot refill credit
+    pos[0, 0, 1] = -.032
+    pos[0, 0, 2] = .009
+    step()
+    pos[0, 0, 2] = .006
+    assert step() > 0  # lowering onto the key completes the approach
+    assert step() == 0
+    command.zero_()
+    assert step() == 0
+
+
+def test_discovery_feedback_and_raw_diagnostics_are_not_deadline_gated():
+    cfg = make_microduck_mario_env_cfg()
+    for leg in ("left", "right"):
+        assert cfg.rewards[f"{leg}_foot_approach"].weight == 3.0
+        assert cfg.rewards[f"{leg}_button_progress"].params["transition_grace_s"] == 0
+        assert cfg.rewards[f"{leg}_requested_button"].params["transition_grace_s"] > 0
+        for suffix in ("raw_progress", "raw_activation"):
+            params = cfg.metrics[f"{leg}_button_{suffix}"].params
+            assert "camera_cfg" not in params
+            assert "anchor_sensor_name" not in params
+            assert params["transition_grace_s"] == 0
