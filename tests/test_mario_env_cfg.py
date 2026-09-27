@@ -26,7 +26,7 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
     assert sum(cfg.commands["twist"].category_weights) == 1.0
     weights = cfg.commands["twist"].category_weights
     assert [index for index, weight in enumerate(weights) if weight > 0.0] == [
-        0, 1, 2, 5, 8, 11
+        0, 1, 2, 5
     ]
     assert cfg.commands["twist"].resampling_time_range == (1.5, 2.5)
     assert "head_pose" not in cfg.commands
@@ -69,14 +69,16 @@ def test_controller_reward_signs_cannot_reward_wrong_button_or_lifted_feet():
 
 def test_task_reward_dominates_idle_posture_credit():
     rewards = make_microduck_mario_env_cfg().rewards
-    idle_budget = sum(rewards[name].weight for name in (
+    survival_budget = sum(rewards[name].weight for name in (
         "upright", "pose", "commanded_trunk_offset", "standing_height",
-        "neutral_head_pose",
+        "neutral_head_pose", "alive",
     ))
-    assert idle_budget <= 2.0
-    assert sum(rewards[name].weight for name in (
-        "requested_button", "left_requested_button", "right_requested_button"
-    )) >= 4 * idle_budget
+    single_press_budget = rewards["requested_button"].weight + max(
+        rewards[f"{leg}_requested_button"].weight
+        + rewards[f"{leg}_button_progress"].weight
+        for leg in ("left", "right")
+    )
+    assert single_press_budget > survival_budget
     assert rewards["upright"].func is microduck_mdp.mario_commanded_lean_reward
     assert rewards["foot_contact_loss"].weight <= -8.0
     assert rewards["body_ang_vel"].weight == -0.40
@@ -93,7 +95,7 @@ def test_task_reward_dominates_idle_posture_credit():
     assert rewards["commanded_trunk_offset"].weight > 0.0
     assert rewards["commanded_trunk_offset"].params["forward_offset"] == 0.0
     assert rewards["commanded_trunk_offset"].params["lateral_offset"] == 0.0
-    assert rewards["commanded_trunk_offset"].params["transition_grace_s"] > 0.0
+    assert rewards["commanded_trunk_offset"].params["transition_grace_s"] == 0.0
     assert rewards["upright"].params["lean_angle"] == 0.0
     assert rewards["standing_height"].params["target_height"] == 0.130
     assert rewards["camera_crouch"].weight < 0.0
@@ -214,7 +216,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[0]["step"] == 0
     assert len(stages) == 2
     assert [i for i, weight in enumerate(stages[0]["weights"]) if weight > 0] == [
-        0, 1, 2, 5, 8, 11
+        0, 1, 2, 5
     ]
     assert stages[1]["step"] == 2_500 * 24
     assert stages[1]["weights"][8] > 0.0
@@ -224,6 +226,31 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[1]["weights"][13] == 0.0
     assert "mario_command_stage" not in play_cfg.curriculum
     assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
+
+
+def test_mario_balance_reward_closes_press_then_crash_loophole():
+    cfg = make_microduck_mario_env_cfg()
+    rewards = cfg.rewards
+    assert rewards["alive"].func is microduck_mdp.is_alive
+    assert rewards["alive"].weight > 0.0
+    assert rewards["fell_over"].func is microduck_mdp.mario_fall_cost
+    assert rewards["fell_over"].weight < 0.0
+    policy_step_dt = cfg.sim.mujoco.timestep * cfg.decimation
+    assert rewards["fell_over"].weight * policy_step_dt == pytest.approx(-10.0)
+    assert rewards["commanded_trunk_offset"].weight >= 1.0
+    assert rewards["commanded_trunk_offset"].params["transition_grace_s"] == 0.0
+    assert rewards["upright"].weight >= 2.0
+
+
+def test_mario_fall_cost_only_reads_named_failure_term():
+    terms = {
+        "fell_over": torch.tensor([False, True, False]),
+        "time_out": torch.tensor([True, False, False]),
+    }
+    env = SimpleNamespace(
+        termination_manager=SimpleNamespace(get_term=terms.__getitem__)
+    )
+    assert microduck_mdp.mario_fall_cost(env).tolist() == [0.0, 1.0, 0.0]
 
 
 def test_mario_combo_stage_waits_for_active_single_button_success():

@@ -5895,6 +5895,20 @@ def mario_command_ready(
     return (term.command_age >= transition_grace_s).to(dtype=term.command.dtype)
 
 
+def mario_fall_cost(
+    env: ManagerBasedRlEnv,
+    termination_name: str = "fell_over",
+) -> torch.Tensor:
+    """One-shot cost on a genuine fall termination, excluding timeouts.
+
+    Button and approach credit otherwise makes crashing a profitable way to
+    obtain a fresh command and replenish per-request shaping. The termination
+    manager is evaluated before rewards, so its named term is current here.
+    """
+
+    return env.termination_manager.get_term(termination_name).float()
+
+
 _MARIO_NES_JOINTS = (
     "passive_dpad_left",
     "passive_dpad_right",

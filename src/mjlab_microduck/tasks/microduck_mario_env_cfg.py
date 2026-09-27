@@ -52,6 +52,14 @@ BUTTON_PROGRESS_WEIGHT = 2.0
 BUTTON_PROGRESS_POWER = 0.5
 FOOT_APPROACH_WEIGHT = 1.0
 DISCOVERY_ACTION_RATE_WEIGHT = -0.02
+ALIVE_WEIGHT = 1.0
+# RewardManager multiplies every term by step_dt=0.02. This therefore produces
+# a -10 terminal reward, large enough to dominate any button credit earned by
+# a press-then-crash shortcut. PPO/GAE propagates it backward through the
+# failed trajectory; it must not leak into the unrelated post-reset episode.
+FALL_PENALTY_WEIGHT = -500.0
+UPRIGHT_WEIGHT = 2.0
+TRUNK_BALANCE_WEIGHT = 1.0
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.060
 # Presses come from a short foot reposition, not from throwing the trunk in
@@ -93,8 +101,8 @@ RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
 # Table order: neutral, L, R, U, D, A, B, A+B,
 # L+A, L+B, L+A+B, R+A, R+B, R+A+B.
 SINGLE_BUTTON_WEIGHTS = (
-    0.20, 0.20, 0.20, 0, 0, 0.20, 0,
-    0, 0.10, 0, 0, 0.10, 0, 0,
+    0.25, 0.25, 0.25, 0, 0, 0.25, 0,
+    0, 0, 0, 0, 0, 0, 0,
 )
 TWO_BUTTON_WEIGHTS = (
     0.15, 0.15, 0.15, 0, 0, 0.15, 0,
@@ -238,7 +246,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     cfg.rewards["pose"].weight = 0.0
     cfg.rewards["upright"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_lean_reward,
-        weight=1.0,
+        weight=UPRIGHT_WEIGHT,
         params={
             "command_name": "twist",
             "lean_angle": COMMAND_LEAN_ANGLE,
@@ -248,15 +256,16 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["commanded_trunk_offset"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_trunk_offset_reward,
-        weight=0.3,
+        weight=TRUNK_BALANCE_WEIGHT,
         params={
             "command_name": "twist",
             "forward_offset": COM_FORWARD_OFFSET,
             "lateral_offset": COM_LATERAL_OFFSET,
             "std": 0.008,
-            # Permit the small support transfer needed to lift one foot; once
-            # the transition ends, pull the trunk back over the feet.
-            "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
+            # Balance is most important during the transition. Track the live
+            # feet centroid immediately instead of leaving the dangerous first
+            # 0.6 s completely unshaped.
+            "transition_grace_s": 0.0,
             "robot_cfg": SceneEntityCfg(
                 "robot", site_names=("left_foot", "right_foot")
             ),
@@ -313,6 +322,15 @@ def make_microduck_mario_env_cfg(play: bool = False):
     )
     cfg.rewards["angular_momentum"].weight = -0.15
     cfg.rewards["angular_momentum"].params["reference"] = 0.01
+    cfg.rewards["alive"] = RewardTermCfg(
+        func=microduck_mdp.is_alive,
+        weight=ALIVE_WEIGHT,
+    )
+    cfg.rewards["fell_over"] = RewardTermCfg(
+        func=microduck_mdp.mario_fall_cost,
+        weight=FALL_PENALTY_WEIGHT,
+        params={"termination_name": "fell_over"},
+    )
 
     controller_activation_params = {
         "command_name": "twist",
