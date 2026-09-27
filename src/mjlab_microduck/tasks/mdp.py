@@ -6053,8 +6053,12 @@ def mario_button_request_debug(
     env.extras["log"]["Debug/req_right"] = req_mean[3]
     env.extras["log"]["Debug/req_A"] = req_mean[4]
     env.extras["log"]["Debug/req_B"] = req_mean[5]
-    env.extras["log"]["Debug/left_req_rate"] = requested[:, [2, 3]].mean()
-    env.extras["log"]["Debug/right_req_rate"] = requested[:, [4, 5]].mean()
+    env.extras["log"]["Debug/left_req_rate"] = (
+        requested[:, [2, 3]].sum(dim=-1) > 0
+    ).float().mean()
+    env.extras["log"]["Debug/right_req_rate"] = (
+        requested[:, [4, 5]].sum(dim=-1) > 0
+    ).float().mean()
     return requested.mean(dim=-1)
 
 
@@ -6151,14 +6155,6 @@ def mario_requested_button_reward(
             env, command_name, transition_grace_s
         )
 
-    left_requested = (selected[:, [2, 3]].sum(dim=-1) > 0).float().mean()
-    right_requested = (selected[:, [4, 5]].sum(dim=-1) > 0).float().mean()
-    env.extras["log"]["Debug/left_req_rate"] = left_requested
-    env.extras["log"]["Debug/right_req_rate"] = right_requested
-    env.extras["log"]["Debug/anchor_gate"] = anchor_gate.mean() if anchor_gate is not None else 1.0
-    env.extras["log"]["Debug/camera_gate"] = camera_score.mean() if camera_cfg is not None else 1.0
-    env.extras["log"]["Debug/pose_gate"] = pose_score.mean() if standing_pose_cfg is not None else 1.0
-    env.extras["log"]["Debug/selection_score"] = score.mean()
     return score
 
 
@@ -6191,8 +6187,18 @@ def mario_requested_button_progress_reward(
     transition_grace_s: float = 0.0,
     enabled_buttons: tuple[bool, ...] | None = None,
     leg: str | None = None,
+    progress_power: float = 1.0,
 ) -> torch.Tensor:
-    """Dense button progress only while planted and camera-ready."""
+    """Dense physical button-travel reward while planted and camera-ready.
+
+    ``progress_power`` below one expands the very small initial switch travel
+    that is otherwise nearly invisible during skill discovery.  Full travel
+    remains exactly one, and the separate activation reward still makes a
+    complete press preferable to parking at a partial depression.
+    """
+
+    if progress_power <= 0.0:
+        raise ValueError("progress_power must be positive")
 
     requested = mario_nes_requested_buttons(env, command_name)
     enabled = _mario_enabled_button_mask(requested, enabled_buttons)
@@ -6204,6 +6210,7 @@ def mario_requested_button_progress_reward(
         chord_press_travel,
         use_chord,
     )
+    progress = progress.pow(progress_power)
     selected = _mario_leg_requests(requested, leg)
     requested_count = selected.sum(dim=-1)
     score = torch.where(
@@ -6254,12 +6261,6 @@ def mario_requested_button_progress_reward(
             env, command_name, transition_grace_s
         )
 
-    left_requested = (selected[:, [2, 3]].sum(dim=-1) > 0).float().mean()
-    right_requested = (selected[:, [4, 5]].sum(dim=-1) > 0).float().mean()
-    env.extras["log"]["Debug/left_progress_rate"] = left_requested
-    env.extras["log"]["Debug/right_progress_rate"] = right_requested
-    env.extras["log"]["Debug/left_button_raw_progress"] = score.mean()
-    env.extras["log"]["Debug/right_button_raw_progress"] = score.mean()
     return score
 
 

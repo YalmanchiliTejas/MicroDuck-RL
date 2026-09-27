@@ -43,9 +43,14 @@ RELEASE_ANGLE = 0.0003
 CHORD_PRESS_TRAVEL = 0.0007
 CHORD_RELEASE_TRAVEL = 0.0005
 BUTTON_ACTIVATION_WEIGHT = 6.0
-LEG_BUTTON_ACTIVATION_WEIGHT = 1.0
-BUTTON_PROGRESS_WEIGHT = 0.5
-FOOT_APPROACH_WEIGHT = 3.0
+LEG_BUTTON_ACTIVATION_WEIGHT = 2.0
+# Per-leg physical travel gets half of this aggregate budget.  A concave
+# discovery curve exposes the first fraction of a millimetre to PPO, while the
+# activation terms make fully depressing the switch substantially more
+# valuable than merely reaching or grazing it.
+BUTTON_PROGRESS_WEIGHT = 2.0
+BUTTON_PROGRESS_POWER = 0.5
+FOOT_APPROACH_WEIGHT = 1.0
 DISCOVERY_ACTION_RATE_WEIGHT = -0.02
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.060
@@ -375,9 +380,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
         params=controller_activation_params,
     )
     # Independent discovery signals: a missing left press must not erase the
-    # right foot's learning signal (or vice versa). The larger complete-request
-    # reward above still requires EVERY requested key, so half a combo earns
-    # only 1.25 at most, versus 8.5 for the complete combination.
+    # right foot's learning signal (or vice versa).  Switch travel and full
+    # activation deliberately outweigh the approach signal: reaching a key is
+    # useful shaping, but only physically depressing it completes the task.
     progress_params = cfg.rewards.pop("requested_button_progress").params
     for leg in ("left", "right"):
         cfg.rewards[f"{leg}_requested_button"] = RewardTermCfg(
@@ -390,7 +395,12 @@ def make_microduck_mario_env_cfg(play: bool = False):
             weight=BUTTON_PROGRESS_WEIGHT / 2,
             # Physical travel during the transition is useful discovery
             # feedback too. Successful holds retain the full deadline gate.
-            params={**progress_params, "leg": leg, "transition_grace_s": 0.0},
+            params={
+                **progress_params,
+                "leg": leg,
+                "transition_grace_s": 0.0,
+                "progress_power": BUTTON_PROGRESS_POWER,
+            },
         )
     foot_pose_params = {
         "command_name": "twist",
@@ -408,8 +418,6 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "robot_cfg": feet_cfg,
         "controller_cfg": platforms_cfg,
     }
-    for k,v in foot_pose_params.items():
-        print(f"{k}: {v}")
     cfg.rewards["commanded_foot_pose"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_pose_reward,
         # Diagnostic only: a foot hovering over a key is not a button press.

@@ -84,12 +84,61 @@ def test_split_reward_budget_and_no_duplicate_aggregate_shaping():
     assert "requested_button_progress" not in rewards
     assert "foot_approach" not in rewards
     single = rewards["left_requested_button"].weight + rewards["left_button_progress"].weight
-    assert single == pytest.approx(1.25)
+    assert single == pytest.approx(3.0)
     complete = rewards["requested_button"].weight + 2 * single
-    assert complete == pytest.approx(8.5)
+    assert complete == pytest.approx(12.0)
     for leg in ("left", "right"):
         for name in (f"{leg}_requested_button", f"{leg}_button_progress", f"{leg}_foot_approach"):
             assert rewards[name].params["leg"] == leg
+
+
+def test_button_discovery_curve_amplifies_early_travel_but_not_full_press(
+    monkeypatch,
+):
+    command = torch.tensor([[1.0, 0.0, 0.0]] * 3)
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_command=lambda _: command)
+    )
+    progress = torch.zeros(3, 6)
+    progress[:, 3] = torch.tensor([0.01, 0.25, 1.0])
+    monkeypatch.setattr(mdp, "mario_nes_progress", lambda *a, **k: progress)
+
+    linear = mdp.mario_requested_button_progress_reward(env, leg="left")
+    shaped = mdp.mario_requested_button_progress_reward(
+        env, leg="left", progress_power=0.5
+    )
+    assert linear.tolist() == pytest.approx([0.01, 0.25, 1.0])
+    assert shaped.tolist() == pytest.approx([0.1, 0.5, 1.0])
+
+
+def test_leg_request_debug_reports_active_env_rate_not_slot_average():
+    command = torch.tensor(
+        [
+            [0.0, 0.0, 0.0],
+            [-1.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 0.0, 1.0],
+            [1.0, 0.0, 1.0],
+        ]
+    )
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_command=lambda _: command),
+        extras={"log": {}},
+    )
+    mdp.mario_button_request_debug(env)
+    assert env.extras["log"]["Debug/left_req_rate"] == pytest.approx(3 / 5)
+    assert env.extras["log"]["Debug/right_req_rate"] == pytest.approx(2 / 5)
+
+
+def test_physical_press_rewards_outweigh_approach_shaping():
+    rewards = make_microduck_mario_env_cfg().rewards
+    for leg in ("left", "right"):
+        physical = (
+            rewards[f"{leg}_requested_button"].weight
+            + rewards[f"{leg}_button_progress"].weight
+        )
+        assert physical > rewards[f"{leg}_foot_approach"].weight
+        assert rewards[f"{leg}_button_progress"].params["progress_power"] < 1.0
 
 
 def test_clearance_and_long_distance_approach_have_bounded_credit():
@@ -139,7 +188,7 @@ def test_clearance_and_long_distance_approach_have_bounded_credit():
 def test_discovery_feedback_and_raw_diagnostics_are_not_deadline_gated():
     cfg = make_microduck_mario_env_cfg()
     for leg in ("left", "right"):
-        assert cfg.rewards[f"{leg}_foot_approach"].weight == 3.0
+        assert cfg.rewards[f"{leg}_foot_approach"].weight == 1.0
         assert cfg.rewards[f"{leg}_button_progress"].params["transition_grace_s"] == 0
         assert cfg.rewards[f"{leg}_requested_button"].params["transition_grace_s"] > 0
         for suffix in ("raw_progress", "raw_activation"):
