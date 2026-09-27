@@ -393,6 +393,14 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "robot_cfg": feet_cfg,
         "controller_cfg": platforms_cfg,
     }
+    # Nested SceneEntityCfg values are not resolved by mjlab's manager. The
+    # activation reward reuses its top-level resolved robot/controller cfgs;
+    # only scalar rocker calibration belongs in the nested parameter block.
+    button_foot_pose_params = {
+        key: value
+        for key, value in foot_pose_params.items()
+        if key not in ("command_name", "robot_cfg", "controller_cfg")
+    }
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
         weight=BUTTON_ACTIVATION_WEIGHT,
@@ -400,7 +408,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             **anchored_button_params,
             **camera_ready_params,
             **standing_pose_params,
-            "foot_pose_params": foot_pose_params,
+            "foot_pose_params": button_foot_pose_params,
         },
     )
     # Keep this separate in the logs: requested_button reports physical

@@ -106,7 +106,12 @@ def test_button_activation_is_multiplied_by_measured_rocker_pose(monkeypatch):
         "mario_commanded_foot_pose_reward",
         lambda *a, **k: torch.tensor([0.0, 1.0]),
     )
-    score = mdp.mario_requested_button_reward(env, foot_pose_params={})
+    score = mdp.mario_requested_button_reward(
+        env,
+        robot_cfg=object(),
+        controller_cfg=object(),
+        foot_pose_params={},
+    )
     assert score.tolist() == [0.0, 1.0]
 
 

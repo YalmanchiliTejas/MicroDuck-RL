@@ -6166,8 +6166,17 @@ def mario_requested_button_reward(
         )
         score = score * torch.sqrt(pose_score.clamp(min=0.0))
     if foot_pose_params is not None:
+        if robot_cfg is None or controller_cfg is None:
+            raise ValueError(
+                "robot_cfg and controller_cfg are required with foot_pose_params"
+            )
         foot_pose_score = mario_commanded_foot_pose_reward(
-            env, leg=leg, **foot_pose_params
+            env,
+            command_name=command_name,
+            robot_cfg=robot_cfg,
+            controller_cfg=controller_cfg,
+            leg=leg,
+            **foot_pose_params,
         )
         score = score * torch.sqrt(foot_pose_score.clamp(min=0.0))
     if transition_grace_s > 0.0:
@@ -7124,8 +7133,19 @@ def mario_clean_button_success(
 
     foot_pose_params = reward_params.get("foot_pose_params")
     if foot_pose_params is not None:
+        robot_cfg = reward_params.get("robot_cfg")
+        controller_cfg = reward_params.get("controller_cfg")
+        if robot_cfg is None or controller_cfg is None:
+            raise ValueError(
+                "robot_cfg and controller_cfg are required with foot_pose_params"
+            )
         foot_pose_score = mario_commanded_foot_pose_reward(
-            env, leg=reward_params.get("leg"), **foot_pose_params
+            env,
+            command_name=command_name,
+            robot_cfg=robot_cfg,
+            controller_cfg=controller_cfg,
+            leg=reward_params.get("leg"),
+            **foot_pose_params,
         )
         # Neutral release has no active foot target; active commands must be
         # mechanically close to the measured rocker pose.

@@ -122,7 +122,15 @@ def test_task_reward_dominates_idle_posture_credit():
     assert foot_pose["lateral_offset"] == pytest.approx(0.0105)
     assert foot_pose["left_neutral_x"] == pytest.approx(-0.0075)
     assert foot_pose["target_tilt"] == pytest.approx(math.radians(6.0))
-    assert rewards["requested_button"].params["foot_pose_params"] is foot_pose
+    button_pose = rewards["requested_button"].params["foot_pose_params"]
+    assert button_pose == {
+        key: value
+        for key, value in foot_pose.items()
+        if key not in ("command_name", "robot_cfg", "controller_cfg")
+    }
+    assert not any(
+        isinstance(value, SceneEntityCfg) for value in button_pose.values()
+    )
     assert rewards["foot_planar_speed"].params["transition_grace_s"] == (
         pytest.approx(0.25)
     )
