@@ -224,7 +224,7 @@ if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
         --task-id "${TASK_ID}" \
         --checkpoint-dir "${TENSORBOARD_DIR}" \
         --video-dir "${VIDEO_DIR}" \
-        --video-length 300 \
+        --video-length 4000 \
         --video-width 960 \
         --video-height 720 \
         --video-distance 0.55 \
