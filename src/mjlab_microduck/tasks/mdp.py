@@ -6527,9 +6527,15 @@ def _mario_commanded_foot_target_xy(
     right_neutral_x: float,
     right_neutral_y: float,
 ) -> torch.Tensor:
-    """Pad-local foot-site targets, calibrated against the HOME stance."""
+    """Pad-local foot-site targets, calibrated against the HOME stance.
 
-    dpad_x, dpad_y, ab = command[:, 0], command[:, 1], command[:, 2]
+    ``lateral_offset`` is retained as a serialized-config compatibility name,
+    but it now denotes the sagittal D-pad offset. LEFT/RIGHT must use the
+    left leg's pitch/knee/ankle plane: its sole cannot remain level during the
+    old lateral motion because the robot has no ankle-roll joint.
+    """
+
+    dpad_x, ab = command[:, 0], command[:, 2]
     # A is forward and B is backward on the right-foot key pair. Values above
     # one are legacy A+B commands and resolve to the A target; that category is
     # disabled because one foot cannot press both separated keys cleanly.
@@ -6538,8 +6544,8 @@ def _mario_commanded_foot_target_xy(
         (
             torch.stack(
                 (
-                    left_neutral_x + position_offset * dpad_y,
-                    left_neutral_y - lateral_offset * dpad_x,
+                    left_neutral_x + lateral_offset * dpad_x,
+                    torch.full_like(dpad_x, left_neutral_y),
                 ),
                 dim=-1,
             ),
@@ -6748,9 +6754,9 @@ def mario_commanded_foot_pose_reward(
 ) -> torch.Tensor:
     """Track command-specific foot position and sole orientation on each pad.
 
-    The left foot moves fore/aft for UP/DOWN and laterally for LEFT/RIGHT;
-    the right foot moves forward for A and backward for B. Neutral targets match
-    HOME contact centroids relative to the controller pivots.
+    The left foot moves forward for RIGHT and backward for LEFT; the right foot
+    moves forward for A and backward for B. Neutral targets match HOME contact
+    centroids relative to the controller pivots.
     """
 
     if position_std <= 0.0 or angle_std <= 0.0:
@@ -6793,13 +6799,13 @@ def mario_commanded_foot_pose_reward(
     )
     target_roll = torch.stack(
         (
-            left_nominal_roll + target_tilt * dpad_x,
+            torch.full_like(dpad_x, left_nominal_roll),
             torch.full_like(ab, right_nominal_roll),
         ),
         dim=-1,
     )
     target_pitch = torch.stack(
-        (target_tilt * dpad_y, target_tilt * ab_direction), dim=-1
+        (target_tilt * dpad_x, target_tilt * ab_direction), dim=-1
     )
     angle_error = torch.stack((roll - target_roll, pitch - target_pitch), dim=-1)
 

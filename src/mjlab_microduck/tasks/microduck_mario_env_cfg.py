@@ -73,7 +73,10 @@ MAX_LEG_POSE_ERROR = 0.80
 # Pad-local centers of the independent keys. Neutral is the fixed center
 # pedestal. The full sole must clear its edge before a key can descend.
 FOOT_POSITION_OFFSET = 0.044
-FOOT_LATERAL_OFFSET = 0.032
+# LEFT/RIGHT use a sagittal pair under the left foot. 36 mm is the largest
+# symmetric offset verified reachable by the articulated leg with an upright
+# trunk and level sole; 44 mm remains the A/B offset under the right foot.
+DPAD_POSITION_OFFSET = 0.036
 LEFT_NEUTRAL_FOOT_X = 0.0
 LEFT_NEUTRAL_FOOT_Y = 0.0
 RIGHT_NEUTRAL_FOOT_X = 0.0
@@ -405,7 +408,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
     foot_pose_params = {
         "command_name": "twist",
         "position_offset": FOOT_POSITION_OFFSET,
-        "lateral_offset": FOOT_LATERAL_OFFSET,
+        # Legacy parameter name: this is now the D-pad's sagittal offset.
+        "lateral_offset": DPAD_POSITION_OFFSET,
         "left_neutral_x": LEFT_NEUTRAL_FOOT_X,
         "left_neutral_y": LEFT_NEUTRAL_FOOT_Y,
         "right_neutral_x": RIGHT_NEUTRAL_FOOT_X,

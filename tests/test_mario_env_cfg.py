@@ -119,7 +119,7 @@ def test_task_reward_dominates_idle_posture_credit():
     )
     foot_pose = rewards["commanded_foot_pose"].params
     assert foot_pose["position_offset"] == pytest.approx(0.044)
-    assert foot_pose["lateral_offset"] == pytest.approx(0.032)
+    assert foot_pose["lateral_offset"] == pytest.approx(0.036)
     assert foot_pose["target_tilt"] == pytest.approx(0.0)
 
 
@@ -637,7 +637,7 @@ def test_unrequested_button_cost_ignores_motion_inside_release_deadband():
 
 def test_calibrated_foot_targets_drive_only_requested_mario_axes():
     from mjlab_microduck.tasks.microduck_mario_env_cfg import (
-        FOOT_LATERAL_OFFSET,
+        DPAD_POSITION_OFFSET,
         FOOT_POSITION_OFFSET,
         LEFT_NEUTRAL_FOOT_X,
         LEFT_NEUTRAL_FOOT_Y,
@@ -658,19 +658,21 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
     target = microduck_mdp._mario_commanded_foot_target_xy(
         commands,
         FOOT_POSITION_OFFSET,
-        FOOT_LATERAL_OFFSET,
+        DPAD_POSITION_OFFSET,
         LEFT_NEUTRAL_FOOT_X,
         LEFT_NEUTRAL_FOOT_Y,
         RIGHT_NEUTRAL_FOOT_X,
         RIGHT_NEUTRAL_FOOT_Y,
     )
     assert target[0, 0].tolist() == pytest.approx([0.0, 0.0])
-    assert target[1, 0, 1] == pytest.approx(
-        LEFT_NEUTRAL_FOOT_Y + FOOT_LATERAL_OFFSET
+    assert target[1, 0, 0] == pytest.approx(
+        LEFT_NEUTRAL_FOOT_X - DPAD_POSITION_OFFSET
     )
-    assert target[2, 0, 1] == pytest.approx(
-        LEFT_NEUTRAL_FOOT_Y - FOOT_LATERAL_OFFSET
+    assert target[2, 0, 0] == pytest.approx(
+        LEFT_NEUTRAL_FOOT_X + DPAD_POSITION_OFFSET
     )
+    assert target[1, 0, 1] == pytest.approx(LEFT_NEUTRAL_FOOT_Y)
+    assert target[2, 0, 1] == pytest.approx(LEFT_NEUTRAL_FOOT_Y)
     assert target[3, 1, 0] == pytest.approx(
         RIGHT_NEUTRAL_FOOT_X + FOOT_POSITION_OFFSET
     )
@@ -826,7 +828,7 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
     foot_pos = torch.tensor(
         [
             [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]],
-            [[0.0, -position_offset, 0.0], [0.0, 0.0, 0.0]],
+            [[position_offset, 0.0, 0.0], [0.0, 0.0, 0.0]],
         ]
     )
     foot_quat = torch.tensor(
@@ -836,7 +838,7 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
                 quat_from_roll_pitch(right_roll, 0.0),
             ],
             [
-                quat_from_roll_pitch(left_roll + target_tilt, 0.0),
+                quat_from_roll_pitch(left_roll, target_tilt),
                 quat_from_roll_pitch(right_roll, 0.0),
             ],
         ]
@@ -872,12 +874,12 @@ def test_commanded_foot_pose_targets_independent_controller_axes():
 
 
 def test_commanded_foot_clearance_lifts_while_misplaced_then_lands_at_target():
-    commands = torch.tensor([[1.0, 0.0, 0.0]] * 3)  # RIGHT moves left foot in -Y.
+    commands = torch.tensor([[1.0, 0.0, 0.0]] * 3)  # RIGHT moves left foot in +X.
     foot_pos = torch.tensor(
         [
             [[0.0, 0.0, 0.006], [0.0, 0.0, 0.006]],  # misplaced, dragging
             [[0.0, 0.0, 0.009], [0.0, 0.0, 0.006]],  # misplaced, 3 mm lift
-            [[0.0, -0.007, 0.006], [0.0, 0.0, 0.006]],  # arrived and landed
+            [[0.007, 0.0, 0.006], [0.0, 0.0, 0.006]],  # arrived and landed
         ]
     )
     robot = SimpleNamespace(data=SimpleNamespace(site_pos_w=foot_pos))

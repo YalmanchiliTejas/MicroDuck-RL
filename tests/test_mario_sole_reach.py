@@ -8,6 +8,8 @@ from pathlib import Path
 import mujoco
 import numpy as np
 import pytest
+from scipy.optimize import least_squares
+from scipy.spatial.transform import Rotation
 
 
 ROBOT_DIR = Path(__file__).parents[1] / "src/mjlab_microduck/robot/microduck"
@@ -78,3 +80,76 @@ def test_full_soles_can_press_exact_keys(left, right, expected):
             assert travel[index] >= 0.0007, travel * 1000
         else:
             assert travel[index] < 0.0003, travel * 1000
+
+
+@pytest.mark.parametrize(
+    "key_name",
+    ["dpad_left_key", "dpad_right_key"],
+)
+def test_articulated_left_leg_reaches_sagittal_dpad_with_level_sole(key_name):
+    """Guard against proving reachability with a teleported sole only.
+
+    The trunk stays fixed and upright, hip yaw/roll stay at HOME, and only the
+    left leg's sagittal chain may move. Both D-pad targets must be attainable
+    without changing the sole orientation.
+    """
+
+    model = mujoco.MjModel.from_xml_path(
+        str(ROBOT_DIR / "scene_controller_nes.xml")
+    )
+    data = mujoco.MjData(model)
+    root_adr = model.joint("trunk_base_freejoint").qposadr[0]
+    data.qpos[root_adr : root_adr + 7] = (0, 0, 0.135, 1, 0, 0, 0)
+    home = {
+        "left_hip_yaw": 0.0,
+        "left_hip_roll": np.deg2rad(-5.0),
+        "left_hip_pitch": -0.457924,
+        "left_knee": -0.004940,
+        "left_ankle": 0.452984,
+    }
+    for name, value in home.items():
+        data.qpos[model.joint(name).qposadr[0]] = value
+    mujoco.mj_forward(model, data)
+
+    site_id = model.site("left_foot").id
+    home_pos = data.site_xpos[site_id].copy()
+    home_mat = data.site_xmat[site_id].reshape(3, 3).copy()
+    platform_x = data.xpos[model.body("dpad_platform").id, 0]
+    assert abs(home_pos[0] - platform_x) < 0.0005
+    target = home_pos.copy()
+    target[0] += model.body(key_name).pos[0]
+
+    joint_names = ("left_hip_pitch", "left_knee", "left_ankle")
+    qpos_adrs = [model.joint(name).qposadr[0] for name in joint_names]
+    initial = np.array([data.qpos[adr] for adr in qpos_adrs])
+    bounds = np.array([model.joint(name).range for name in joint_names]).T
+
+    def residual(joint_pos):
+        for adr, value in zip(qpos_adrs, joint_pos, strict=True):
+            data.qpos[adr] = value
+        mujoco.mj_forward(model, data)
+        position_mm = (data.site_xpos[site_id] - target) * 1000.0
+        site_mat = data.site_xmat[site_id].reshape(3, 3)
+        orientation = Rotation.from_matrix(
+            home_mat.T @ site_mat
+        ).as_rotvec()
+        return np.concatenate((position_mm, orientation * 100.0))
+
+    result = least_squares(
+        residual,
+        initial,
+        bounds=bounds,
+        max_nfev=1_000,
+        xtol=1e-12,
+        ftol=1e-12,
+        gtol=1e-12,
+    )
+    residual(result.x)
+    position_error_mm = np.linalg.norm(data.site_xpos[site_id] - target) * 1000
+    orientation_error_deg = np.degrees(
+        Rotation.from_matrix(
+            home_mat.T @ data.site_xmat[site_id].reshape(3, 3)
+        ).magnitude()
+    )
+    assert position_error_mm < 0.1
+    assert orientation_error_deg < 0.1

@@ -62,18 +62,18 @@ def test_per_leg_approach_history_is_independent_and_not_rechargeable():
     result = step()
     assert not result["left"].any()
     assert (result["right"] > 0).all()
-    pos[:, 0, 1] -= .002
+    pos[:, 0, 0] += .002
     result = step(("right", "left"))
     assert (result["left"] > 0).all()
     assert not result["right"].any()
     assert all(not value.any() for value in step().values())
-    pos[:, 0, 1] += .002
+    pos[:, 0, 0] -= .002
     step()
-    pos[:, 0, 1] -= .002
+    pos[:, 0, 0] += .002
     assert all(not value.any() for value in step().values())
     # Reset only one world: the other world's improvement survives.
     env.episode_length_buf[0] = 0
-    pos[:, 0, 1] -= .002
+    pos[:, 0, 0] += .002
     result = step()
     assert result["left"][0] == 0
     assert result["left"][1] > 0
@@ -144,7 +144,7 @@ def test_physical_press_rewards_outweigh_approach_shaping():
 def test_clearance_and_long_distance_approach_have_bounded_credit():
     cfg = make_microduck_mario_env_cfg()
     command = torch.tensor([[1., 0., 0.]])
-    pos = torch.tensor([[[0., .032, .006], [0., 0., .006]]])
+    pos = torch.tensor([[[-.036, 0., .006], [0., 0., .006]]])
     term = SimpleNamespace(command_age=torch.ones(1))
     env = SimpleNamespace(
         step_dt=.02, episode_length_buf=torch.tensor([10]),
@@ -166,7 +166,7 @@ def test_clearance_and_long_distance_approach_have_bounded_credit():
     assert step() == 0
     # Switching directions starts two movement ranges away. Moving toward
     # the key must pay before crossing the old clipping boundary.
-    pos[0, 0, 1] -= .002
+    pos[0, 0, 0] += .002
     assert step() > 0
     pos[0, 0, 2] += .001
     assert step() > 0
@@ -175,7 +175,7 @@ def test_clearance_and_long_distance_approach_have_bounded_credit():
     assert step() == 0
     pos[0, 0, 2] += .001
     assert step() == 0  # lift cycling cannot refill credit
-    pos[0, 0, 1] = -.032
+    pos[0, 0, 0] = .036
     pos[0, 0, 2] = .009
     step()
     pos[0, 0, 2] = .006

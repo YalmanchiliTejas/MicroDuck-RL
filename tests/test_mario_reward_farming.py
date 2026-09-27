@@ -31,7 +31,7 @@ def fixture():
 def test_neutral_and_half_combo_cannot_farm_foot_pose():
     env, command, pos, term, params = fixture()
     assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == 0
-    pos[0, 0, 1] = -params["lateral_offset"]
+    pos[0, 0, 0] = params["lateral_offset"]
     assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == 0
     pos[0, 1, 0] = params["position_offset"]
     assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == pytest.approx(1)
@@ -49,18 +49,18 @@ def test_approach_credit_cannot_be_farmed_by_holding_or_oscillation():
         return mdp.mario_foot_approach_reward(env, **params).item()
     assert step() == 0
     assert step() == 0
-    pos[0, 0, 1] -= .002
+    pos[0, 0, 0] += .002
     assert step() > 0
     assert step() == 0
-    pos[0, 0, 1] += .002
+    pos[0, 0, 0] -= .002
     assert step() == 0
-    pos[0, 0, 1] -= .002
+    pos[0, 0, 0] += .002
     assert step() == 0
     term.command_age.zero_()
-    pos[0, 0, 1] -= .002
+    pos[0, 0, 0] += .002
     assert step() == 0
     env.episode_length_buf.zero_()
-    pos[0, 0, 1] -= .002
+    pos[0, 0, 0] += .002
     assert step() == 0
 
 
@@ -103,8 +103,14 @@ def test_foot_targets_match_actual_xml_key_centers():
         Path(__file__).parents[1] / "src/mjlab_microduck/robot/microduck/controller_nes.xml"))
     cfg = make_microduck_mario_env_cfg()
     p = cfg.rewards["commanded_foot_pose"].params
-    assert model.body("dpad_left_key").pos[1] == pytest.approx(p["lateral_offset"])
-    assert model.body("dpad_right_key").pos[1] == pytest.approx(-p["lateral_offset"])
+    assert model.body("dpad_left_key").pos[0] == pytest.approx(
+        p["left_neutral_x"] - p["lateral_offset"]
+    )
+    assert model.body("dpad_right_key").pos[0] == pytest.approx(
+        p["left_neutral_x"] + p["lateral_offset"]
+    )
+    assert model.body("dpad_left_key").pos[1] == pytest.approx(0.0)
+    assert model.body("dpad_right_key").pos[1] == pytest.approx(0.0)
     assert model.body("button_a_key").pos[0] == pytest.approx(p["position_offset"])
     assert model.body("button_b_key").pos[0] == pytest.approx(-p["position_offset"])
     assert cfg.rewards["commanded_foot_pose"].weight == 0
