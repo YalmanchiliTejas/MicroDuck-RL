@@ -31,10 +31,21 @@ def fixture():
 def test_neutral_and_half_combo_cannot_farm_foot_pose():
     env, command, pos, term, params = fixture()
     assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == 0
-    pos[0, 0, 0] = params["lateral_offset"]
+    left_target = params["left_neutral_x"] + params["lateral_offset"]
+    right_target = params["right_neutral_x"] + params["position_offset"]
+    pos[0, 0, 0] = left_target
     assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == 0
-    pos[0, 1, 0] = params["position_offset"]
-    assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == pytest.approx(1)
+    pos[0, 1, 0] = right_target
+    pitch = params["target_tilt"]
+    quat = torch.tensor(
+        [torch.cos(torch.tensor(pitch / 2)), 0.0,
+         torch.sin(torch.tensor(pitch / 2)), 0.0]
+    )
+    env.scene["robot"].data.site_quat_w[0, 0] = quat
+    env.scene["robot"].data.site_quat_w[0, 1] = quat
+    assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == (
+        pytest.approx(1, abs=1e-4)
+    )
     command.zero_()
     pos.zero_()
     assert mdp.mario_commanded_foot_pose_reward(env, **params).item() == 0
@@ -81,6 +92,24 @@ def test_combo_reward_requires_both_switches_and_no_wrong_key(monkeypatch):
     assert progress.tolist() == [0., 0., 1., 0.]
 
 
+def test_button_activation_is_multiplied_by_measured_rocker_pose(monkeypatch):
+    command = torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]])
+    activation = torch.tensor(
+        [[0.0, 0.0, 0.0, 1.0, 0.0, 0.0]] * 2
+    )
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_command=lambda _: command)
+    )
+    monkeypatch.setattr(mdp, "mario_nes_activation", lambda *a, **k: activation)
+    monkeypatch.setattr(
+        mdp,
+        "mario_commanded_foot_pose_reward",
+        lambda *a, **k: torch.tensor([0.0, 1.0]),
+    )
+    score = mdp.mario_requested_button_reward(env, foot_pose_params={})
+    assert score.tolist() == [0.0, 1.0]
+
+
 def test_unloaded_switch_sag_has_zero_progress(monkeypatch):
     monkeypatch.setattr(mdp, "mario_nes_joint_state", lambda *a: torch.full((2, 6), .000082))
     assert not mdp.mario_nes_progress(SimpleNamespace()).any()
@@ -95,7 +124,7 @@ def test_active_success_excludes_neutral_and_requires_complete_combos(monkeypatc
     assert mdp.mario_active_success_rate(env, combinations_only=True).tolist() == [0., 0., 0.]
 
 
-def test_foot_targets_match_actual_xml_key_centers():
+def test_foot_targets_are_measured_rocker_poses_inside_xml_key_centers():
     import mujoco
     from pathlib import Path
 
@@ -103,16 +132,18 @@ def test_foot_targets_match_actual_xml_key_centers():
         Path(__file__).parents[1] / "src/mjlab_microduck/robot/microduck/controller_nes.xml"))
     cfg = make_microduck_mario_env_cfg()
     p = cfg.rewards["commanded_foot_pose"].params
-    assert model.body("dpad_left_key").pos[0] == pytest.approx(
-        p["left_neutral_x"] - p["lateral_offset"]
-    )
-    assert model.body("dpad_right_key").pos[0] == pytest.approx(
-        p["left_neutral_x"] + p["lateral_offset"]
-    )
+    left_target = p["left_neutral_x"] - p["lateral_offset"]
+    right_target = p["left_neutral_x"] + p["lateral_offset"]
+    a_target = p["right_neutral_x"] + p["position_offset"]
+    assert left_target == pytest.approx(-0.018)
+    assert right_target == pytest.approx(0.003)
+    assert a_target == pytest.approx(0.012)
+    assert p["target_tilt"] == pytest.approx(torch.deg2rad(torch.tensor(6.0)).item())
+    assert abs(left_target) < abs(model.body("dpad_left_key").pos[0])
+    assert abs(right_target) < abs(model.body("dpad_right_key").pos[0])
     assert model.body("dpad_left_key").pos[1] == pytest.approx(0.0)
     assert model.body("dpad_right_key").pos[1] == pytest.approx(0.0)
-    assert model.body("button_a_key").pos[0] == pytest.approx(p["position_offset"])
-    assert model.body("button_b_key").pos[0] == pytest.approx(-p["position_offset"])
+    assert abs(a_target) < abs(model.body("button_a_key").pos[0])
     assert cfg.rewards["commanded_foot_pose"].weight == 0
     assert cfg.rewards["commanded_foot_clearance"].weight == 0
     assert cfg.rewards["pose"].weight == 0

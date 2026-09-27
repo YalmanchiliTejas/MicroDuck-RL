@@ -69,6 +69,64 @@ def loaded_keys(left=0, right=0):
     return np.array([-data.qpos[model.jnt_qposadr[model.joint(name).id]] for name in names])
 
 
+def loaded_rocker_pose(left=0, right=0):
+    """Settle the measured planted rocker targets under realistic sole load."""
+
+    controller = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
+    platform_names = ("dpad_platform", "ab_platform")
+    positions = [controller.body(name).pos.copy() for name in platform_names]
+    left_x = {-1: -0.018, 0: -0.0075, 1: 0.003}[left]
+    right_x = {0: 0.0, 1: 0.012}[right]
+    pitches = (left * 6.0, right * 6.0)
+    positions[0][0] += left_x
+    positions[1][0] += right_x
+    for position in positions:
+        position[2] = 0.035
+
+    meshes, bodies = [], []
+    for index, side in enumerate(("left", "right")):
+        meshes.append(f'<mesh name="{side}" vertex="{sole_vertices(side)}"/>')
+        roll = -5.0 if side == "left" else 5.0
+        quat_xyzw = Rotation.from_euler(
+            "xy", (roll, pitches[index]), degrees=True
+        ).as_quat()
+        quat = " ".join(map(str, np.roll(quat_xyzw, 1)))
+        pos = " ".join(map(str, positions[index]))
+        bodies.append(f'''<body name="{side}_probe" pos="{pos}" quat="{quat}">
+          <joint name="passive_{side}_probe" type="slide" axis="0 0 1" damping="2"/>
+          <inertial pos="0 0 0" mass="0.30" diaginertia="0.001 0.001 0.001"/>
+          <geom type="mesh" mesh="{side}" friction="1.6 0.02 0.002"/>
+        </body>''')
+    xml = f'''<mujoco><include file="{ROBOT_DIR / 'controller_nes.xml'}"/>
+      <option timestep="0.001"/>
+      <asset>{''.join(meshes)}</asset><worldbody>{''.join(bodies)}</worldbody>
+    </mujoco>'''
+    model = mujoco.MjModel.from_xml_string(xml)
+    data = mujoco.MjData(model)
+    for _ in range(2_000):
+        mujoco.mj_step(model, data)
+    names = (
+        "passive_dpad_left", "passive_dpad_right",
+        "passive_button_a", "passive_button_b",
+    )
+    return np.array([
+        -data.qpos[model.jnt_qposadr[model.joint(name).id]] for name in names
+    ])
+
+
+@pytest.mark.parametrize("left,right,expected", [
+    (0, 0, []), (-1, 0, [0]), (1, 0, [1]), (0, 1, [2]),
+    (-1, 1, [0, 2]), (1, 1, [1, 2]),
+])
+def test_measured_rocker_poses_press_only_requested_keys(left, right, expected):
+    travel = loaded_rocker_pose(left, right)
+    for index in range(4):
+        if index in expected:
+            assert travel[index] >= 0.0007, travel * 1000
+        else:
+            assert travel[index] < 0.0003, travel * 1000
+
+
 @pytest.mark.parametrize("left,right,expected", [
     (0, 0, []), (-1, 0, [0]), (1, 0, [1]), (0, 1, [2]), (0, -1, [3]),
     (-1, 1, [0, 2]), (1, 1, [1, 2]), (-1, -1, [0, 3]), (1, -1, [1, 3]),

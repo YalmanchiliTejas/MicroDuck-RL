@@ -109,20 +109,23 @@ def test_task_reward_dominates_idle_posture_credit():
     assert rewards["foot_anchor"].weight < 0.0
     assert rewards["foot_planar_speed"].weight < 0.0
     assert rewards["commanded_foot_clearance"].weight == 0.0
-    assert rewards["commanded_foot_clearance"].params["lift_height"] == (
-        pytest.approx(0.003)
-    )
+    assert rewards["commanded_foot_clearance"].params["lift_height"] == 0.0
     assert (
         rewards["foot_contact_loss"].func
-        is microduck_mdp.mario_transition_contact_loss_cost
+        is microduck_mdp.feet_contact_loss_cost
     )
     assert rewards["foot_planar_speed"].params["sensor_name"] == (
         "feet_ground_contact"
     )
     foot_pose = rewards["commanded_foot_pose"].params
-    assert foot_pose["position_offset"] == pytest.approx(0.044)
-    assert foot_pose["lateral_offset"] == pytest.approx(0.036)
-    assert foot_pose["target_tilt"] == pytest.approx(0.0)
+    assert foot_pose["position_offset"] == pytest.approx(0.012)
+    assert foot_pose["lateral_offset"] == pytest.approx(0.0105)
+    assert foot_pose["left_neutral_x"] == pytest.approx(-0.0075)
+    assert foot_pose["target_tilt"] == pytest.approx(math.radians(6.0))
+    assert rewards["requested_button"].params["foot_pose_params"] is foot_pose
+    assert rewards["foot_planar_speed"].params["transition_grace_s"] == (
+        pytest.approx(0.25)
+    )
 
 
 def test_mario_runner_reduces_entropy_pressure_for_stationary_control():
@@ -225,7 +228,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[1]["weights"][10] == 0.0
     assert stages[1]["weights"][13] == 0.0
     assert "mario_command_stage" not in play_cfg.curriculum
-    assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
+    assert play_cfg.commands["twist"].category_weights == stages[0]["weights"]
 
 
 def test_mario_balance_reward_closes_press_then_crash_loophole():
@@ -691,7 +694,9 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
         RIGHT_NEUTRAL_FOOT_X,
         RIGHT_NEUTRAL_FOOT_Y,
     )
-    assert target[0, 0].tolist() == pytest.approx([0.0, 0.0])
+    assert target[0, 0].tolist() == pytest.approx(
+        [LEFT_NEUTRAL_FOOT_X, LEFT_NEUTRAL_FOOT_Y]
+    )
     assert target[1, 0, 0] == pytest.approx(
         LEFT_NEUTRAL_FOOT_X - DPAD_POSITION_OFFSET
     )
@@ -708,6 +713,9 @@ def test_calibrated_foot_targets_drive_only_requested_mario_axes():
     )
     assert target[5, 0].tolist() == pytest.approx(target[2, 0].tolist())
     assert target[5, 1].tolist() == pytest.approx(target[3, 1].tolist())
+    assert target[1, 0, 0] == pytest.approx(-0.018)
+    assert target[2, 0, 0] == pytest.approx(0.003)
+    assert target[3, 1, 0] == pytest.approx(0.012)
     assert torch.all(torch.linalg.vector_norm(target, dim=-1) < 0.060)
 
 
@@ -732,8 +740,11 @@ def test_mario_commands_keep_trunk_centered_and_upright():
     robot = SimpleNamespace(
         data=SimpleNamespace(
             site_pos_w=torch.zeros(3, 2, 3),
-            root_link_pos_w=torch.tensor([[0.0, 0.0, 0.13]] * 3),
             root_link_quat_w=quats,
+            indexing=SimpleNamespace(root_body_id=0),
+            data=SimpleNamespace(
+                subtree_com=torch.tensor([[[0.0, 0.0, 0.13]]] * 3)
+            ),
         )
     )
     env = SimpleNamespace(
@@ -747,6 +758,52 @@ def test_mario_commands_keep_trunk_centered_and_upright():
     lean_score = microduck_mdp.mario_commanded_lean_reward(env, lean_angle=0.0)
     assert torch.allclose(trunk_score, torch.ones(3))
     assert torch.allclose(lean_score, torch.ones(3), atol=1e-6)
+
+
+def test_mario_balance_uses_whole_body_com_and_only_contacting_feet():
+    feet = torch.tensor(
+        [[[-0.02, 0.0, 0.0], [0.02, 0.0, 0.0]]] * 4
+    )
+    whole_com = torch.tensor(
+        [[[-0.02, 0.0, 0.13]], [[-0.02, 0.0, 0.13]],
+         [[0.0, 0.0, 0.13]], [[0.0, 0.0, 0.13]]]
+    )
+    robot = SimpleNamespace(
+        data=SimpleNamespace(
+            site_pos_w=feet,
+            root_link_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]] * 4),
+            indexing=SimpleNamespace(root_body_id=0),
+            data=SimpleNamespace(subtree_com=whole_com),
+        )
+    )
+    found = torch.tensor(
+        [[1.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 0.0]]
+    )
+
+    class FakeScene(dict):
+        def __init__(self):
+            super().__init__(robot=robot)
+            self.sensors = {
+                "feet": SimpleNamespace(data=SimpleNamespace(found=found))
+            }
+
+    env = SimpleNamespace(
+        scene=FakeScene(),
+        command_manager=SimpleNamespace(
+            get_command=lambda _: torch.zeros(4, 3)
+        ),
+    )
+    score = microduck_mdp.mario_commanded_trunk_offset_reward(
+        env,
+        std=0.004,
+        support_radius=0.005,
+        sensor_name="feet",
+        robot_cfg=_resolved_cfg("robot", site_ids=[0, 1]),
+    )
+    assert score[0] == pytest.approx(1.0)
+    assert score[1] < 1e-6
+    assert score[2] == pytest.approx(1.0)
+    assert score[3] == 0.0
 
 
 def test_button_reward_drops_to_zero_when_either_foot_leaves_its_pad():

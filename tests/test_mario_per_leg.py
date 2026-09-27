@@ -73,7 +73,7 @@ def test_per_leg_approach_history_is_independent_and_not_rechargeable():
     assert all(not value.any() for value in step().values())
     # Reset only one world: the other world's improvement survives.
     env.episode_length_buf[0] = 0
-    pos[:, 0, 0] += .002
+    pos[:, 0, 0] += .0005
     result = step()
     assert result["left"][0] == 0
     assert result["left"][1] > 0
@@ -169,7 +169,8 @@ def test_clearance_and_long_distance_approach_have_bounded_credit():
     pos[0, 0, 0] += .002
     assert step() > 0
     pos[0, 0, 2] += .001
-    assert step() > 0
+    # The planted rocker recipe intentionally has no lift-height objective.
+    assert step() == 0
     assert step() == 0  # hovering is not a continuing reward
     pos[0, 0, 2] -= .001
     assert step() == 0
@@ -179,7 +180,7 @@ def test_clearance_and_long_distance_approach_have_bounded_credit():
     pos[0, 0, 2] = .009
     step()
     pos[0, 0, 2] = .006
-    assert step() > 0  # lowering onto the key completes the approach
+    assert step() == 0  # vertical cycling is outside the planted recipe
     assert step() == 0
     command.zero_()
     assert step() == 0

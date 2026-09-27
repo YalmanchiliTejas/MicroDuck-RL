@@ -35,7 +35,7 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 
 EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (1.5, 2.5)
-BUTTON_TRANSITION_GRACE_S = 0.60
+BUTTON_TRANSITION_GRACE_S = 0.25
 # Legacy names are retained in reward params, but these values are now vertical
 # slider travel in metres: 0.7 mm activates, 0.3 mm releases.
 ACTIVATE_ANGLE = 0.0007
@@ -78,18 +78,19 @@ MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
 FULL_LEG_POSE_ERROR = 0.30
 MAX_LEG_POSE_ERROR = 0.80
-# Pad-local centers of the independent keys. Neutral is the fixed center
-# pedestal. The full sole must clear its edge before a key can descend.
-FOOT_POSITION_OFFSET = 0.044
-# LEFT/RIGHT use a sagittal pair under the left foot. 36 mm is the largest
-# symmetric offset verified reachable by the articulated leg with an upright
-# trunk and level sole; 44 mm remains the A/B offset under the right foot.
-DPAD_POSITION_OFFSET = 0.036
-LEFT_NEUTRAL_FOOT_X = 0.0
+# Full-sole physics probes show that the stable controller motion is a planted
+# short-shift + ankle rock, not a level-foot step onto each key center.  These
+# targets retain contact with the neutral pedestal while cleanly crossing the
+# 0.7 mm activation threshold: LEFT=-18 mm/-6 deg, RIGHT=+3 mm/+6 deg,
+# A=+12 mm/+6 deg.  Encoding the asymmetric D-pad targets as midpoint +/-
+# offset keeps the common target helper and makes LEFT<->RIGHT only 21 mm.
+FOOT_POSITION_OFFSET = 0.012
+DPAD_POSITION_OFFSET = 0.0105
+LEFT_NEUTRAL_FOOT_X = -0.0075
 LEFT_NEUTRAL_FOOT_Y = 0.0
 RIGHT_NEUTRAL_FOOT_X = 0.0
 RIGHT_NEUTRAL_FOOT_Y = 0.0
-FOOT_TARGET_TILT = 0.0
+FOOT_TARGET_TILT = math.radians(6.0)
 FOOT_POSITION_STD = 0.010
 FOOT_ANGLE_STD = math.radians(4.0)
 LEFT_NOMINAL_FOOT_ROLL = math.radians(-5.0)
@@ -198,7 +199,10 @@ def make_microduck_mario_env_cfg(play: bool = False):
     cfg.commands["twist"] = microduck_mdp.MarioNesCommandCfg(
         resampling_time_range=BUTTON_RESAMPLE_S,
         category_weights=(
-            FULL_COMMAND_WEIGHTS if play else SINGLE_BUTTON_WEIGHTS
+            # Evaluation must not silently test combinations that the stage-0
+            # checkpoint has never seen. Combo videos can opt in explicitly
+            # after the success-gated curriculum unlocks them.
+            SINGLE_BUTTON_WEIGHTS
         ),
     )
     # Head/body slots stay present in the observation but are unused here.
@@ -262,9 +266,10 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "forward_offset": COM_FORWARD_OFFSET,
             "lateral_offset": COM_LATERAL_OFFSET,
             "std": 0.008,
-            # Balance is most important during the transition. Track the live
-            # feet centroid immediately instead of leaving the dangerous first
-            # 0.6 s completely unshaped.
+            "support_radius": 0.012,
+            "sensor_name": controller_feet_contact.name,
+            # Balance is evaluated against the contact-derived support region
+            # on every step; an airborne foot never moves the target.
             "transition_grace_s": 0.0,
             "robot_cfg": SceneEntityCfg(
                 "robot", site_names=("left_foot", "right_foot")
@@ -371,6 +376,23 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "max_pose_error": MAX_LEG_POSE_ERROR,
         "require_exclusive": True,
     }
+    foot_pose_params = {
+        "command_name": "twist",
+        "position_offset": FOOT_POSITION_OFFSET,
+        # Legacy parameter name: this is now the D-pad's sagittal offset.
+        "lateral_offset": DPAD_POSITION_OFFSET,
+        "left_neutral_x": LEFT_NEUTRAL_FOOT_X,
+        "left_neutral_y": LEFT_NEUTRAL_FOOT_Y,
+        "right_neutral_x": RIGHT_NEUTRAL_FOOT_X,
+        "right_neutral_y": RIGHT_NEUTRAL_FOOT_Y,
+        "target_tilt": FOOT_TARGET_TILT,
+        "position_std": FOOT_POSITION_STD,
+        "angle_std": FOOT_ANGLE_STD,
+        "left_nominal_roll": LEFT_NOMINAL_FOOT_ROLL,
+        "right_nominal_roll": RIGHT_NOMINAL_FOOT_ROLL,
+        "robot_cfg": feet_cfg,
+        "controller_cfg": platforms_cfg,
+    }
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
         weight=BUTTON_ACTIVATION_WEIGHT,
@@ -378,6 +400,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             **anchored_button_params,
             **camera_ready_params,
             **standing_pose_params,
+            "foot_pose_params": foot_pose_params,
         },
     )
     # Keep this separate in the logs: requested_button reports physical
@@ -423,23 +446,6 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "progress_power": BUTTON_PROGRESS_POWER,
             },
         )
-    foot_pose_params = {
-        "command_name": "twist",
-        "position_offset": FOOT_POSITION_OFFSET,
-        # Legacy parameter name: this is now the D-pad's sagittal offset.
-        "lateral_offset": DPAD_POSITION_OFFSET,
-        "left_neutral_x": LEFT_NEUTRAL_FOOT_X,
-        "left_neutral_y": LEFT_NEUTRAL_FOOT_Y,
-        "right_neutral_x": RIGHT_NEUTRAL_FOOT_X,
-        "right_neutral_y": RIGHT_NEUTRAL_FOOT_Y,
-        "target_tilt": FOOT_TARGET_TILT,
-        "position_std": FOOT_POSITION_STD,
-        "angle_std": FOOT_ANGLE_STD,
-        "left_nominal_roll": LEFT_NOMINAL_FOOT_ROLL,
-        "right_nominal_roll": RIGHT_NOMINAL_FOOT_ROLL,
-        "robot_cfg": feet_cfg,
-        "controller_cfg": platforms_cfg,
-    }
     cfg.rewards["commanded_foot_pose"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_pose_reward,
         # Diagnostic only: a foot hovering over a key is not a button press.
@@ -451,7 +457,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             func=microduck_mdp.mario_foot_approach_reward,
             weight=FOOT_APPROACH_WEIGHT,
             params={"leg": leg, "contact_height": 0.006,
-                    "lift_height": 0.003, "full_lift_error": 0.005,
+                    "lift_height": 0.0, "full_lift_error": 0.005,
                     "height_scale": 0.003,
                     **{key: foot_pose_params[key] for key in (
                 "command_name", "position_offset", "lateral_offset",
@@ -474,22 +480,17 @@ def make_microduck_mario_env_cfg(play: bool = False):
             },
             # Sole sites sit ~6 mm above each platform frame at contact.
             "contact_height": 0.006,
-            "lift_height": 0.003,
+            "lift_height": 0.0,
             "full_lift_error": 0.005,
             "height_std": 0.0015,
         },
     )
-    # During the short command transition, one foot may lift for a tiny
-    # reposition while the other stays planted. Afterwards both contacts are
-    # mandatory, and button credit is gated by the same deadline.
+    # The measured rocker poses retain the center pedestal: both feet must stay
+    # supported throughout instead of learning a destabilizing swing step.
     cfg.rewards["foot_contact_loss"] = RewardTermCfg(
-        func=microduck_mdp.mario_transition_contact_loss_cost,
+        func=microduck_mdp.feet_contact_loss_cost,
         weight=-8.0,
-        params={
-            "sensor_name": controller_feet_contact.name,
-            "command_name": "twist",
-            "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
-        },
+        params={"sensor_name": controller_feet_contact.name},
     )
     cfg.rewards["foot_anchor"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_anchor_cost,
@@ -518,6 +519,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "speed_scale": 0.10,
             "max_cost": 2.0,
             "sensor_name": controller_feet_contact.name,
+            "command_name": "twist",
+            "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
             "robot_cfg": SceneEntityCfg(
                 "robot", site_names=("left_foot", "right_foot")
             ),

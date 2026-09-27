@@ -6105,8 +6105,9 @@ def mario_requested_button_reward(
     transition_grace_s: float = 0.0,
     enabled_buttons: tuple[bool, ...] | None = None,
     leg: str | None = None,
+    foot_pose_params: dict | None = None,
 ) -> torch.Tensor:
-    """Reward requested activation only with planted feet and a usable camera."""
+    """Reward a physical press only when its foot reaches the rocker pose."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     enabled = _mario_enabled_button_mask(requested, enabled_buttons)
@@ -6164,6 +6165,11 @@ def mario_requested_button_reward(
             max_error=max_pose_error,
         )
         score = score * torch.sqrt(pose_score.clamp(min=0.0))
+    if foot_pose_params is not None:
+        foot_pose_score = mario_commanded_foot_pose_reward(
+            env, leg=leg, **foot_pose_params
+        )
+        score = score * torch.sqrt(foot_pose_score.clamp(min=0.0))
     if transition_grace_s > 0.0:
         score = score * mario_command_ready(
             env, command_name, transition_grace_s
@@ -6765,6 +6771,7 @@ def mario_commanded_foot_pose_reward(
     left_neutral_y: float = 0.0,
     right_neutral_x: float = 0.0,
     right_neutral_y: float = 0.0,
+    leg: str | None = None,
 ) -> torch.Tensor:
     """Track command-specific foot position and sole orientation on each pad.
 
@@ -6829,6 +6836,10 @@ def mario_commanded_foot_pose_reward(
     active = torch.stack(
         ((dpad_x.abs() + dpad_y.abs()) > 0.5, ab.abs() > 0.5), dim=-1
     )
+    if leg not in (None, "left", "right"):
+        raise ValueError("leg must be left, right, or None")
+    if leg is not None:
+        active = active & active.new_tensor((leg == "left", leg == "right"))
     neutral = target_xy.new_tensor(
         ((left_neutral_x, left_neutral_y),
          (right_neutral_x, right_neutral_y))
@@ -6857,6 +6868,8 @@ def mario_foot_planar_speed_cost(
     max_cost: float = 2.0,
     sensor_name: str = "feet_ground_contact",
     robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
+    command_name: str | None = None,
+    transition_grace_s: float = 0.0,
 ) -> torch.Tensor:
     """Cost planar motion only while a sole touches the controller.
 
@@ -6874,7 +6887,12 @@ def mario_foot_planar_speed_cost(
         found = found.any(dim=-1)
     planted = (found > 0).to(dtype=speed.dtype)
     slip = torch.clamp(speed / max(speed_scale, 1e-6), max=max_cost) * planted
-    return slip.mean(dim=-1)
+    cost = slip.mean(dim=-1)
+    if command_name is not None and transition_grace_s > 0.0:
+        cost = cost * mario_command_ready(
+            env, command_name, transition_grace_s
+        )
+    return cost
 
 
 def mario_commanded_trunk_offset_reward(
@@ -6883,14 +6901,16 @@ def mario_commanded_trunk_offset_reward(
     forward_offset: float = 0.012,
     lateral_offset: float = 0.010,
     std: float = 0.008,
+    support_radius: float = 0.012,
+    sensor_name: str | None = None,
     transition_grace_s: float = 0.0,
     robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
 ) -> torch.Tensor:
-    """Track a command-conditioned trunk offset relative to planted feet.
+    """Keep the whole-robot CoM over the feet that actually support it.
 
     NES ``UP/DOWN`` command forward/backward trunk motion. ``RIGHT/LEFT`` command
-    right/left trunk motion.  In the robot frame +Y is left, hence the minus sign
-    mapping positive d-pad X (RIGHT) to a negative lateral offset.
+    right/left CoM motion. The default zero offsets keep stationary controller
+    commands centered. An airborne foot never moves the support target.
     """
 
     robot: Entity = env.scene[robot_cfg.name]
@@ -6898,11 +6918,11 @@ def mario_commanded_trunk_offset_reward(
     target_x = forward_offset * command[:, 1]
     target_y = -lateral_offset * command[:, 0]
 
-    feet_centroid = robot.data.site_pos_w[:, robot_cfg.site_ids, :2].mean(dim=1)
-    # Use the trunk frame, not root_com_pos_w: the trunk link's own inertial
-    # CoM is 22.6 mm behind its frame and is not the whole-robot CoM.  Using it
-    # would make neutral standing miss a zero-offset target by almost 3 stds.
-    delta_w = robot.data.root_link_pos_w[:, :2] - feet_centroid
+    feet = robot.data.site_pos_w[:, robot_cfg.site_ids, :2]
+    # subtree_com at the robot root includes every articulated body. In
+    # contrast, root_com_pos_w is only the trunk link's inertial CoM.
+    root_body_id = robot.data.indexing.root_body_id
+    com_w = robot.data.data.subtree_com[:, root_body_id, :2]
     quat = robot.data.root_link_quat_w
     qw, qx, qy, qz = quat[:, 0], quat[:, 1], quat[:, 2], quat[:, 3]
     yaw = torch.atan2(
@@ -6910,14 +6930,40 @@ def mario_commanded_trunk_offset_reward(
         1.0 - 2.0 * (qy * qy + qz * qz),
     )
     cos_yaw, sin_yaw = torch.cos(yaw), torch.sin(yaw)
-    x_body = cos_yaw * delta_w[:, 0] + sin_yaw * delta_w[:, 1]
-    y_body = -sin_yaw * delta_w[:, 0] + cos_yaw * delta_w[:, 1]
+    target_w = torch.stack(
+        (
+            cos_yaw * target_x - sin_yaw * target_y,
+            sin_yaw * target_x + cos_yaw * target_y,
+        ),
+        dim=-1,
+    )
+    query = com_w - target_w
 
-    x_score = torch.exp(-((x_body - target_x) / std) ** 2)
-    y_score = torch.exp(-((y_body - target_y) / std) ** 2)
-    # A product prevents the policy from collecting half-credit by matching
-    # the easy neutral axis while ignoring the requested directional shift.
-    score = x_score * y_score
+    if sensor_name is None:
+        contact = torch.ones(
+            feet.shape[:2], dtype=torch.bool, device=feet.device
+        )
+    else:
+        found = env.scene.sensors[sensor_name].data.found
+        if found.dim() == 3:
+            found = found.any(dim=-1)
+        contact = found > 0
+
+    a, b = feet[:, 0], feet[:, 1]
+    segment = b - a
+    fraction = ((query - a) * segment).sum(dim=-1) / segment.square().sum(
+        dim=-1
+    ).clamp(min=1e-8)
+    closest_both = a + fraction.clamp(0.0, 1.0).unsqueeze(-1) * segment
+    contact_count = contact.sum(dim=-1)
+    closest_single = torch.where(contact[:, :1], a, b)
+    closest = torch.where(
+        (contact_count == 2).unsqueeze(-1), closest_both, closest_single
+    )
+    distance = torch.linalg.vector_norm(query - closest, dim=-1)
+    error = (distance - support_radius).clamp(min=0.0)
+    score = torch.exp(-torch.square(error / std))
+    score = score * (contact_count > 0).to(dtype=score.dtype)
     if transition_grace_s > 0.0:
         score = score * mario_command_ready(
             env, command_name, transition_grace_s
@@ -7075,6 +7121,17 @@ def mario_clean_button_success(
             max_error=reward_params.get("max_pose_error", 0.40),
         )
         success &= pose_score >= readiness_threshold
+
+    foot_pose_params = reward_params.get("foot_pose_params")
+    if foot_pose_params is not None:
+        foot_pose_score = mario_commanded_foot_pose_reward(
+            env, leg=reward_params.get("leg"), **foot_pose_params
+        )
+        # Neutral release has no active foot target; active commands must be
+        # mechanically close to the measured rocker pose.
+        success &= (requested_count == 0.0) | (
+            foot_pose_score >= readiness_threshold
+        )
 
     transition_grace_s = reward_params.get("transition_grace_s", 0.0)
     if transition_grace_s > 0.0:
