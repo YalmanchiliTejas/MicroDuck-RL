@@ -247,7 +247,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[2]["weights"][10] == 0.0
     assert stages[2]["weights"][13] == 0.0
     assert curriculum.params["discovery_button_index"] == 2
-    assert curriculum.params["discovery_unlock_success"] == pytest.approx(0.50)
+    assert curriculum.params["discovery_unlock_success"] == pytest.approx(0.25)
     assert train_cfg.commands["twist"].category_weights == stages[0]["weights"]
     assert "mario_command_stage" not in play_cfg.curriculum
     assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]

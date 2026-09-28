@@ -717,7 +717,13 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "command_name": "twist",
                 "combo_unlock_success": 0.65,
                 "discovery_button_index": 2,
-                "discovery_unlock_success": 0.50,
+                # The controller-alignment recovery run converged to a real,
+                # repeatable LEFT press rate of about 26% (from effectively
+                # zero) while remaining in the 40%-LEFT discovery mixture.
+                # Advance at 25% so RIGHT and JUMP can be reconsolidated under
+                # balanced singles.  Combinations retain their independent
+                # 65% gate below and therefore cannot unlock prematurely.
+                "discovery_unlock_success": 0.25,
                 "weight_stages": [
                     {"step": 0, "weights": LEFT_DISCOVERY_WEIGHTS},
                     {"step": 0, "weights": BALANCED_SINGLE_BUTTON_WEIGHTS},
