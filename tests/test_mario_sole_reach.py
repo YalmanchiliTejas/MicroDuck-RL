@@ -173,9 +173,14 @@ def test_articulated_left_leg_reaches_sagittal_dpad_with_level_sole(key_name):
     home_pos = data.site_xpos[site_id].copy()
     home_mat = data.site_xmat[site_id].reshape(3, 3).copy()
     platform_x = data.xpos[model.body("dpad_platform").id, 0]
-    assert abs(home_pos[0] - platform_x) < 0.0005
+    # HOME must be the midpoint of the calibrated planted-rocker targets
+    # (-18 mm LEFT and +3 mm RIGHT), not the visual center of the D-pad.
+    assert home_pos[0] - platform_x == pytest.approx(-0.0075, abs=0.0005)
     target = home_pos.copy()
-    target[0] += model.body(key_name).pos[0]
+    target[0] = platform_x + {
+        "dpad_left_key": -0.018,
+        "dpad_right_key": 0.003,
+    }[key_name]
 
     joint_names = ("left_hip_pitch", "left_knee", "left_ankle")
     qpos_adrs = [model.joint(name).qposadr[0] for name in joint_names]

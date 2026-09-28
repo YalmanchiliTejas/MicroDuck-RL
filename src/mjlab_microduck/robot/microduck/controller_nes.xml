@@ -17,7 +17,11 @@
 
     <worldbody>
       <body name="controller_root">
-        <geom name="dpad_housing" type="box" pos="0 0.043 0.004"
+        <!-- The D-pad is 7.5 mm forward of the old centered placement.  This
+             puts the HOME left sole at the midpoint of the calibrated planted
+             rocker targets (-18 mm LEFT, +3 mm RIGHT) instead of leaving
+             LEFT six times farther away than RIGHT. -->
+        <geom name="dpad_housing" type="box" pos="0.0075 0.043 0.004"
               size="0.045 0.027 0.004" rgba="0.025 0.030 0.045 1"
               contype="0" conaffinity="0"/>
         <geom name="ab_housing" type="box" pos="-0.006 -0.041 0.004"
@@ -25,7 +29,7 @@
               contype="0" conaffinity="0"/>
 
         <!-- Fixed frames double as per-foot anchor references. -->
-        <body name="dpad_platform" pos="0 0.043 0.007">
+        <body name="dpad_platform" pos="0.0075 0.043 0.007">
             <!-- Neutral rest is 2 mm above the unpressed keys. Key spacing
                  clears the actual 54 x 41 mm sole; point-load tests alone
                  cannot detect a sole bridging the rest and blocking travel. -->
