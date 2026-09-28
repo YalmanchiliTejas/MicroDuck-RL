@@ -139,8 +139,8 @@ def test_task_reward_dominates_idle_posture_credit():
 def test_mario_runner_reduces_entropy_pressure_for_stationary_control():
     from mjlab_microduck.tasks.microduck_mario_env_cfg import MicroduckMarioRlCfg
 
-    assert MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] == pytest.approx(0.10)
-    assert MicroduckMarioRlCfg.algorithm.entropy_coef == pytest.approx(0.0)
+    assert MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] == pytest.approx(0.20)
+    assert MicroduckMarioRlCfg.algorithm.entropy_coef == pytest.approx(0.002)
 
 
 def test_mario_action_smoothing_does_not_tighten_on_a_clock():
@@ -247,7 +247,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[2]["weights"][10] == 0.0
     assert stages[2]["weights"][13] == 0.0
     assert curriculum.params["discovery_button_index"] == 2
-    assert curriculum.params["discovery_unlock_success"] == pytest.approx(0.50)
+    assert curriculum.params["discovery_unlock_success"] == pytest.approx(0.25)
     assert train_cfg.commands["twist"].category_weights == stages[0]["weights"]
     assert "mario_command_stage" not in play_cfg.curriculum
     assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]

@@ -717,13 +717,10 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "command_name": "twist",
                 "combo_unlock_success": 0.65,
                 "discovery_button_index": 2,
-                # Training success is measured under sampled PPO actions,
-                # whereas videos and the deployed ONNX execute the policy
-                # mean.  A 25% gate promoted a policy whose exploration noise
-                # occasionally pressed LEFT while its deterministic mean did
-                # not move the foot.  Require substantial consolidation
-                # before returning to balanced single-button sampling.
-                "discovery_unlock_success": 0.50,
+                # Once LEFT reaches the demonstrated recovery level, return
+                # to balanced single-button sampling so RIGHT and JUMP keep
+                # receiving enough experience to improve with it.
+                "discovery_unlock_success": 0.25,
                 "weight_stages": [
                     {"step": 0, "weights": LEFT_DISCOVERY_WEIGHTS},
                     {"step": 0, "weights": BALANCED_SINGLE_BUTTON_WEIGHTS},
@@ -743,12 +740,11 @@ MicroduckMarioRlCfg = deepcopy(MicroduckRlCfg)
 MicroduckMarioRlCfg.experiment_name = "mario_nes_controller"
 MicroduckMarioRlCfg.run_name = "mario_nes_controller"
 MicroduckMarioRlCfg.max_iterations = 5_000
-# This run starts from a random policy.  Keep enough spread to discover the
-# short rocker motion without repeating the balance-breaking std=0.20 startup.
-MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] = 0.10
-# Deployment and checkpoint videos execute the deterministic policy mean.
-# An entropy bonus let sampled actions collect occasional button successes
-# while the mean stayed idle, making training logs look better than deployment.
-# PPO still samples from its learned distribution with this coefficient at
-# zero; it simply has no incentive to preserve useless variance.
-MicroduckMarioRlCfg.algorithm.entropy_coef = 0.0
+# A fresh policy needs enough action spread to discover the short rocker
+# motion.  Starting at 0.10 with no entropy pressure collapsed to std=0.02 and
+# the safe stand-still solution before any active button skill was discovered.
+MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] = 0.20
+# Keep modest exploration pressure throughout this run.  The previous 0.002
+# setting retained useful button discovery without the destructive variance
+# produced by the shared walking recipe's much larger entropy coefficient.
+MicroduckMarioRlCfg.algorithm.entropy_coef = 0.002
