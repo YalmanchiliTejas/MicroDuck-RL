@@ -149,6 +149,14 @@ def test_mario_action_smoothing_does_not_tighten_on_a_clock():
     assert [stage["weight"] for stage in stages] == [-0.02]
 
 
+def test_mario_com_randomization_stays_at_five_mm():
+    curricula = make_microduck_mario_env_cfg().curriculum
+    for name in ("com_range", "head_com_range"):
+        assert curricula[name].params["range_stages"] == [
+            {"step": 0, "range": 0.005},
+        ]
+
+
 def test_mario_angular_momentum_is_normalized_to_robot_scale():
     momentum = torch.tensor([[0.006, 0.008, 0.0], [0.0, 0.0, 0.020]])
     sensor = SimpleNamespace(data=momentum)

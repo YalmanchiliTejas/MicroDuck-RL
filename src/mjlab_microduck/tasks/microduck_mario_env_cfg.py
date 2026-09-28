@@ -641,6 +641,17 @@ def make_microduck_mario_env_cfg(play: bool = False):
         {"step": 0, "weight": DISCOVERY_ACTION_RATE_WEIGHT},
     ]
 
+    # The shared walking recipe expands trunk/head CoM randomization at
+    # iterations 1000 and 1500.  That is useful for locomotion robustness, but
+    # the iteration-1000 jump from +/-5 mm to +/-10 mm coincided with a sharp
+    # loss of commanded-foot-pose and clean-button performance in this precise
+    # planted-foot task.  Keep Mario at +/-5 mm until the manipulation skill is
+    # consolidated; do not weaken the shared walking curriculum globally.
+    for name in ("com_range", "head_com_range"):
+        cfg.curriculum[name].params["range_stages"] = [
+            {"step": 0, "range": 0.005},
+        ]
+
     # Remove curricula that reference deleted velocity/head/body command or
     # reward terms. Retain action smoothing and sim2real DR curricula.
     for name in (

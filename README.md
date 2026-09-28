@@ -183,12 +183,16 @@ critic, optimizer, exploration standard deviation, and all command-slot
 semantics; full `--resume` from a velocity checkpoint is incompatible with
 this task.
 
-After checkpoints exist, render a deterministic six-second rollout from every
-saved Mario-controller checkpoint in a separate GPU job:
+After checkpoints exist, render a deterministic 12-second rollout from every
+saved Mario-controller checkpoint in a separate GPU job. This covers roughly
+six command windows without the cost of the previous 80-second diagnostic:
 
 ```bash
 MARIO_CONTROLLER_RUN_TAG=nes-v3 ./slurm_mario_controller_videos.sh
 ```
+
+Override the 600-frame default when needed with `MARIO_VIDEO_LENGTH` (the
+controller runs at 50 Hz).
 
 Videos are written beneath
 `~/scratch/microduck-rl/mario-nes-controller-nes-v3/videos/checkpoints/`.

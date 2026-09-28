@@ -45,10 +45,40 @@ def test_overlay_request_rerenders_legacy_unannotated_video(tmp_path):
     marker = watcher.completion_marker(tmp_path, 250)
     marker.parent.mkdir(parents=True)
     marker.write_text(json.dumps({"iteration": 250}))
-    args = type("Args", (), {"video_dir": tmp_path, "video_debug_overlay": True})()
+    args = type(
+        "Args",
+        (),
+        {
+            "video_dir": tmp_path,
+            "video_debug_overlay": True,
+            "video_length": 600,
+        },
+    )()
     assert not watcher.recording_is_complete(args, 250)
-    marker.write_text(json.dumps({"video_debug_overlay": True}))
+    marker.write_text(json.dumps({
+        "video_debug_overlay": True,
+        "video_length": 600,
+    }))
     assert watcher.recording_is_complete(args, 250)
+
+
+def test_changed_video_length_rerenders_existing_checkpoint(tmp_path):
+    marker = watcher.completion_marker(tmp_path, 250)
+    marker.parent.mkdir(parents=True)
+    marker.write_text(json.dumps({
+        "video_debug_overlay": True,
+        "video_length": 300,
+    }))
+    args = type(
+        "Args",
+        (),
+        {
+            "video_dir": tmp_path,
+            "video_debug_overlay": True,
+            "video_length": 600,
+        },
+    )()
+    assert not watcher.recording_is_complete(args, 250)
 
 
 def test_default_video_covers_full_six_second_cycle(tmp_path, monkeypatch):

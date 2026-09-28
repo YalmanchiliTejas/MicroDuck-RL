@@ -47,19 +47,24 @@ def completion_marker(video_root: Path, iteration: int) -> Path:
 
 
 def recording_is_complete(args: argparse.Namespace, iteration: int) -> bool:
-    """Return whether the existing recording has the requested overlay mode."""
+    """Return whether the existing recording matches the requested settings."""
     marker = completion_marker(args.video_dir, iteration)
     if not marker.exists():
         return False
-    if not args.video_debug_overlay:
-        return True
     try:
         metadata = json.loads(marker.read_text())
     except (json.JSONDecodeError, OSError):
         return False
+    # A changed duration is a changed diagnostic.  Do not silently reuse an
+    # older six-second clip when the caller now requests a longer rollout.
+    if metadata.get("video_length") != args.video_length:
+        return False
     # Old markers predate overlays. Force a one-time rerender when the caller
     # asks for diagnostics instead of silently accepting the unannotated MP4.
-    return metadata.get("video_debug_overlay") is True
+    return (
+        not args.video_debug_overlay
+        or metadata.get("video_debug_overlay") is True
+    )
 
 
 def record_checkpoint(args: argparse.Namespace, checkpoint: Path, iteration: int) -> None:
