@@ -51,6 +51,10 @@ LEG_BUTTON_ACTIVATION_WEIGHT = 2.0
 BUTTON_PROGRESS_WEIGHT = 2.0
 BUTTON_PROGRESS_POWER = 0.5
 FOOT_APPROACH_WEIGHT = 1.0
+# LEFT remained completely motionless after RIGHT and JUMP had converged. This
+# bounded potential reward supplies pose-discovery credit without paying for a
+# held hover or increasing the value of the already-learned directions.
+LEFT_POSE_PROGRESS_WEIGHT = 2.0
 DISCOVERY_ACTION_RATE_WEIGHT = -0.02
 ALIVE_WEIGHT = 1.0
 # RewardManager multiplies every term by step_dt=0.02. This therefore produces
@@ -101,10 +105,19 @@ RIGHT_NOMINAL_FOOT_ROLL = math.radians(5.0)
 # when pressed accidentally, but it is not sampled by the current curriculum.
 # Table order: neutral, L, R, U, D, A, B, A+B,
 # L+A, L+B, L+A+B, R+A, R+B, R+A+B.
-SINGLE_BUTTON_WEIGHTS = (
+BALANCED_SINGLE_BUTTON_WEIGHTS = (
     0.25, 0.25, 0.25, 0, 0, 0.25, 0,
     0, 0, 0, 0, 0, 0, 0,
 )
+# Recovery distribution for the observed model-2000 failure: RIGHT and A were
+# reliable while LEFT produced no visible foot motion or switch travel. Keep
+# every learned category alive, but devote twice as many samples to LEFT until
+# its own clean-success metric reaches the curriculum threshold.
+LEFT_DISCOVERY_WEIGHTS = (
+    0.20, 0.40, 0.20, 0, 0, 0.20, 0,
+    0, 0, 0, 0, 0, 0, 0,
+)
+SINGLE_BUTTON_WEIGHTS = BALANCED_SINGLE_BUTTON_WEIGHTS
 TWO_BUTTON_WEIGHTS = (
     0.15, 0.15, 0.15, 0, 0, 0.15, 0,
     0, 0.20, 0, 0, 0.20, 0, 0,
@@ -202,7 +215,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             # Evaluation must not silently test combinations that the stage-0
             # checkpoint has never seen. Combo videos can opt in explicitly
             # after the success-gated curriculum unlocks them.
-            SINGLE_BUTTON_WEIGHTS
+            SINGLE_BUTTON_WEIGHTS if play else LEFT_DISCOVERY_WEIGHTS
         ),
     )
     # Head/body slots stay present in the observation but are unused here.
@@ -473,6 +486,15 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "right_neutral_y", "robot_cfg", "controller_cfg",
             )}},
         )
+    cfg.rewards["dpad_left_pose_progress"] = RewardTermCfg(
+        func=microduck_mdp.mario_foot_pose_approach_reward,
+        weight=LEFT_POSE_PROGRESS_WEIGHT,
+        params={
+            "button_index": 2,
+            "leg": "left",
+            **foot_pose_params,
+        },
+    )
     cfg.rewards["commanded_foot_clearance"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_clearance_reward,
         weight=0.0,
@@ -602,6 +624,18 @@ def make_microduck_mario_env_cfg(play: bool = False):
             func=microduck_mdp.mario_requested_button_reward,
             params={"leg": leg, **cfg.metrics["requested_button_clean"].params},
         )
+    for name, button_index in (
+        ("dpad_left_success", 2),
+        ("dpad_right_success", 3),
+        ("jump_success", 4),
+    ):
+        cfg.metrics[name] = MetricsTermCfg(
+            func=microduck_mdp.mario_active_success_rate,
+            params={
+                "button_index": button_index,
+                **cfg.metrics["requested_button_success"].params,
+            },
+        )
     cfg.metrics["feet_anchored"] = MetricsTermCfg(
         func=microduck_mdp.mario_feet_anchored,
         params={
@@ -668,8 +702,11 @@ def make_microduck_mario_env_cfg(play: bool = False):
             params={
                 "command_name": "twist",
                 "combo_unlock_success": 0.65,
+                "discovery_button_index": 2,
+                "discovery_unlock_success": 0.50,
                 "weight_stages": [
-                    {"step": 0, "weights": SINGLE_BUTTON_WEIGHTS},
+                    {"step": 0, "weights": LEFT_DISCOVERY_WEIGHTS},
+                    {"step": 0, "weights": BALANCED_SINGLE_BUTTON_WEIGHTS},
                     {"step": 2_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
                 ],
             },

@@ -139,6 +139,17 @@ def test_physical_press_rewards_outweigh_approach_shaping():
         )
         assert physical > rewards[f"{leg}_foot_approach"].weight
         assert rewards[f"{leg}_button_progress"].params["progress_power"] < 1.0
+    left_pose = rewards["dpad_left_pose_progress"]
+    assert left_pose.weight == pytest.approx(2.0)
+    assert left_pose.params["button_index"] == 2
+    assert left_pose.params["leg"] == "left"
+
+
+def test_direction_metrics_separate_left_right_and_jump():
+    metrics = make_microduck_mario_env_cfg().metrics
+    assert metrics["dpad_left_success"].params["button_index"] == 2
+    assert metrics["dpad_right_success"].params["button_index"] == 3
+    assert metrics["jump_success"].params["button_index"] == 4
 
 
 def test_clearance_and_long_distance_approach_have_bounded_credit():

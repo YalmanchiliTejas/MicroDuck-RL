@@ -5833,35 +5833,76 @@ def mario_command_category_curriculum(
     command_name: str,
     weight_stages: list[dict],
     combo_unlock_success: float = 0.65,
+    discovery_button_index: int | None = None,
+    discovery_unlock_success: float = 0.50,
 ) -> torch.Tensor:
-    """Increase the combination fraction after active-request competence.
+    """Advance button sampling only after the currently missing skill works.
 
     Each stage is ``{"step": int, "weights": tuple[float, ...]}`` in the
-    command table order.  The live command term is mutated so subsequent
-    resamples immediately use the selected distribution. The combo stage is
-    never forced merely because the clock advanced: active
-    requests must already be clean, planted, and camera-ready.
+    command table order. With ``discovery_button_index`` unset, the historical
+    two-stage singles -> combinations behavior is retained. When it is set,
+    stage 0 is a targeted discovery distribution, stage 1 is balanced singles,
+    and stage 2 is combinations. The discovery stage unlocks only when that
+    exact physical button is clean, planted, camera-ready, and command-ready.
+    The combination stage retains its separate clock and competence gates.
     """
 
     del env_ids
     if not 0.0 < combo_unlock_success <= 1.0:
         raise ValueError("combo_unlock_success must be in (0, 1]")
-    stage_index = 0
-    for index, stage in enumerate(weight_stages):
-        if env.common_step_counter >= stage["step"]:
-            stage_index = index
+    if not 0.0 < discovery_unlock_success <= 1.0:
+        raise ValueError("discovery_unlock_success must be in (0, 1]")
+    if discovery_button_index is not None:
+        if not 0 <= discovery_button_index < 6:
+            raise ValueError("discovery_button_index must be in [0, 5]")
+        if len(weight_stages) != 3:
+            raise ValueError(
+                "targeted Mario curriculum requires discovery, balanced, and combo stages"
+            )
+        balanced_stage, combo_stage = 1, 2
+    else:
+        if len(weight_stages) != 2:
+            raise ValueError("Mario curriculum requires singles and combo stages")
+        balanced_stage, combo_stage = 0, 1
+
     term = env.command_manager.get_term(command_name)
-    if stage_index > 0:
+    metrics = env.metrics_manager
+    success_idx = metrics.active_terms.index("requested_button_success")
+    ready_idx = metrics.active_terms.index("command_ready")
+    command = env.command_manager.get_command(command_name)
+
+    if discovery_button_index is not None and not getattr(
+        term, "_mario_discovery_unlocked", False
+    ):
+        last_check = getattr(term, "_mario_discovery_last_check_step", -250)
+        if env.common_step_counter - last_check >= 250:
+            term._mario_discovery_last_check_step = env.common_step_counter
+            requested = mario_nes_requested_buttons(env, command_name)
+            valid = (
+                (requested[:, discovery_button_index] > 0.5)
+                & (metrics._step_values[:, ready_idx] > 0.5)
+            )
+            if valid.any():
+                success = metrics._step_values[valid, success_idx].mean()
+                if success >= discovery_unlock_success:
+                    term._mario_discovery_unlocked = True
+
+    stage_index = (
+        balanced_stage
+        if discovery_button_index is None
+        or getattr(term, "_mario_discovery_unlocked", False)
+        else 0
+    )
+    if (
+        stage_index == balanced_stage
+        and env.common_step_counter >= weight_stages[combo_stage]["step"]
+    ):
         last_check = getattr(term, "_mario_combo_last_check_step", -250)
         if (
             not getattr(term, "_mario_combo_unlocked", False)
             and env.common_step_counter - last_check >= 250
         ):
             term._mario_combo_last_check_step = env.common_step_counter
-            metrics = env.metrics_manager
-            success_idx = metrics.active_terms.index("requested_button_success")
-            ready_idx = metrics.active_terms.index("command_ready")
-            command = env.command_manager.get_command(command_name)
             # Neutral success cannot unlock combinations; neither can command
             # transition frames, which still reflect the previous request.
             active = (command[:, 0] != 0.0) | (command[:, 1] != 0.0) | (
@@ -5872,7 +5913,8 @@ def mario_command_category_curriculum(
                 success = metrics._step_values[valid, success_idx].mean()
                 if success >= combo_unlock_success:
                     term._mario_combo_unlocked = True
-        stage_index = int(getattr(term, "_mario_combo_unlocked", False))
+        if getattr(term, "_mario_combo_unlocked", False):
+            stage_index = combo_stage
     weights = tuple(weight_stages[stage_index]["weights"])
     if len(weights) != len(term.cfg.category_weights):
         raise ValueError("Mario command curriculum weight count is invalid")
@@ -6707,6 +6749,62 @@ def mario_foot_approach_reward(
     return (rate * active).sum(dim=-1) / active.sum(dim=-1).clamp(min=1)
 
 
+def mario_foot_pose_approach_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    button_index: int,
+    leg: str,
+    **foot_pose_params,
+) -> torch.Tensor:
+    """Pay only new best progress toward one button's complete rocker pose.
+
+    The activation reward is deliberately multiplicative: a switch press is
+    useful only at the calibrated foot pose. That creates a discovery dead zone
+    when an unlearned direction has neither switch travel nor pose accuracy.
+    This potential term bridges that zone with bounded, one-time progress in
+    both position and orientation. Holding, retreating, and cycling back to a
+    previous best all pay zero.
+    """
+
+    if not 0 <= button_index < 6:
+        raise ValueError("button_index must be in [0, 5]")
+    if leg not in ("left", "right"):
+        raise ValueError("leg must be left or right")
+    term = env.command_manager.get_term(command_name)
+    command = env.command_manager.get_command(command_name)
+    requested = mario_nes_requested_buttons(env, command_name)
+    active = requested[:, button_index] > 0.5
+    score = mario_commanded_foot_pose_reward(
+        env,
+        command_name=command_name,
+        leg=leg,
+        **foot_pose_params,
+    )
+
+    cache_name = f"_mario_pose_approach_cache_{leg}_{button_index}"
+    cache = getattr(env, cache_name, None)
+    age = term.command_age
+    if cache is None:
+        gain = torch.zeros_like(score)
+        best = score
+    else:
+        previous_best, previous_age, previous_command = cache
+        reset = (
+            (age <= previous_age)
+            | (env.episode_length_buf <= 1)
+            | (command != previous_command).any(dim=-1)
+        )
+        best = torch.where(reset, score, previous_best)
+        gain = (score - best).clamp(min=0.0)
+        best = torch.maximum(best, score)
+    setattr(
+        env,
+        cache_name,
+        (best.detach().clone(), age.clone(), command.clone()),
+    )
+    return (gain / env.step_dt).clamp(max=2.0) * active
+
+
 def mario_commanded_foot_clearance_reward(
     env: ManagerBasedRlEnv,
     command_name: str,
@@ -7162,7 +7260,10 @@ def mario_clean_button_success(
 
 
 def mario_active_success_rate(
-    env: ManagerBasedRlEnv, combinations_only: bool = False, **reward_params,
+    env: ManagerBasedRlEnv,
+    combinations_only: bool = False,
+    button_index: int | None = None,
+    **reward_params,
 ) -> torch.Tensor:
     """Batch success fraction for ready active requests, excluding neutral.
 
@@ -7177,7 +7278,14 @@ def mario_active_success_rate(
     full_count = requested.sum(dim=-1)
     requested = _mario_leg_requests(requested, reward_params.get("leg"))
     count = requested.sum(dim=-1)
-    selected = count >= 1
+    if button_index is not None:
+        if not 0 <= button_index < requested.shape[-1]:
+            raise ValueError("button_index is outside the requested-button vector")
+        if combinations_only:
+            raise ValueError("button_index and combinations_only are mutually exclusive")
+        selected = requested[:, button_index] > 0.5
+    else:
+        selected = count >= 1
     if combinations_only:
         selected &= full_count >= 2
     grace = reward_params.get("transition_grace_s", 0.0)

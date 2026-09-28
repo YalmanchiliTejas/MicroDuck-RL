@@ -233,18 +233,24 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     curriculum = train_cfg.curriculum["mario_command_stage"]
     stages = curriculum.params["weight_stages"]
     assert stages[0]["step"] == 0
-    assert len(stages) == 2
+    assert len(stages) == 3
     assert [i for i, weight in enumerate(stages[0]["weights"]) if weight > 0] == [
         0, 1, 2, 5
     ]
-    assert stages[1]["step"] == 2_500 * 24
-    assert stages[1]["weights"][8] > 0.0
-    assert stages[1]["weights"][11] > 0.0
-    assert stages[1]["weights"][7] == 0.0
-    assert stages[1]["weights"][10] == 0.0
-    assert stages[1]["weights"][13] == 0.0
+    assert stages[0]["weights"][1] == pytest.approx(0.40)
+    assert stages[1]["weights"] == (0.25, 0.25, 0.25, 0, 0, 0.25, 0,
+                                     0, 0, 0, 0, 0, 0, 0)
+    assert stages[2]["step"] == 2_500 * 24
+    assert stages[2]["weights"][8] > 0.0
+    assert stages[2]["weights"][11] > 0.0
+    assert stages[2]["weights"][7] == 0.0
+    assert stages[2]["weights"][10] == 0.0
+    assert stages[2]["weights"][13] == 0.0
+    assert curriculum.params["discovery_button_index"] == 2
+    assert curriculum.params["discovery_unlock_success"] == pytest.approx(0.50)
+    assert train_cfg.commands["twist"].category_weights == stages[0]["weights"]
     assert "mario_command_stage" not in play_cfg.curriculum
-    assert play_cfg.commands["twist"].category_weights == stages[0]["weights"]
+    assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
 
 
 def test_mario_balance_reward_closes_press_then_crash_loophole():
@@ -272,10 +278,10 @@ def test_mario_fall_cost_only_reads_named_failure_term():
     assert microduck_mdp.mario_fall_cost(env).tolist() == [0.0, 1.0, 0.0]
 
 
-def test_mario_combo_stage_waits_for_active_single_button_success():
-    stages = make_microduck_mario_env_cfg().curriculum[
-        "mario_command_stage"
-    ].params["weight_stages"]
+def test_mario_curriculum_rebalances_left_before_unlocking_combos():
+    curriculum = make_microduck_mario_env_cfg().curriculum["mario_command_stage"]
+    params = curriculum.params
+    stages = params["weight_stages"]
     term = SimpleNamespace(
         cfg=SimpleNamespace(category_weights=stages[0]["weights"])
     )
@@ -299,17 +305,24 @@ def test_mario_combo_stage_waits_for_active_single_button_success():
         metrics_manager=metrics,
     )
     stage = microduck_mdp.mario_command_category_curriculum(
-        env, torch.arange(4), "twist", stages
+        env, torch.arange(4), **params
     )
     assert stage.item() == 0.0
     assert term.cfg.category_weights == stages[0]["weights"]
     env.common_step_counter += 250
-    metrics._step_values[1:, 0] = 0.9
+    metrics._step_values[:, 0] = torch.tensor([1.0, 0.9, 0.2, 0.2])
     stage = microduck_mdp.mario_command_category_curriculum(
-        env, torch.arange(4), "twist", stages
+        env, torch.arange(4), **params
     )
     assert stage.item() == 1.0
     assert term.cfg.category_weights == stages[1]["weights"]
+    env.common_step_counter += 250
+    metrics._step_values[1:, 0] = 0.9
+    stage = microduck_mdp.mario_command_category_curriculum(
+        env, torch.arange(4), **params
+    )
+    assert stage.item() == 2.0
+    assert term.cfg.category_weights == stages[2]["weights"]
 
 
 def test_mario_command_grace_tracks_time_since_resample():

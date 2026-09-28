@@ -75,6 +75,50 @@ def test_approach_credit_cannot_be_farmed_by_holding_or_oscillation():
     assert step() == 0
 
 
+def test_left_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
+    monkeypatch,
+):
+    command = torch.tensor([[-1.0, 0.0, 0.0]])
+    term = SimpleNamespace(command_age=torch.tensor([0.5]))
+    env = SimpleNamespace(
+        step_dt=0.02,
+        episode_length_buf=torch.tensor([10]),
+        command_manager=SimpleNamespace(
+            get_command=lambda _: command,
+            get_term=lambda _: term,
+        ),
+    )
+    pose = {"score": torch.tensor([0.0])}
+    monkeypatch.setattr(
+        mdp,
+        "mario_commanded_foot_pose_reward",
+        lambda *args, **kwargs: pose["score"],
+    )
+
+    def step():
+        term.command_age += env.step_dt
+        return mdp.mario_foot_pose_approach_reward(
+            env,
+            command_name="twist",
+            button_index=2,
+            leg="left",
+        ).item()
+
+    assert step() == 0
+    pose["score"] = torch.tensor([0.10])
+    assert step() > 0
+    assert step() == 0
+    pose["score"] = torch.tensor([0.05])
+    assert step() == 0
+    pose["score"] = torch.tensor([0.10])
+    assert step() == 0
+    pose["score"] = torch.tensor([0.20])
+    assert step() > 0
+    command[0, 0] = 1.0
+    pose["score"] = torch.tensor([0.80])
+    assert step() == 0
+
+
 def test_combo_reward_requires_both_switches_and_no_wrong_key(monkeypatch):
     command = torch.tensor([[1., 0., 1.]] * 4)
     activation = torch.tensor([
@@ -127,6 +171,25 @@ def test_active_success_excludes_neutral_and_requires_complete_combos(monkeypatc
                         lambda *a, **k: torch.tensor([1., 1., 0.]))
     assert mdp.mario_active_success_rate(env).tolist() == [.5, .5, .5]
     assert mdp.mario_active_success_rate(env, combinations_only=True).tolist() == [0., 0., 0.]
+
+
+def test_button_specific_success_does_not_hide_missing_left(monkeypatch):
+    commands = torch.tensor([
+        [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+        [0.0, 0.0, 1.0],
+    ])
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_command=lambda _: commands)
+    )
+    monkeypatch.setattr(
+        mdp,
+        "mario_clean_button_success",
+        lambda *args, **kwargs: torch.tensor([0.0, 1.0, 1.0]),
+    )
+    assert mdp.mario_active_success_rate(env, button_index=2).tolist() == [0.0] * 3
+    assert mdp.mario_active_success_rate(env, button_index=3).tolist() == [1.0] * 3
+    assert mdp.mario_active_success_rate(env, button_index=4).tolist() == [1.0] * 3
 
 
 def test_foot_targets_are_measured_rocker_poses_inside_xml_key_centers():
