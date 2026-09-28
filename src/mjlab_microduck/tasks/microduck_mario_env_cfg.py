@@ -717,17 +717,21 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "command_name": "twist",
                 "combo_unlock_success": 0.65,
                 "discovery_button_index": 2,
-                # The controller-alignment recovery run converged to a real,
-                # repeatable LEFT press rate of about 26% (from effectively
-                # zero) while remaining in the 40%-LEFT discovery mixture.
-                # Advance at 25% so RIGHT and JUMP can be reconsolidated under
-                # balanced singles.  Combinations retain their independent
-                # 65% gate below and therefore cannot unlock prematurely.
-                "discovery_unlock_success": 0.25,
+                # Training success is measured under sampled PPO actions,
+                # whereas videos and the deployed ONNX execute the policy
+                # mean.  A 25% gate promoted a policy whose exploration noise
+                # occasionally pressed LEFT while its deterministic mean did
+                # not move the foot.  Require substantial consolidation
+                # before returning to balanced single-button sampling.
+                "discovery_unlock_success": 0.50,
                 "weight_stages": [
                     {"step": 0, "weights": LEFT_DISCOVERY_WEIGHTS},
                     {"step": 0, "weights": BALANCED_SINGLE_BUTTON_WEIGHTS},
-                    {"step": 2_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
+                    # The first clean-slate run is a single-button run.  Its
+                    # deterministic checkpoint battery decides whether a
+                    # later continuation may introduce combinations; noisy
+                    # training success must not make that decision alone.
+                    {"step": 5_000 * 24, "weights": TWO_BUTTON_WEIGHTS},
                 ],
             },
         )
@@ -739,12 +743,12 @@ MicroduckMarioRlCfg = deepcopy(MicroduckRlCfg)
 MicroduckMarioRlCfg.experiment_name = "mario_nes_controller"
 MicroduckMarioRlCfg.run_name = "mario_nes_controller"
 MicroduckMarioRlCfg.max_iterations = 5_000
-# A warm-started balance mean should not immediately be destroyed by the
-# velocity recipe's std=1.0 random actions. The source checkpoint's learned
-# std is deliberately not copied; 0.20 leaves task exploration without the
-# catastrophic first-step thrashing seen in the from-scratch run.
-MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] = 0.20
-# The walking recipe's entropy coefficient drove this stationary controller
-# policy from std=0.20 to 0.65, flooding training with balance-breaking random
-# actions.  Retain modest exploration without continuously rewarding thrash.
-MicroduckMarioRlCfg.algorithm.entropy_coef = 0.002
+# This run starts from a random policy.  Keep enough spread to discover the
+# short rocker motion without repeating the balance-breaking std=0.20 startup.
+MicroduckMarioRlCfg.actor.distribution_cfg["init_std"] = 0.10
+# Deployment and checkpoint videos execute the deterministic policy mean.
+# An entropy bonus let sampled actions collect occasional button successes
+# while the mean stayed idle, making training logs look better than deployment.
+# PPO still samples from its learned distribution with this coefficient at
+# zero; it simply has no incentive to preserve useless variance.
+MicroduckMarioRlCfg.algorithm.entropy_coef = 0.0
