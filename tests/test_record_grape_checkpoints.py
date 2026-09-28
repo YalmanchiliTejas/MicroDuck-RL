@@ -33,6 +33,9 @@ def test_find_checkpoints_sorts_numeric_iterations_across_run_dirs(tmp_path):
         "model_250.pt",
         "model_1000.pt",
     ]
+    assert [
+        path.name for path in watcher.find_checkpoints(tmp_path, 1000)
+    ] == ["model_1000.pt"]
 
 
 def test_completion_marker_is_isolated_per_iteration(tmp_path):

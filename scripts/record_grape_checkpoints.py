@@ -33,11 +33,17 @@ def checkpoint_iteration(path: Path) -> int | None:
     return int(match.group(1)) if match else None
 
 
-def find_checkpoints(checkpoint_dir: Path) -> list[Path]:
-    """Find checkpoints in chronological order, including timestamped run dirs."""
+def find_checkpoints(
+    checkpoint_dir: Path, checkpoint_iteration_filter: int | None = None
+) -> list[Path]:
+    """Find checkpoints in chronological order, optionally selecting one iteration."""
     checkpoints = [
         path for path in checkpoint_dir.rglob("model_*.pt")
         if checkpoint_iteration(path) is not None
+        and (
+            checkpoint_iteration_filter is None
+            or checkpoint_iteration(path) == checkpoint_iteration_filter
+        )
     ]
     return sorted(checkpoints, key=lambda path: (checkpoint_iteration(path), str(path)))
 
@@ -135,6 +141,12 @@ def parse_args() -> argparse.Namespace:
                         help="Registered task used to load and evaluate each checkpoint.")
     parser.add_argument("--checkpoint-dir", type=Path, required=True,
                         help="Directory containing model_<iteration>.pt files.")
+    parser.add_argument(
+        "--checkpoint-iteration",
+        type=int,
+        default=None,
+        help="Record only model_<N>.pt for this iteration (default: record all).",
+    )
     parser.add_argument("--video-dir", type=Path, default=None,
                         help="Destination root (default: <checkpoint-dir>/videos/checkpoints).")
     parser.add_argument("--poll-seconds", type=float, default=30.0)
@@ -179,7 +191,15 @@ def main() -> int:
 
     while True:
         now = time.time()
-        for checkpoint in find_checkpoints(args.checkpoint_dir):
+        checkpoints = find_checkpoints(
+            args.checkpoint_dir, args.checkpoint_iteration
+        )
+        if args.checkpoint_iteration is not None and not checkpoints:
+            raise SystemExit(
+                f"model_{args.checkpoint_iteration}.pt was not found beneath "
+                f"{args.checkpoint_dir}"
+            )
+        for checkpoint in checkpoints:
             iteration = checkpoint_iteration(checkpoint)
             assert iteration is not None
             if recording_is_complete(args, iteration):

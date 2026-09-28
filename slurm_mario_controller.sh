@@ -60,6 +60,8 @@ CHECKPOINT_INTERVAL="${CHECKPOINT_INTERVAL:-250}"
 MARIO_CONTROLLER_RUN_TAG="${MARIO_CONTROLLER_RUN_TAG:-nes-approach-v4}"
 MARIO_BALANCE_CHECKPOINT="${MARIO_BALANCE_CHECKPOINT:-}"
 MARIO_VIDEO_ONLY="${MARIO_VIDEO_ONLY:-0}"
+# Optional numeric checkpoint selector for a fast one-checkpoint video job.
+MARIO_VIDEO_CHECKPOINT="${MARIO_VIDEO_CHECKPOINT:-}"
 MARIO_SLURM_PARTITION="${MARIO_SLURM_PARTITION:-gpu}"
 # The controller runs at 50 Hz. 600 frames gives a 12-second diagnostic:
 # long enough for roughly six command windows, while avoiding the old
@@ -79,6 +81,10 @@ if ! [[ "${MARIO_CONTROLLER_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
 fi
 if [[ "${MARIO_VIDEO_ONLY}" != "0" && "${MARIO_VIDEO_ONLY}" != "1" ]]; then
     echo "ERROR: MARIO_VIDEO_ONLY must be 0 or 1." >&2
+    exit 1
+fi
+if [[ -n "${MARIO_VIDEO_CHECKPOINT}" ]] && ! [[ "${MARIO_VIDEO_CHECKPOINT}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: MARIO_VIDEO_CHECKPOINT must be a non-negative integer." >&2
     exit 1
 fi
 
@@ -136,7 +142,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
         --partition="${MARIO_SLURM_PARTITION}"
         --output="${submission_log_dir}/slurm-%j.out"
         --error="${submission_log_dir}/slurm-%j.err"
-        --export="ALL,NUM_ENVS=${NUM_ENVS},TARGET_ITERATIONS=${TARGET_ITERATIONS},ITERATIONS_PER_JOB=${ITERATIONS_PER_JOB},CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL},MARIO_CONTROLLER_RUN_TAG=${MARIO_CONTROLLER_RUN_TAG},MARIO_BALANCE_CHECKPOINT=${MARIO_BALANCE_CHECKPOINT},MARIO_VIDEO_ONLY=${MARIO_VIDEO_ONLY},MARIO_VIDEO_LENGTH=${MARIO_VIDEO_LENGTH},MARIO_SLURM_PARTITION=${MARIO_SLURM_PARTITION},MICRODUCK_REPO_DIR=${REPO_DIR},MICRODUCK_RUN_ROOT=${RUNS_ROOT}"
+        --export="ALL,NUM_ENVS=${NUM_ENVS},TARGET_ITERATIONS=${TARGET_ITERATIONS},ITERATIONS_PER_JOB=${ITERATIONS_PER_JOB},CHECKPOINT_INTERVAL=${CHECKPOINT_INTERVAL},MARIO_CONTROLLER_RUN_TAG=${MARIO_CONTROLLER_RUN_TAG},MARIO_BALANCE_CHECKPOINT=${MARIO_BALANCE_CHECKPOINT},MARIO_VIDEO_ONLY=${MARIO_VIDEO_ONLY},MARIO_VIDEO_CHECKPOINT=${MARIO_VIDEO_CHECKPOINT},MARIO_VIDEO_LENGTH=${MARIO_VIDEO_LENGTH},MARIO_SLURM_PARTITION=${MARIO_SLURM_PARTITION},MICRODUCK_REPO_DIR=${REPO_DIR},MICRODUCK_RUN_ROOT=${RUNS_ROOT}"
     )
 
     echo "Submission host: $(hostname)"
@@ -223,11 +229,17 @@ if [[ "${MARIO_VIDEO_ONLY}" == "1" ]]; then
     fi
     mkdir -p "${VIDEO_DIR}"
     echo "Video length: ${MARIO_VIDEO_LENGTH} frames (~$((MARIO_VIDEO_LENGTH / 50)) seconds at 50 Hz)"
+    video_checkpoint_args=()
+    if [[ -n "${MARIO_VIDEO_CHECKPOINT}" ]]; then
+        video_checkpoint_args=(--checkpoint-iteration "${MARIO_VIDEO_CHECKPOINT}")
+        echo "Video checkpoint: model_${MARIO_VIDEO_CHECKPOINT}.pt"
+    fi
     export MUJOCO_GL=egl
     export PYOPENGL_PLATFORM=egl
     srun uv run python scripts/record_grape_checkpoints.py \
         --task-id "${TASK_ID}" \
         --checkpoint-dir "${TENSORBOARD_DIR}" \
+        "${video_checkpoint_args[@]}" \
         --video-dir "${VIDEO_DIR}" \
         --video-length "${MARIO_VIDEO_LENGTH}" \
         --video-width 960 \
