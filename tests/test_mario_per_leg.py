@@ -140,7 +140,7 @@ def test_physical_press_rewards_outweigh_approach_shaping():
         assert physical > rewards[f"{leg}_foot_approach"].weight
         assert rewards[f"{leg}_button_progress"].params["progress_power"] < 1.0
     left_pose = rewards["dpad_left_pose_progress"]
-    assert left_pose.weight == pytest.approx(2.0)
+    assert left_pose.weight == pytest.approx(4.0)
     assert left_pose.params["button_index"] == 2
     assert left_pose.params["leg"] == "left"
 
@@ -150,6 +150,11 @@ def test_direction_metrics_separate_left_right_and_jump():
     assert metrics["dpad_left_success"].params["button_index"] == 2
     assert metrics["dpad_right_success"].params["button_index"] == 3
     assert metrics["jump_success"].params["button_index"] == 4
+    assert metrics["dpad_left_x_error_mm"].params["component"] == "x_mm"
+    assert (
+        metrics["dpad_left_pitch_error_deg"].params["component"]
+        == "pitch_deg"
+    )
 
 
 def test_clearance_and_long_distance_approach_have_bounded_credit():

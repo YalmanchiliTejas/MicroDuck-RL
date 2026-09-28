@@ -88,11 +88,14 @@ def test_left_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
             get_term=lambda _: term,
         ),
     )
-    pose = {"score": torch.tensor([0.0])}
+    errors = {
+        "x": torch.tensor([0.0105]),
+        "pitch": torch.deg2rad(torch.tensor([6.0])),
+    }
     monkeypatch.setattr(
         mdp,
-        "mario_commanded_foot_pose_reward",
-        lambda *args, **kwargs: pose["score"],
+        "_mario_foot_pose_component_errors",
+        lambda *args, **kwargs: (errors["x"], errors["pitch"]),
     )
 
     def step():
@@ -102,21 +105,84 @@ def test_left_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
             command_name="twist",
             button_index=2,
             leg="left",
+            position_offset=0.012,
+            lateral_offset=0.0105,
+            target_tilt=torch.deg2rad(torch.tensor(6.0)).item(),
         ).item()
 
     assert step() == 0
-    pose["score"] = torch.tensor([0.10])
-    assert step() > 0
+    errors["x"] = torch.tensor([0.0084])
+    # A 20% improvement in one of two components is a 0.1 potential gain.
+    # With no destructive rate cap, the reported rate is 0.1 / 0.02 = 5.
+    assert step() == pytest.approx(5.0)
     assert step() == 0
-    pose["score"] = torch.tensor([0.05])
+    errors["x"] = torch.tensor([0.0095])
     assert step() == 0
-    pose["score"] = torch.tensor([0.10])
+    errors["x"] = torch.tensor([0.0084])
     assert step() == 0
-    pose["score"] = torch.tensor([0.20])
+    errors["pitch"] = torch.deg2rad(torch.tensor([3.0]))
     assert step() > 0
     command[0, 0] = 1.0
-    pose["score"] = torch.tensor([0.80])
+    errors["x"] = torch.tensor([0.0])
+    errors["pitch"] = torch.tensor([0.0])
     assert step() == 0
+
+
+def test_left_pose_error_metrics_report_conditional_physical_units(monkeypatch):
+    command = torch.tensor([
+        [-1.0, 0.0, 0.0],
+        [-1.0, 0.0, 0.0],
+        [1.0, 0.0, 0.0],
+    ])
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(get_command=lambda _: command)
+    )
+    monkeypatch.setattr(
+        mdp,
+        "_mario_foot_pose_component_errors",
+        lambda *args, **kwargs: (
+            torch.tensor([0.010, 0.006, 0.100]),
+            torch.deg2rad(torch.tensor([6.0, 2.0, 90.0])),
+        ),
+    )
+    x_error = mdp.mario_button_foot_pose_error(
+        env, "twist", 2, "left", "x_mm"
+    )
+    pitch_error = mdp.mario_button_foot_pose_error(
+        env, "twist", 2, "left", "pitch_deg"
+    )
+    assert x_error.tolist() == pytest.approx([8.0] * 3)
+    assert pitch_error.tolist() == pytest.approx([4.0] * 3)
+
+
+def test_linear_left_pose_errors_use_measured_negative_x_and_pitch_target():
+    env, command, pos, _term, params = fixture()
+    command[:] = torch.tensor([[-1.0, 0.0, 0.0]])
+    pos[0, 0, 0] = params["left_neutral_x"]
+    x_error, pitch_error = mdp._mario_foot_pose_component_errors(
+        env, leg="left", **params
+    )
+    assert x_error.item() == pytest.approx(params["lateral_offset"])
+    assert pitch_error.item() == pytest.approx(params["target_tilt"])
+
+    pos[0, 0, 0] = params["left_neutral_x"] - params["lateral_offset"]
+    pitch = -params["target_tilt"]
+    # The compact fixture initially shares the identity quaternion tensor
+    # between robot sites and controller bodies; real entities do not alias.
+    env.scene["nes_controller"].data.body_link_quat_w = (
+        env.scene["nes_controller"].data.body_link_quat_w.clone()
+    )
+    env.scene["robot"].data.site_quat_w[0, 0] = torch.tensor([
+        torch.cos(torch.tensor(pitch / 2)),
+        0.0,
+        torch.sin(torch.tensor(pitch / 2)),
+        0.0,
+    ])
+    x_error, pitch_error = mdp._mario_foot_pose_component_errors(
+        env, leg="left", **params
+    )
+    assert x_error.item() == pytest.approx(0.0, abs=1e-6)
+    assert pitch_error.item() == pytest.approx(0.0, abs=1e-6)
 
 
 def test_combo_reward_requires_both_switches_and_no_wrong_key(monkeypatch):

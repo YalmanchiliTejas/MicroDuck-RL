@@ -54,7 +54,7 @@ FOOT_APPROACH_WEIGHT = 1.0
 # LEFT remained completely motionless after RIGHT and JUMP had converged. This
 # bounded potential reward supplies pose-discovery credit without paying for a
 # held hover or increasing the value of the already-learned directions.
-LEFT_POSE_PROGRESS_WEIGHT = 2.0
+LEFT_POSE_PROGRESS_WEIGHT = 4.0
 DISCOVERY_ACTION_RATE_WEIGHT = -0.02
 ALIVE_WEIGHT = 1.0
 # RewardManager multiplies every term by step_dt=0.02. This therefore produces
@@ -634,6 +634,20 @@ def make_microduck_mario_env_cfg(play: bool = False):
             params={
                 "button_index": button_index,
                 **cfg.metrics["requested_button_success"].params,
+            },
+        )
+    for name, component in (
+        ("dpad_left_x_error_mm", "x_mm"),
+        ("dpad_left_pitch_error_deg", "pitch_deg"),
+    ):
+        cfg.metrics[name] = MetricsTermCfg(
+            func=microduck_mdp.mario_button_foot_pose_error,
+            params={
+                "button_index": 2,
+                "leg": "left",
+                "component": component,
+                "transition_grace_s": BUTTON_TRANSITION_GRACE_S,
+                **foot_pose_params,
             },
         )
     cfg.metrics["feet_anchored"] = MetricsTermCfg(

@@ -6749,6 +6749,68 @@ def mario_foot_approach_reward(
     return (rate * active).sum(dim=-1) / active.sum(dim=-1).clamp(min=1)
 
 
+def _mario_foot_pose_component_errors(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    leg: str,
+    position_offset: float,
+    target_tilt: float,
+    robot_cfg: SceneEntityCfg,
+    controller_cfg: SceneEntityCfg,
+    lateral_offset: float | None = None,
+    left_neutral_x: float = 0.0,
+    left_neutral_y: float = 0.0,
+    right_neutral_x: float = 0.0,
+    right_neutral_y: float = 0.0,
+    **_unused,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return absolute sagittal-position and pitch errors for one Mario foot."""
+
+    if leg not in ("left", "right"):
+        raise ValueError("leg must be left or right")
+    from mjlab.utils.lab_api.math import quat_apply_inverse
+
+    robot: Entity = env.scene[robot_cfg.name]
+    controller: Entity = env.scene[controller_cfg.name]
+    command = env.command_manager.get_command(command_name)
+    foot_pos = robot.data.site_pos_w[:, robot_cfg.site_ids]
+    pad_pos = controller.data.body_link_pos_w[:, controller_cfg.body_ids]
+    pad_quat = controller.data.body_link_quat_w[:, controller_cfg.body_ids]
+    local_delta = quat_apply_inverse(
+        pad_quat.reshape(-1, 4), (foot_pos - pad_pos).reshape(-1, 3)
+    ).reshape(foot_pos.shape)
+    target_xy = _mario_commanded_foot_target_xy(
+        command,
+        position_offset,
+        position_offset if lateral_offset is None else lateral_offset,
+        left_neutral_x,
+        left_neutral_y,
+        right_neutral_x,
+        right_neutral_y,
+    )
+
+    foot_quat = robot.data.site_quat_w[:, robot_cfg.site_ids]
+    qw, qx, qy, qz = (
+        foot_quat[..., 0],
+        foot_quat[..., 1],
+        foot_quat[..., 2],
+        foot_quat[..., 3],
+    )
+    pitch = torch.asin(
+        torch.clamp(2.0 * (qw * qy - qz * qx), -1.0, 1.0)
+    )
+    dpad_x, ab = command[:, 0], command[:, 2]
+    ab_direction = torch.where(ab.abs() > 1.5, torch.zeros_like(ab), ab)
+    target_pitch = torch.stack(
+        (target_tilt * dpad_x, target_tilt * ab_direction), dim=-1
+    )
+    foot_index = 0 if leg == "left" else 1
+    x_error = (local_delta[:, foot_index, 0] - target_xy[:, foot_index, 0]).abs()
+    pitch_delta = pitch[:, foot_index] - target_pitch[:, foot_index]
+    pitch_error = torch.atan2(torch.sin(pitch_delta), torch.cos(pitch_delta)).abs()
+    return x_error, pitch_error
+
+
 def mario_foot_pose_approach_reward(
     env: ManagerBasedRlEnv,
     command_name: str,
@@ -6774,19 +6836,38 @@ def mario_foot_pose_approach_reward(
     command = env.command_manager.get_command(command_name)
     requested = mario_nes_requested_buttons(env, command_name)
     active = requested[:, button_index] > 0.5
-    score = mario_commanded_foot_pose_reward(
+    x_error, pitch_error = _mario_foot_pose_component_errors(
         env,
         command_name=command_name,
         leg=leg,
         **foot_pose_params,
+    )
+    position_offset = float(foot_pose_params["position_offset"])
+    lateral_offset = foot_pose_params.get("lateral_offset")
+    x_scale = (
+        position_offset
+        if leg == "right" or lateral_offset is None
+        else float(lateral_offset)
+    )
+    pitch_scale = abs(float(foot_pose_params["target_tilt"]))
+    if x_scale <= 0.0 or pitch_scale <= 0.0:
+        raise ValueError("foot-pose progress scales must be positive")
+    # Linear normalized errors retain a useful signal at the neutral pose:
+    # LEFT begins at approximately (1 x-range, 1 tilt-range), whereas the old
+    # product of exponentials was essentially zero until already near target.
+    # Clamp only extreme errors so a fall cannot create an unbounded recovery
+    # jackpot; the normal opposite-key -> target transition remains visible.
+    error = 0.5 * (
+        torch.clamp(x_error / x_scale, max=2.0)
+        + torch.clamp(pitch_error / pitch_scale, max=2.0)
     )
 
     cache_name = f"_mario_pose_approach_cache_{leg}_{button_index}"
     cache = getattr(env, cache_name, None)
     age = term.command_age
     if cache is None:
-        gain = torch.zeros_like(score)
-        best = score
+        gain = torch.zeros_like(error)
+        best = error
     else:
         previous_best, previous_age, previous_command = cache
         reset = (
@@ -6794,15 +6875,53 @@ def mario_foot_pose_approach_reward(
             | (env.episode_length_buf <= 1)
             | (command != previous_command).any(dim=-1)
         )
-        best = torch.where(reset, score, previous_best)
-        gain = (score - best).clamp(min=0.0)
-        best = torch.maximum(best, score)
+        best = torch.where(reset, error, previous_best)
+        gain = (best - error).clamp(min=0.0)
+        best = torch.minimum(best, error)
     setattr(
         env,
         cache_name,
         (best.detach().clone(), age.clone(), command.clone()),
     )
-    return (gain / env.step_dt).clamp(max=2.0) * active
+    # RewardManager multiplies by step_dt, exactly recovering ``gain``. The
+    # potential is already bounded, so a rate cap would only discard useful
+    # credit from a correct movement completed within one policy step.
+    return (gain / env.step_dt) * active
+
+
+def mario_button_foot_pose_error(
+    env: ManagerBasedRlEnv,
+    command_name: str,
+    button_index: int,
+    leg: str,
+    component: str,
+    transition_grace_s: float = 0.0,
+    **foot_pose_params,
+) -> torch.Tensor:
+    """Conditional physical LEFT/RIGHT/JUMP foot-pose error diagnostic."""
+
+    if not 0 <= button_index < 6:
+        raise ValueError("button_index must be in [0, 5]")
+    x_error, pitch_error = _mario_foot_pose_component_errors(
+        env,
+        command_name=command_name,
+        leg=leg,
+        **foot_pose_params,
+    )
+    if component == "x_mm":
+        error = x_error * 1000.0
+    elif component == "pitch_deg":
+        error = torch.rad2deg(pitch_error)
+    else:
+        raise ValueError("component must be x_mm or pitch_deg")
+    requested = mario_nes_requested_buttons(env, command_name)
+    selected = requested[:, button_index] > 0.5
+    if transition_grace_s > 0.0:
+        selected &= mario_command_ready(
+            env, command_name, transition_grace_s
+        ).bool()
+    mean = (error * selected).sum() / selected.sum().clamp(min=1)
+    return mean.expand_as(error)
 
 
 def mario_commanded_foot_clearance_reward(
