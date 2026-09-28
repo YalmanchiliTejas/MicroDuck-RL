@@ -122,15 +122,8 @@ def test_task_reward_dominates_idle_posture_credit():
     assert foot_pose["lateral_offset"] == pytest.approx(0.0105)
     assert foot_pose["left_neutral_x"] == pytest.approx(-0.0075)
     assert foot_pose["target_tilt"] == pytest.approx(math.radians(6.0))
-    button_pose = rewards["requested_button"].params["foot_pose_params"]
-    assert button_pose == {
-        key: value
-        for key, value in foot_pose.items()
-        if key not in ("command_name", "robot_cfg", "controller_cfg")
-    }
-    assert not any(
-        isinstance(value, SceneEntityCfg) for value in button_pose.values()
-    )
+    for name in ("requested_button", "left_requested_button", "right_requested_button"):
+        assert "foot_pose_params" not in rewards[name].params
     assert rewards["foot_planar_speed"].params["transition_grace_s"] == (
         pytest.approx(0.25)
     )
@@ -317,6 +310,22 @@ def test_mario_curriculum_rebalances_left_before_unlocking_combos():
     assert stage.item() == 1.0
     assert term.cfg.category_weights == stages[1]["weights"]
     env.common_step_counter += 250
+    # Two perfect skills must not hide an absent third skill (mean = 2/3).
+    metrics._step_values[1:, 0] = torch.tensor([1.0, 1.0, 0.0])
+    stage = microduck_mdp.mario_command_category_curriculum(
+        env, torch.arange(4), **params
+    )
+    assert stage.item() == 1.0
+    # Missing observations for JUMP must not count as evidence of readiness.
+    env.common_step_counter += 250
+    metrics._step_values[3, 1] = 0.0
+    metrics._step_values[1:, 0] = 0.9
+    stage = microduck_mdp.mario_command_category_curriculum(
+        env, torch.arange(4), **params
+    )
+    assert stage.item() == 1.0
+    env.common_step_counter += 250
+    metrics._step_values[3, 1] = 1.0
     metrics._step_values[1:, 0] = 0.9
     stage = microduck_mdp.mario_command_category_curriculum(
         env, torch.arange(4), **params

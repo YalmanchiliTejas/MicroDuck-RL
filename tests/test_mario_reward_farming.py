@@ -75,10 +75,15 @@ def test_approach_credit_cannot_be_farmed_by_holding_or_oscillation():
     assert step() == 0
 
 
-def test_left_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
-    monkeypatch,
+@pytest.mark.parametrize("button_index,leg,command_value", [
+    (2, "left", (-1.0, 0.0, 0.0)),
+    (3, "left", (1.0, 0.0, 0.0)),
+    (4, "right", (0.0, 0.0, 1.0)),
+])
+def test_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
+    monkeypatch, button_index, leg, command_value,
 ):
-    command = torch.tensor([[-1.0, 0.0, 0.0]])
+    command = torch.tensor([command_value])
     term = SimpleNamespace(command_age=torch.tensor([0.5]))
     env = SimpleNamespace(
         step_dt=0.02,
@@ -89,7 +94,7 @@ def test_left_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
         ),
     )
     errors = {
-        "x": torch.tensor([0.0105]),
+        "x": torch.tensor([0.012 if leg == "right" else 0.0105]),
         "pitch": torch.deg2rad(torch.tensor([6.0])),
     }
     monkeypatch.setattr(
@@ -103,29 +108,53 @@ def test_left_pose_progress_bridges_dead_zone_without_hold_or_cycle_farming(
         return mdp.mario_foot_pose_approach_reward(
             env,
             command_name="twist",
-            button_index=2,
-            leg="left",
+            button_index=button_index,
+            leg=leg,
             position_offset=0.012,
             lateral_offset=0.0105,
             target_tilt=torch.deg2rad(torch.tensor(6.0)).item(),
         ).item()
 
     assert step() == 0
-    errors["x"] = torch.tensor([0.0084])
+    x_scale = 0.012 if leg == "right" else 0.0105
+    errors["x"] = torch.tensor([0.8 * x_scale])
     # A 20% improvement in one of two components is a 0.1 potential gain.
     # With no destructive rate cap, the reported rate is 0.1 / 0.02 = 5.
     assert step() == pytest.approx(5.0)
     assert step() == 0
-    errors["x"] = torch.tensor([0.0095])
+    errors["x"] = torch.tensor([0.9 * x_scale])
     assert step() == 0
-    errors["x"] = torch.tensor([0.0084])
+    errors["x"] = torch.tensor([0.8 * x_scale])
     assert step() == 0
     errors["pitch"] = torch.deg2rad(torch.tensor([3.0]))
     assert step() > 0
-    command[0, 0] = 1.0
+    command.zero_()
     errors["x"] = torch.tensor([0.0])
     errors["pitch"] = torch.tensor([0.0])
     assert step() == 0
+
+
+def test_task_rewards_clean_press_without_prescribed_pose(monkeypatch):
+    """A valid switch press must not be zeroed by an arbitrary pose target."""
+    cfg = make_microduck_mario_env_cfg()
+    command = torch.tensor([[-1., 0., 0.], [1., 0., 0.], [0., 0., 1.]])
+    env = SimpleNamespace(command_manager=SimpleNamespace(get_command=lambda _: command))
+    activation = torch.tensor([
+        [0., 0., 1., 0., 0., 0.],
+        [0., 0., 0., 1., 0., 0.],
+        [0., 0., 0., 0., 1., 0.],
+    ])
+    monkeypatch.setattr(mdp, "mario_nes_activation", lambda *a, **k: activation)
+    for name in ("_mario_foot_anchor_gate", "mario_camera_ready",
+                 "mario_standing_pose_ready", "mario_command_ready"):
+        monkeypatch.setattr(mdp, name, lambda *a, **k: torch.ones(3))
+    monkeypatch.setattr(mdp, "mario_commanded_foot_pose_reward",
+                        lambda *a, **k: torch.zeros(3))
+    term = cfg.rewards["requested_button"]
+    assert term.func(env, **term.params).tolist() == [1., 1., 1.]
+    # Wrong switches still invalidate the press.
+    activation[:, 5] = 1.
+    assert term.func(env, **term.params).tolist() == [0., 0., 0.]
 
 
 def test_left_pose_error_metrics_report_conditional_physical_units(monkeypatch):

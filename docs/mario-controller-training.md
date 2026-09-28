@@ -1,0 +1,92 @@
+# Mario controller: discovery and verification
+
+The earlier fresh run earned about 74 return while active button success was
+0.0004. Return alone therefore cannot be the acceptance criterion. The earlier
+0.20/std, 0.002/entropy runs discovered presses, but did not demonstrate a
+reliable controller either.
+
+This recipe retains initial std 0.20 and entropy coefficient 0.002. Std is
+learned, not fixed: these settings do not guarantee a minimum exploration
+level. LEFT unlocks balanced singles at 0.25 clean success. Combinations are
+eligible after iteration 2500, but LEFT, RIGHT, and JUMP must each reach 0.65
+before they unlock. Iteration 2500 is not an automatic promotion.
+
+Physical switch travel and clean activation provide task credit. Prescribed
+foot position/orientation no longer multiply away a legitimate physical press.
+All three buttons receive equal best-so-far position/pitch approach shaping.
+Holding at an approach pose, retreating, or returning to the previous best
+does not repeatedly pay. Camera, support, posture, exclusivity, and fall checks
+remain in effect for button rewards.
+
+## Start a separate run
+
+On the Slurm submission host, after updating this checkout, start a real
+training segment through checkpoint 500. This limits the first expenditure;
+the same run can then continue without discarding its learned weights.
+
+```bash
+cd /home/tyalaman/MicroDuck-RL
+export MARIO_CONTROLLER_RUN_TAG="nes-physical-press-$(date +%Y%m%d-%H%M%S)"
+MICRODUCK_RUN_ROOT=/scratch/scholar/tyalaman/microduck-rl \
+MARIO_BALANCE_CHECKPOINT= \
+MARIO_VIDEO_ONLY=0 \
+NUM_ENVS=2048 \
+TARGET_ITERATIONS=501 \
+ITERATIONS_PER_JOB=501 \
+CHECKPOINT_INTERVAL=250 \
+MAX_JOBS=1 \
+./slurm_mario_controller.sh
+```
+
+The new tag prevents the launcher from resuming the collapsed checkpoint.
+Confirm the log says it is starting from randomly initialized weights.
+Changing `init_std` does not reset the learned std when resuming a checkpoint.
+
+## Check actual skill early
+
+On an allocated GPU node, evaluate a saved checkpoint without rendering:
+
+```bash
+uv run python scripts/evaluate_mario_controller.py /absolute/path/model_500.pt
+```
+
+The default runs 64 environments for 1000 steps, with sampled actions and equal
+neutral/LEFT/RIGHT/JUMP sampling. Results give per-command clean-success
+fractions over ready timesteps, plus falls and completed episodes. Neutral is
+reported separately. A missing category reports null, not a success. These are
+time fractions, not the probability of completing an entire command sequence.
+Evaluation uses the play environment; it does not reproduce every training
+randomization.
+
+`--mode mean` evaluates the exported policy's action convention, without an
+extra training/consolidation phase. `--include-combinations` tests both chords.
+The script loads the actor and its observation normalizer through the standard
+runner. It does not modify the checkpoint or export an unnormalized policy.
+
+Compare checkpoints 250 and 500 before spending the entire budget. If all
+three active skills remain essentially zero, investigate their rollouts and
+physics before continuing unchanged. Do not interpret improving survival or
+total reward as evidence that a button is being learned. Do not select a final
+policy using only aggregate reward: check every requested direction and chord.
+
+If the early checkpoints demonstrate improving physical presses, continue in
+the same shell with the **same** exported run tag:
+
+```bash
+MICRODUCK_RUN_ROOT=/scratch/scholar/tyalaman/microduck-rl \
+MARIO_BALANCE_CHECKPOINT= MARIO_VIDEO_ONLY=0 NUM_ENVS=2048 \
+TARGET_ITERATIONS=4000 ITERATIONS_PER_JOB=1000 CHECKPOINT_INTERVAL=250 \
+MAX_JOBS=5 ./slurm_mario_controller.sh
+```
+
+In a new shell, set `MARIO_CONTROLLER_RUN_TAG` to the exact tag of the first
+segment before continuing; do not generate a new timestamp. The launcher will
+find and resume its latest checkpoint.
+
+## Validation limits
+
+Regression tests exercise reward gates, approach reward cycling/reset behavior,
+curriculum readiness, evaluation denominators, full-sole switch isolation, and
+articulated leg reach. Constrained sole-load tests do **not** demonstrate
+whole-body dynamic balance or PPO convergence. The new recipe still requires
+checkpoint evaluation; no passing unit test can promise the next run succeeds.

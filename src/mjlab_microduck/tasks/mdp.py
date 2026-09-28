@@ -5833,6 +5833,7 @@ def mario_command_category_curriculum(
     command_name: str,
     weight_stages: list[dict],
     combo_unlock_success: float = 0.65,
+    combo_button_indices: tuple[int, ...] = (2, 3, 4),
     discovery_button_index: int | None = None,
     discovery_unlock_success: float = 0.50,
 ) -> torch.Tensor:
@@ -5850,6 +5851,8 @@ def mario_command_category_curriculum(
     del env_ids
     if not 0.0 < combo_unlock_success <= 1.0:
         raise ValueError("combo_unlock_success must be in (0, 1]")
+    if not combo_button_indices or any(i not in range(6) for i in combo_button_indices):
+        raise ValueError("combo_button_indices must contain physical button indices")
     if not 0.0 < discovery_unlock_success <= 1.0:
         raise ValueError("discovery_unlock_success must be in (0, 1]")
     if discovery_button_index is not None:
@@ -5869,7 +5872,6 @@ def mario_command_category_curriculum(
     metrics = env.metrics_manager
     success_idx = metrics.active_terms.index("requested_button_success")
     ready_idx = metrics.active_terms.index("command_ready")
-    command = env.command_manager.get_command(command_name)
 
     if discovery_button_index is not None and not getattr(
         term, "_mario_discovery_unlocked", False
@@ -5903,16 +5905,18 @@ def mario_command_category_curriculum(
             and env.common_step_counter - last_check >= 250
         ):
             term._mario_combo_last_check_step = env.common_step_counter
-            # Neutral success cannot unlock combinations; neither can command
-            # transition frames, which still reflect the previous request.
-            active = (command[:, 0] != 0.0) | (command[:, 1] != 0.0) | (
-                command[:, 2] > 0.5
-            )
-            valid = active & (metrics._step_values[:, ready_idx] > 0.5)
-            if valid.any():
-                success = metrics._step_values[valid, success_idx].mean()
-                if success >= combo_unlock_success:
-                    term._mario_combo_unlocked = True
+            # Every required single button must work. An aggregate can exceed
+            # 65% with two perfect buttons and one completely missing skill.
+            # No samples for a button is insufficient evidence to advance.
+            requested = mario_nes_requested_buttons(env, command_name)
+            ready = metrics._step_values[:, ready_idx] > 0.5
+            button_scores = []
+            for button_index in combo_button_indices:
+                valid = (requested[:, button_index] > 0.5) & ready
+                score = (metrics._step_values[:, success_idx] * valid).sum()
+                button_scores.append(score / valid.sum().clamp(min=1))
+            if torch.stack(button_scores).amin() >= combo_unlock_success:
+                term._mario_combo_unlocked = True
         if getattr(term, "_mario_combo_unlocked", False):
             stage_index = combo_stage
     weights = tuple(weight_stages[stage_index]["weights"])
@@ -6149,7 +6153,7 @@ def mario_requested_button_reward(
     leg: str | None = None,
     foot_pose_params: dict | None = None,
 ) -> torch.Tensor:
-    """Reward a physical press only when its foot reaches the rocker pose."""
+    """Reward physical activation with optional support, posture and pose gates."""
 
     requested = mario_nes_requested_buttons(env, command_name)
     enabled = _mario_enabled_button_mask(requested, enabled_buttons)
@@ -6820,10 +6824,8 @@ def mario_foot_pose_approach_reward(
 ) -> torch.Tensor:
     """Pay only new best progress toward one button's complete rocker pose.
 
-    The activation reward is deliberately multiplicative: a switch press is
-    useful only at the calibrated foot pose. That creates a discovery dead zone
-    when an unlearned direction has neither switch travel nor pose accuracy.
-    This potential term bridges that zone with bounded, one-time progress in
+    Switch-travel rewards cannot guide a foot that has not touched the key.
+    This term bridges that zone with bounded, one-time progress in
     both position and orientation. Holding, retreating, and cycling back to a
     previous best all pay zero.
     """

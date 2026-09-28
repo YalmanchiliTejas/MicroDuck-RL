@@ -51,10 +51,9 @@ LEG_BUTTON_ACTIVATION_WEIGHT = 2.0
 BUTTON_PROGRESS_WEIGHT = 2.0
 BUTTON_PROGRESS_POWER = 0.5
 FOOT_APPROACH_WEIGHT = 1.0
-# LEFT remained completely motionless after RIGHT and JUMP had converged. This
-# bounded potential reward supplies pose-discovery credit without paying for a
-# held hover or increasing the value of the already-learned directions.
-LEFT_POSE_PROGRESS_WEIGHT = 4.0
+# Every active command needs discovery feedback before touching its switch.
+# Best-so-far progress pays once per command; holding or cycling pays nothing.
+BUTTON_POSE_PROGRESS_WEIGHT = 4.0
 DISCOVERY_ACTION_RATE_WEIGHT = -0.02
 ALIVE_WEIGHT = 1.0
 # RewardManager multiplies every term by step_dt=0.02. This therefore produces
@@ -406,14 +405,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
         "robot_cfg": feet_cfg,
         "controller_cfg": platforms_cfg,
     }
-    # Nested SceneEntityCfg values are not resolved by mjlab's manager. The
-    # activation reward reuses its top-level resolved robot/controller cfgs;
-    # only scalar rocker calibration belongs in the nested parameter block.
-    button_foot_pose_params = {
-        key: value
-        for key, value in foot_pose_params.items()
-        if key not in ("command_name", "robot_cfg", "controller_cfg")
-    }
+    # Physical switch activation is the objective. The calibrated pose is
+    # approach guidance, not another requirement for a clean physical press.
+    # Its neutral-baseline subtraction can zero otherwise valid button credit.
     cfg.rewards["requested_button"] = RewardTermCfg(
         func=microduck_mdp.mario_requested_button_reward,
         weight=BUTTON_ACTIVATION_WEIGHT,
@@ -421,7 +415,6 @@ def make_microduck_mario_env_cfg(play: bool = False):
             **anchored_button_params,
             **camera_ready_params,
             **standing_pose_params,
-            "foot_pose_params": button_foot_pose_params,
         },
     )
     # Keep this separate in the logs: requested_button reports physical
@@ -486,15 +479,16 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "right_neutral_y", "robot_cfg", "controller_cfg",
             )}},
         )
-    cfg.rewards["dpad_left_pose_progress"] = RewardTermCfg(
-        func=microduck_mdp.mario_foot_pose_approach_reward,
-        weight=LEFT_POSE_PROGRESS_WEIGHT,
-        params={
-            "button_index": 2,
-            "leg": "left",
-            **foot_pose_params,
-        },
-    )
+    for name, button_index, leg in (
+        ("dpad_left", 2, "left"),
+        ("dpad_right", 3, "left"),
+        ("jump", 4, "right"),
+    ):
+        cfg.rewards[f"{name}_pose_progress"] = RewardTermCfg(
+            func=microduck_mdp.mario_foot_pose_approach_reward,
+            weight=BUTTON_POSE_PROGRESS_WEIGHT,
+            params={"button_index": button_index, "leg": leg, **foot_pose_params},
+        )
     cfg.rewards["commanded_foot_clearance"] = RewardTermCfg(
         func=microduck_mdp.mario_commanded_foot_clearance_reward,
         weight=0.0,
@@ -716,6 +710,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             params={
                 "command_name": "twist",
                 "combo_unlock_success": 0.65,
+                "combo_button_indices": (2, 3, 4),
                 "discovery_button_index": 2,
                 # Once LEFT reaches the demonstrated recovery level, return
                 # to balanced single-button sampling so RIGHT and JUMP keep

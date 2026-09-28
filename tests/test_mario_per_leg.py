@@ -143,6 +143,11 @@ def test_physical_press_rewards_outweigh_approach_shaping():
     assert left_pose.weight == pytest.approx(4.0)
     assert left_pose.params["button_index"] == 2
     assert left_pose.params["leg"] == "left"
+    for name, button, leg in (("dpad_right", 3, "left"), ("jump", 4, "right")):
+        progress = rewards[f"{name}_pose_progress"]
+        assert progress.weight == left_pose.weight
+        assert progress.params["button_index"] == button
+        assert progress.params["leg"] == leg
 
 
 def test_direction_metrics_separate_left_right_and_jump():
