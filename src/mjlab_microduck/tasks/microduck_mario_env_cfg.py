@@ -724,11 +724,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 "weight_stages": [
                     {"step": 0, "weights": LEFT_DISCOVERY_WEIGHTS},
                     {"step": 0, "weights": BALANCED_SINGLE_BUTTON_WEIGHTS},
-                    # The first clean-slate run is a single-button run.  Its
-                    # deterministic checkpoint battery decides whether a
-                    # later continuation may introduce combinations; noisy
-                    # training success must not make that decision alone.
-                    {"step": 5_000 * 24, "weights": TWO_BUTTON_WEIGHTS},
+                    # Introduce LEFT+JUMP and RIGHT+JUMP only after the single
+                    # buttons have had most of the run to consolidate.
+                    {"step": 2_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
                 ],
             },
         )

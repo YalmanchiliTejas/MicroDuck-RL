@@ -240,7 +240,7 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert stages[0]["weights"][1] == pytest.approx(0.40)
     assert stages[1]["weights"] == (0.25, 0.25, 0.25, 0, 0, 0.25, 0,
                                      0, 0, 0, 0, 0, 0, 0)
-    assert stages[2]["step"] == 5_000 * 24
+    assert stages[2]["step"] == 2_500 * 24
     assert stages[2]["weights"][8] > 0.0
     assert stages[2]["weights"][11] > 0.0
     assert stages[2]["weights"][7] == 0.0
@@ -296,7 +296,7 @@ def test_mario_curriculum_rebalances_left_before_unlocking_combos():
         ),
     )
     env = SimpleNamespace(
-        common_step_counter=5_000 * 24,
+        common_step_counter=2_500 * 24,
         device=torch.device("cpu"),
         command_manager=SimpleNamespace(
             get_term=lambda _name: term,
