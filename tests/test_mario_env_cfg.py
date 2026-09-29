@@ -250,6 +250,38 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
 
 
+def test_mario_combo_finetune_samples_combinations_without_dropping_singles(
+    monkeypatch,
+):
+    monkeypatch.setenv("MARIO_COMBO_FINETUNE", "1")
+    cfg = make_microduck_mario_env_cfg(play=False)
+    weights = cfg.commands["twist"].category_weights
+    assert sum(weights) == pytest.approx(1.0)
+    assert weights[1] == pytest.approx(0.10)  # LEFT
+    assert weights[2] == pytest.approx(0.10)  # RIGHT
+    assert weights[5] == pytest.approx(0.20)  # JUMP
+    assert weights[8] == pytest.approx(0.30)  # LEFT+JUMP
+    assert weights[11] == pytest.approx(0.30)  # RIGHT+JUMP
+    assert cfg.commands["twist"].neutral_transition_time_range == (0.5, 0.5)
+    assert "mario_command_stage" not in cfg.curriculum
+    assert "mario_transition_stage" not in cfg.curriculum
+
+    # The environment flag is training-only; evaluation remains balanced and
+    # continues to expose direct transitions for an honest checkpoint test.
+    play_cfg = make_microduck_mario_env_cfg(play=True)
+    assert play_cfg.commands["twist"].category_weights == (
+        0.25, 0.25, 0.25, 0, 0, 0.25, 0,
+        0, 0, 0, 0, 0, 0, 0,
+    )
+    assert play_cfg.commands["twist"].neutral_transition_time_range is None
+
+
+def test_mario_combo_finetune_flag_rejects_typos(monkeypatch):
+    monkeypatch.setenv("MARIO_COMBO_FINETUNE", "yes")
+    with pytest.raises(ValueError, match="must be 0 or 1"):
+        make_microduck_mario_env_cfg()
+
+
 def test_mario_transition_curriculum_waits_for_competence_before_direct_switches():
     cfg = make_microduck_mario_env_cfg()
     params = cfg.curriculum["mario_transition_stage"].params
