@@ -131,6 +131,14 @@ COMBINATION_FINETUNE_WEIGHTS = (
     0.0, 0.10, 0.10, 0, 0, 0.20, 0,
     0, 0.30, 0, 0, 0.30, 0, 0,
 )
+# Short anti-forgetting continuation after combination fine-tuning. Full
+# neutral windows recover idle behavior, while every deployed command remains
+# on-policy. RIGHT+JUMP receives a little extra rehearsal because it was the
+# weaker combination in the model-6000 evaluation.
+CONSOLIDATION_FINETUNE_WEIGHTS = (
+    0.20, 0.20, 0.10, 0, 0, 0.15, 0,
+    0, 0.15, 0, 0, 0.20, 0, 0,
+)
 FULL_COMMAND_WEIGHTS = TWO_BUTTON_WEIGHTS
 
 # Activation tensor order is UP, DOWN, LEFT, RIGHT, A, B. Only the physical
@@ -144,9 +152,16 @@ def make_microduck_mario_env_cfg(play: bool = False):
     """Create the flat-ground physical game-controller training environment."""
 
     combo_finetune_value = os.environ.get("MARIO_COMBO_FINETUNE", "0")
-    if combo_finetune_value not in ("0", "1"):
-        raise ValueError("MARIO_COMBO_FINETUNE must be 0 or 1")
+    consolidation_value = os.environ.get("MARIO_CONSOLIDATION_FINETUNE", "0")
+    if combo_finetune_value not in ("0", "1") or consolidation_value not in (
+        "0",
+        "1",
+    ):
+        raise ValueError("Mario fine-tune flags must be 0 or 1")
+    if combo_finetune_value == "1" and consolidation_value == "1":
+        raise ValueError("Mario fine-tune modes are mutually exclusive")
     combo_finetune = not play and combo_finetune_value == "1"
+    consolidation_finetune = not play and consolidation_value == "1"
 
     cfg = make_microduck_velocity_env_cfg(play=play, rough=False)
     # Robot must remain first: reset events assume its free joint starts qpos.
@@ -228,12 +243,15 @@ def make_microduck_mario_env_cfg(play: bool = False):
         neutral_transition_time_range=(
             None if play else NEUTRAL_TRANSITION_SETTLE_S
         ),
+        allow_sampled_neutral=consolidation_finetune,
         category_weights=(
             # Evaluation must not silently test combinations that the stage-0
             # checkpoint has never seen. Combo videos can opt in explicitly
             # after the success-gated curriculum unlocks them.
             SINGLE_BUTTON_WEIGHTS
             if play
+            else CONSOLIDATION_FINETUNE_WEIGHTS
+            if consolidation_finetune
             else COMBINATION_FINETUNE_WEIGHTS
             if combo_finetune
             else LEFT_DISCOVERY_WEIGHTS
@@ -737,7 +755,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
     ):
         cfg.curriculum.pop(name, None)
 
-    if not play and not combo_finetune:
+    if not play and not combo_finetune and not consolidation_finetune:
         cfg.curriculum["mario_command_stage"] = CurriculumTermCfg(
             func=microduck_mdp.mario_command_category_curriculum,
             params={
@@ -777,10 +795,10 @@ def make_microduck_mario_env_cfg(play: bool = False):
                 ],
             },
         )
-    elif combo_finetune:
+    elif combo_finetune or consolidation_finetune:
         # This mode is entered only from a learned checkpoint. Keep the full
-        # neutral recovery window fixed and bypass the single-skill competence
-        # gate so combination requests are present from the first rollout.
+        # neutral recovery window fixed and bypass curricula that could change
+        # the requested rehearsal distribution during the short continuation.
         cfg.commands["twist"].neutral_transition_time_range = (
             NEUTRAL_TRANSITION_SETTLE_S
         )

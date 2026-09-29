@@ -4,6 +4,7 @@
 set -euo pipefail
 checkpoint="${1:?Provide the original checkpoint, e.g. /absolute/path/model_2750.pt}"
 iterations="${2:-250}"
+learning_rate="${MARIO_RECOVERY_LEARNING_RATE:-0.0001}"
 if [[ ! -f "$checkpoint" || "$checkpoint" != /* ]]; then
     echo "Checkpoint must be an existing absolute path: $checkpoint" >&2
     exit 1
@@ -16,6 +17,10 @@ fi
 source_iteration=$((10#${BASH_REMATCH[1]}))
 if [[ ! "$iterations" =~ ^[1-9][0-9]*$ ]]; then
     echo "Iterations must be positive" >&2
+    exit 1
+fi
+if [[ ! "$learning_rate" =~ ^0\.[0-9]+$ || "$learning_rate" =~ ^0\.0*$ ]]; then
+    echo "MARIO_RECOVERY_LEARNING_RATE must be a positive decimal below 1" >&2
     exit 1
 fi
 repo_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
@@ -49,6 +54,7 @@ export CHECKPOINT_INTERVAL=50
 export MAX_JOBS=1
 echo "Source preserved: $checkpoint"
 echo "Recovery directory: $recovery_dir"
+echo "Fixed learning rate: $learning_rate"
 bash "$repo_dir/slurm_mario_controller.sh" \
-    --agent.algorithm.learning-rate 0.0001 \
+    --agent.algorithm.learning-rate "$learning_rate" \
     --agent.algorithm.schedule fixed

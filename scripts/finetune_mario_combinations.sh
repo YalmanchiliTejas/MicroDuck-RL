@@ -8,4 +8,5 @@ iterations="${2:-2000}"
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 export MARIO_COMBO_FINETUNE=1
+export MARIO_CONSOLIDATION_FINETUNE=0
 exec bash "${script_dir}/recover_mario.sh" "${checkpoint}" "${iterations}"

@@ -5808,11 +5808,12 @@ class MarioNesCommand(CommandTerm):
                     *settle_range
                 )
             sample_ids = env_ids[~previous_active]
-            # Neutral experience is supplied by the mandatory settling
-            # windows; sampling another neutral here would create long idle
-            # stretches and reduce active-button learning.
-            probabilities = probabilities.clone()
-            probabilities[0] = 0.0
+            # Most training modes get neutral experience from the mandatory
+            # settling windows. Consolidation can additionally sample a full
+            # neutral command window to rehearse sustained idle behavior.
+            if not getattr(self.cfg, "allow_sampled_neutral", False):
+                probabilities = probabilities.clone()
+                probabilities[0] = 0.0
         else:
             sample_ids = env_ids
         if len(sample_ids) > 0:
@@ -5843,6 +5844,9 @@ class MarioNesCommandCfg(CommandTermCfg):
     # When set, every active command is followed by a neutral release window
     # of this duration before another active category may be sampled.
     neutral_transition_time_range: tuple[float, float] | None = None
+    # When true, the neutral category remains eligible after a transition
+    # settling window and therefore lasts for the normal resampling duration.
+    allow_sampled_neutral: bool = False
     # Same order as the explicit command table above. Sums to 1.0 by default.
     category_weights: tuple[float, ...] = (
         0.10,  # neutral

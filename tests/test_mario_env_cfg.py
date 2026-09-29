@@ -263,6 +263,7 @@ def test_mario_combo_finetune_samples_combinations_without_dropping_singles(
     assert weights[8] == pytest.approx(0.30)  # LEFT+JUMP
     assert weights[11] == pytest.approx(0.30)  # RIGHT+JUMP
     assert cfg.commands["twist"].neutral_transition_time_range == (0.5, 0.5)
+    assert cfg.commands["twist"].allow_sampled_neutral is False
     assert "mario_command_stage" not in cfg.curriculum
     assert "mario_transition_stage" not in cfg.curriculum
 
@@ -279,6 +280,32 @@ def test_mario_combo_finetune_samples_combinations_without_dropping_singles(
 def test_mario_combo_finetune_flag_rejects_typos(monkeypatch):
     monkeypatch.setenv("MARIO_COMBO_FINETUNE", "yes")
     with pytest.raises(ValueError, match="must be 0 or 1"):
+        make_microduck_mario_env_cfg()
+
+
+def test_mario_consolidation_rehearses_neutral_and_every_deployed_action(
+    monkeypatch,
+):
+    monkeypatch.setenv("MARIO_CONSOLIDATION_FINETUNE", "1")
+    cfg = make_microduck_mario_env_cfg(play=False)
+    weights = cfg.commands["twist"].category_weights
+    assert sum(weights) == pytest.approx(1.0)
+    assert weights[0] == pytest.approx(0.20)  # sustained neutral
+    assert weights[1] == pytest.approx(0.20)  # LEFT
+    assert weights[2] == pytest.approx(0.10)  # RIGHT
+    assert weights[5] == pytest.approx(0.15)  # JUMP
+    assert weights[8] == pytest.approx(0.15)  # LEFT+JUMP
+    assert weights[11] == pytest.approx(0.20)  # RIGHT+JUMP
+    assert cfg.commands["twist"].allow_sampled_neutral is True
+    assert cfg.commands["twist"].neutral_transition_time_range == (0.5, 0.5)
+    assert "mario_command_stage" not in cfg.curriculum
+    assert "mario_transition_stage" not in cfg.curriculum
+
+
+def test_mario_finetune_modes_are_mutually_exclusive(monkeypatch):
+    monkeypatch.setenv("MARIO_COMBO_FINETUNE", "1")
+    monkeypatch.setenv("MARIO_CONSOLIDATION_FINETUNE", "1")
+    with pytest.raises(ValueError, match="mutually exclusive"):
         make_microduck_mario_env_cfg()
 
 
@@ -341,6 +368,27 @@ def test_mario_command_inserts_neutral_between_active_requests():
     assert term._command.tolist() == [[0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]
     assert term.time_left.tolist() == pytest.approx([0.5, 2.0])
     assert term.command_age.tolist() == pytest.approx([-0.02, -0.02])
+
+
+def test_mario_command_can_sample_sustained_neutral_after_settling():
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term._env = SimpleNamespace(
+        num_envs=1, device=torch.device("cpu"), step_dt=0.02
+    )
+    term.cfg = SimpleNamespace(
+        category_weights=(1.0,) + (0.0,) * 13,
+        neutral_transition_time_range=(0.5, 0.5),
+        allow_sampled_neutral=True,
+    )
+    term._command = torch.zeros(1, 3)
+    term.command_age = torch.ones(1)
+    term.time_left = torch.full((1,), 2.0)
+    term._resample_command(torch.arange(1))
+    assert term._command.tolist() == [[0.0, 0.0, 0.0]]
+    # The command manager keeps the normal resampling time rather than the
+    # short transition-settle time, producing genuine idle rehearsal.
+    assert term.time_left.tolist() == pytest.approx([2.0])
+    assert term.command_age.tolist() == pytest.approx([-0.02])
 
 
 def test_mario_balance_reward_closes_press_then_crash_loophole():
