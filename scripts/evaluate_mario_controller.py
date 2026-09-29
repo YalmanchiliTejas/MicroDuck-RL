@@ -7,6 +7,8 @@ Example on a GPU node:
 Reports clean-success fractions over ready command timesteps, not command
 completion probabilities. Sampled actions are the default; --mode mean checks
 the same actor and normalizer used by deployment without a consolidation run.
+Use --hold-head for an A/B test that replaces only neck/head policy outputs
+with zero raw action (the configured HOME offsets) before stepping the env.
 """
 
 import argparse
@@ -33,6 +35,22 @@ FAILURE_COMPONENTS = (
     "b_released_if_unrequested",
 )
 CAMERA_COMPONENTS = ("trunk_height", "camera_height", "trunk_tilt", "view_alignment")
+
+
+def hold_head_at_default(actions: torch.Tensor, target_names: list[str]) -> torch.Tensor:
+    """Return actions with neck/head targets set to their default-position offsets."""
+    head_ids = [
+        index for index, name in enumerate(target_names)
+        if "neck" in name.lower() or "head" in name.lower()
+    ]
+    if len(head_ids) != 4:
+        raise RuntimeError(
+            f"Expected four neck/head action targets, found {len(head_ids)}: "
+            f"{[target_names[index] for index in head_ids]}"
+        )
+    held = actions.clone()
+    held[:, head_ids] = 0.0
+    return held
 
 
 class TransitionDiagnostics:
@@ -131,6 +149,10 @@ def main():
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--mode", choices=("sampled", "mean"), default="sampled")
+    parser.add_argument(
+        "--hold-head", action="store_true",
+        help="Hold all four neck/head joints at configured HOME offsets.",
+    )
     parser.add_argument("--include-combinations", action="store_true")
     parser.add_argument("--device", default="cuda:0")
     parser.add_argument("--output", type=Path, help="Also save the JSON report to this file")
@@ -187,6 +209,7 @@ def main():
         runner = runner_cls(env, asdict(agent_cfg), device=args.device)
         runner.load(str(args.checkpoint), map_location=args.device)
         policy = runner.get_inference_policy(device=args.device)
+        action_target_names = raw_env.action_manager.get_term("joint_pos").target_names
         obs, _ = env.reset()
         metrics = raw_env.metrics_manager
         ready_idx = metrics.active_terms.index("command_ready")
@@ -208,6 +231,8 @@ def main():
                 commands = raw_env.command_manager.get_command("twist").clone()
                 ages = raw_env.command_manager.get_term("twist").command_age.clone()
                 actions = policy(obs, stochastic_output=args.mode == "sampled")
+                if args.hold_head:
+                    actions = hold_head_at_default(actions, action_target_names)
                 obs, _, done, _ = env.step(actions)
                 fallen = raw_env.termination_manager.get_term("fell_over")
                 counts += command_counts(
@@ -228,6 +253,7 @@ def main():
         report = {
             "checkpoint": str(args.checkpoint.resolve()),
             "mode": args.mode, "seed": args.seed,
+            "head_control": "home_held" if args.hold_head else "policy",
             "num_envs": args.num_envs, "steps": args.steps,
             "environment": "play configuration, balanced command sampling",
             "falls": falls.item(), "completed_episodes": endings.item(),

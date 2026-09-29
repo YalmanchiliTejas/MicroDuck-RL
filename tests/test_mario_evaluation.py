@@ -31,6 +31,21 @@ def test_command_counts_exclude_transition_and_fall_success():
     assert counts.tolist() == [[1, 1], [1, 1], [1, 0], [2, 1], [0, 0], [0, 0]]
 
 
+def test_hold_head_at_default_preserves_every_leg_action():
+    module = load_evaluator()
+    actions = torch.arange(28, dtype=torch.float).reshape(2, 14)
+    names = [
+        "left_hip_yaw", "left_hip_roll", "left_hip_pitch", "left_knee", "left_ankle",
+        "neck_pitch", "head_pitch", "head_yaw", "head_roll",
+        "right_hip_yaw", "right_hip_roll", "right_hip_pitch", "right_knee", "right_ankle",
+    ]
+    held = module.hold_head_at_default(actions, names)
+    assert torch.equal(held[:, :5], actions[:, :5])
+    assert torch.equal(held[:, 9:], actions[:, 9:])
+    assert torch.equal(held[:, 5:9], torch.zeros(2, 4))
+    assert torch.equal(actions, torch.arange(28, dtype=torch.float).reshape(2, 14))
+
+
 def test_transitions_track_exposure_and_do_not_cross_episode_resets():
     module = load_evaluator()
     tracker = module.TransitionDiagnostics(1, "cpu")
