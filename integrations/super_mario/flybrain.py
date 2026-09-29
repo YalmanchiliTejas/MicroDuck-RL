@@ -68,7 +68,11 @@ def preprocess_frame(rgb: np.ndarray, size: int = 84) -> np.ndarray:
     frame = np.asarray(rgb)
     if frame.ndim != 3 or frame.shape[2] < 3:
         raise ValueError("frame must have shape (height, width, 3 or 4)")
-    tensor = torch.as_tensor(frame[:, :, :3], dtype=torch.float32)
+    # Emulator wrappers can return channel-reversed NumPy views with negative
+    # strides. PyTorch cannot wrap those views, so materialize a compact RGB
+    # array at this boundary.
+    rgb = np.ascontiguousarray(frame[:, :, :3])
+    tensor = torch.as_tensor(rgb, dtype=torch.float32)
     # ITU-R BT.601 luminance. Keeping replay as uint8 cuts memory by 4x.
     gray = tensor @ tensor.new_tensor((0.299, 0.587, 0.114))
     gray = F.interpolate(gray[None, None], size=(size, size), mode="area")[0, 0]

@@ -86,6 +86,16 @@ def test_frame_preprocessing_and_stack_have_cnn_shape():
     assert np.array_equal(state[0], state[-1])
 
 
+def test_frame_preprocessing_accepts_negative_stride_emulator_views():
+    flybrain = _load_flybrain()
+    rgb = np.zeros((240, 256, 3), dtype=np.uint8)
+    negative_stride_view = rgb[:, ::-1, :]
+    assert negative_stride_view.strides[1] < 0
+    frame = flybrain.preprocess_frame(negative_stride_view)
+    assert frame.shape == (84, 84)
+    assert frame.dtype == np.uint8
+
+
 def test_flybrain_config_locks_four_frames_and_ten_intents():
     flybrain = _load_flybrain()
     assert flybrain.FlybrainConfig().stack_depth == 4
