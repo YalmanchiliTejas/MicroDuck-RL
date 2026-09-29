@@ -41,6 +41,9 @@ def test_sidecar_action_mapping_cancels_opposite_directions():
     sidecar = _load_sidecar()
     assert sidecar.action_index(sidecar.PadLevels(left=True, right=True)) == 0
     assert sidecar.action_index(sidecar.PadLevels(left=True, right=True, jump=True)) == 3
+    assert sidecar.action_index(
+        sidecar.PadLevels(left=True, right=True, jump=True), run=True
+    ) == 3
 
 
 def test_sidecar_maps_direction_and_jump_combinations():
@@ -50,11 +53,19 @@ def test_sidecar_maps_direction_and_jump_combinations():
     assert sidecar.action_index(sidecar.PadLevels(jump=True)) == 3
     assert sidecar.action_index(sidecar.PadLevels(left=True, jump=True)) == 4
     assert sidecar.action_index(sidecar.PadLevels(right=True, jump=True)) == 5
+    assert sidecar.action_index(sidecar.PadLevels(left=True), run=True) == 6
+    assert sidecar.action_index(sidecar.PadLevels(right=True), run=True) == 7
+    assert sidecar.action_index(sidecar.PadLevels(left=True, jump=True), run=True) == 8
+    assert sidecar.action_index(sidecar.PadLevels(right=True, jump=True), run=True) == 9
     assert sidecar.nes_actions() == [
         ["NOOP"],
+        ["left"],
+        ["right"],
+        ["A"],
+        ["left", "A"],
+        ["right", "A"],
         ["left", "B"],
         ["right", "B"],
-        ["A"],
         ["left", "A", "B"],
         ["right", "A", "B"],
     ]

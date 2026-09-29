@@ -189,9 +189,9 @@ class RolloutRecorder:
         destination = self.root / name
         temporary = self.root / f".{name}.{uuid.uuid4().hex}.tmp"
         metadata = {
-            # Schema 2 records the six-action automatic-run semantics. Schema 1
-            # used a ten-action space with an independently selected run bit.
-            "schema": 2,
+            # Schema 3 records ten game intents. Direction/jump are physically
+            # measured; run is a virtual intent applied to that measured direction.
+            "schema": 3,
             "run_id": self.run_id,
             "episode": self._episode,
             "complete": bool(rows[-1]["terminated"] or rows[-1]["truncated"]),
@@ -250,7 +250,7 @@ def load_rollout(path: Path) -> tuple[dict, dict[str, np.ndarray]]:
     with np.load(path, allow_pickle=False) as archive:
         metadata = json.loads(str(archive["metadata"]))
         arrays = {key: archive[key].copy() for key in archive.files if key != "metadata"}
-    if metadata.get("schema") != 2:
+    if metadata.get("schema") != 3:
         raise ValueError("unsupported rollout schema")
     lengths = {len(value) for value in arrays.values()}
     if len(lengths) != 1:

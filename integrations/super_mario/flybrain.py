@@ -1,10 +1,10 @@
 """Pixel-based Double-DQN "flybrain" for the Microduck Mario controller.
 
-The flybrain chooses exactly one of the six commands the physical controller
-can execute. During direct training the command is applied to the emulator;
-during combined MuJoCo training it is first sent as a request to the robot.
-NES B is derived automatically from measured LEFT/RIGHT and is not a learned
-action or a physical button.
+The flybrain chooses one of ten game intents. During direct training the intent
+is applied to the emulator; during combined MuJoCo training its left/right/jump
+part is sent to the robot. NES B remains virtual: the sidecar applies it only
+when the chosen intent requires running and only in the direction the duck
+actually presses.
 """
 
 from __future__ import annotations
@@ -29,21 +29,29 @@ class FlybrainAction(IntEnum):
     JUMP = 3
     LEFT_JUMP = 4
     RIGHT_JUMP = 5
+    LEFT_RUN = 6
+    RIGHT_RUN = 7
+    LEFT_RUN_JUMP = 8
+    RIGHT_RUN_JUMP = 9
 
 
 ACTION_LEVELS: tuple[tuple[bool, bool, bool, bool], ...] = (
-    # left, right, jump, derived virtual run (NES B)
+    # requested left, right, jump, virtual run (NES B)
     (False, False, False, False),
+    (True, False, False, False),
+    (False, True, False, False),
+    (False, False, True, False),
+    (True, False, True, False),
+    (False, True, True, False),
     (True, False, False, True),
     (False, True, False, True),
-    (False, False, True, False),
     (True, False, True, True),
     (False, True, True, True),
 )
 
 
 def action_levels(action: int | FlybrainAction) -> tuple[bool, bool, bool, bool]:
-    """Map an action to physical levels plus automatically derived run."""
+    """Map an action to requested physical levels plus a virtual-run intent."""
 
     try:
         index = int(action)
@@ -123,7 +131,7 @@ class FlybrainConfig:
             raise ValueError("flybrain temporal input must contain exactly four frames")
         if self.num_actions != len(ACTION_LEVELS):
             raise ValueError(
-                f"flybrain action space must contain exactly {len(ACTION_LEVELS)} commands"
+                f"flybrain action space must contain exactly {len(ACTION_LEVELS)} intents"
             )
         if self.replay_start < self.batch_size:
             raise ValueError("replay_start must be at least batch_size")
@@ -343,7 +351,7 @@ class FlybrainAgent:
         output.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "schema": 2,
+                "schema": 3,
                 "actions": [action.name.lower() for action in FlybrainAction],
                 "config": asdict(self.config),
                 "online": self.online.state_dict(),
@@ -360,10 +368,10 @@ class FlybrainAgent:
         cls, path: str | Path, device: str | torch.device = "cpu"
     ) -> "FlybrainAgent":
         checkpoint = torch.load(path, map_location=device, weights_only=False)
-        if checkpoint.get("schema") != 2:
+        if checkpoint.get("schema") != 3:
             raise ValueError(
-                "unsupported flybrain checkpoint schema; start a fresh six-action "
-                "checkpoint because run is now automatic"
+                "unsupported flybrain checkpoint schema; start a fresh ten-intent "
+                "checkpoint with separate walk and virtual-run choices"
             )
         agent = cls(FlybrainConfig(**checkpoint["config"]), device=device)
         agent.online.load_state_dict(checkpoint["online"])

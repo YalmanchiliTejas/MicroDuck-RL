@@ -152,25 +152,33 @@ def decode_packet(payload: bytes) -> tuple[int, PadLevels]:
 
 
 def nes_actions() -> list[list[str]]:
-    """Six physical commands; directional commands automatically hold NES B."""
+    """Game intents with walk/run variants; B is never a physical duck pad."""
 
     return [
         ["NOOP"],
+        ["left"],
+        ["right"],
+        ["A"],
+        ["left", "A"],
+        ["right", "A"],
         ["left", "B"],
         ["right", "B"],
-        ["A"],
         ["left", "A", "B"],
         ["right", "A", "B"],
     ]
 
 
-def action_index(levels: PadLevels) -> int:
-    """Map measured physical pads to the six-action auto-run JoypadSpace."""
+def action_index(levels: PadLevels, run: bool = False) -> int:
+    """Map measured pads plus the flybrain's virtual-run intent to the game."""
 
     horizontal = int(levels.right) - int(levels.left)
     if horizontal < 0:
+        if run:
+            return 8 if levels.jump else 6
         return 4 if levels.jump else 1
     if horizontal > 0:
+        if run:
+            return 9 if levels.jump else 7
         return 5 if levels.jump else 2
     return 3 if levels.jump else 0
 
@@ -334,11 +342,14 @@ def run(args: argparse.Namespace) -> None:
                 # if this process stalls or exits.
                 request_sender.send(requested)
             levels = demo_levels(step) if args.demo else receiver.poll()
-            # Direction and jump come only from measured pads. The corresponding
-            # Joypad direction actions always include virtual NES B, so Mario
-            # runs automatically without a fourth robot button.
+            # Direction and jump come only from measured pads. B comes from the
+            # current flybrain intent, so the duck walks normally unless the
+            # game state calls for running. If the duck presses the wrong
+            # direction, B follows that measured direction rather than cheating
+            # with the requested one.
+            virtual_run = requested.run if flybrain is not None else levels.run
             observation, reward, terminated, truncated, info = env.step(
-                action_index(levels)
+                action_index(levels, run=virtual_run)
             )
             if active_state is not None:
                 interval_reward += float(reward)
