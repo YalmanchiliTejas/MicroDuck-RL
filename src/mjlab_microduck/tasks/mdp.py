@@ -6434,6 +6434,43 @@ def _mario_height_and_tilt(
     return trunk_z, camera_z, tilt_deg
 
 
+def _mario_camera_view_alignment(
+    env: ManagerBasedRlEnv,
+    camera_cfg: SceneEntityCfg,
+) -> torch.Tensor:
+    """Camera optical-axis cosine to the fixed monitor in each environment."""
+    robot: Entity = env.scene[camera_cfg.name]
+    camera_pos = robot.data.site_pos_w[:, camera_cfg.site_ids[0]]
+    camera_quat = robot.data.site_quat_w[:, camera_cfg.site_ids[0]]
+    camera_forward = quat_apply(
+        camera_quat, camera_pos.new_tensor((1.0, 0.0, 0.0)).expand_as(camera_pos)
+    )
+    monitor_center = env.scene.terrain.env_origins + camera_pos.new_tensor(
+        (0.445, 0.0, 0.205)
+    )
+    to_monitor = torch.nn.functional.normalize(monitor_center - camera_pos, dim=-1)
+    return (camera_forward * to_monitor).sum(dim=-1).clamp(-1.0, 1.0)
+
+
+def mario_camera_view_cost(
+    env: ManagerBasedRlEnv,
+    camera_cfg: SceneEntityCfg,
+    full_view_alignment: float = 0.95,
+    alignment_scale: float = 0.10,
+) -> torch.Tensor:
+    """Nonnegative sightline deficit on ALL commands, including neutral.
+
+    The button gate alone provides no view incentive when no button is
+    requested. This cost remains informative below the gate's zero cutoff,
+    while charging nothing anywhere inside its full-readiness tolerance.
+    """
+    if alignment_scale <= 0 or not -1.0 < full_view_alignment <= 1.0:
+        raise ValueError("Invalid camera alignment cost parameters")
+    alignment = _mario_camera_view_alignment(env, camera_cfg)
+    alignment = torch.nan_to_num(alignment, nan=-1.0)
+    return (full_view_alignment - alignment).clamp(min=0.0) / alignment_scale
+
+
 def mario_camera_ready(
     env: ManagerBasedRlEnv,
     camera_cfg: SceneEntityCfg,
@@ -6454,22 +6491,7 @@ def mario_camera_ready(
     """
 
     trunk_z, camera_z, tilt_deg = _mario_height_and_tilt(env, camera_cfg)
-    robot: Entity = env.scene[camera_cfg.name]
-    camera_pos = robot.data.site_pos_w[:, camera_cfg.site_ids[0]]
-    camera_quat = robot.data.site_quat_w[:, camera_cfg.site_ids[0]]
-    camera_forward = quat_apply(
-        camera_quat, camera_pos.new_tensor((1.0, 0.0, 0.0)).expand_as(camera_pos)
-    )
-    # The monitor is fixed at (0.45, 0, 0.205) in each environment; its screen
-    # plane is 5 mm toward the duck.  The head_camera site's local +X points
-    # along the optical axis at HOME (verified against the MJCF camera frame).
-    monitor_center = env.scene.terrain.env_origins + camera_pos.new_tensor(
-        (0.445, 0.0, 0.205)
-    )
-    to_monitor = torch.nn.functional.normalize(
-        monitor_center - camera_pos, dim=-1
-    )
-    view_alignment = (camera_forward * to_monitor).sum(dim=-1)
+    view_alignment = _mario_camera_view_alignment(env, camera_cfg)
 
     def smooth_ramp(value: torch.Tensor, low: float, high: float) -> torch.Tensor:
         t = ((value - low) / (high - low)).clamp(0.0, 1.0)

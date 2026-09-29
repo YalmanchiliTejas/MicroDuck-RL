@@ -1130,3 +1130,19 @@ def test_camera_readiness_rejects_crouch_low_camera_tilt_and_bad_view():
     assert crouch[0].item() == 0.0
     assert crouch[1].item() > 0.0
     assert crouch[2].item() > 0.0
+    view_cost = microduck_mdp.mario_camera_view_cost(env, camera_cfg)
+    assert view_cost[:4].tolist() == pytest.approx([0.] * 4)
+    assert view_cost[4] > 0
+
+
+def test_camera_view_cost_teaches_neutral_below_readiness_cutoff(monkeypatch):
+    cfg = make_microduck_mario_env_cfg()
+    reward = cfg.rewards["camera_view"]
+    assert reward.weight < 0
+    assert reward.params["full_view_alignment"] == cfg.metrics["camera_ready"].params["full_view_alignment"]
+    # The function does not require an active command or a switch contact.
+    monkeypatch.setattr(microduck_mdp, "_mario_camera_view_alignment",
+                        lambda *a, **k: torch.tensor([1., .95, .90, .80, .5, -1.]))
+    costs = reward.func(SimpleNamespace(), **reward.params)
+    assert costs.tolist() == pytest.approx([0., 0., .5, 1.5, 4.5, 19.5], abs=1e-5)
+    assert (costs * reward.weight <= 0).all()

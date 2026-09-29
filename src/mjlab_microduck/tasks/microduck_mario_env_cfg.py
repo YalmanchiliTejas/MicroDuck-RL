@@ -79,6 +79,7 @@ FULL_CAMERA_TILT_DEG = 12.0
 MAX_CAMERA_TILT_DEG = 20.0
 MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
+CAMERA_VIEW_COST_WEIGHT = -0.2
 FULL_LEG_POSE_ERROR = 0.30
 MAX_LEG_POSE_ERROR = 0.80
 # Full-sole physics probes show that the stable controller motion is a planted
@@ -327,6 +328,18 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "asset_cfg": SceneEntityCfg(
                 "robot", joint_names=(r"^(?!passive_).*(neck|head).*",)
             ),
+        },
+    )
+    # The policy can satisfy HOME joint regularization imperfectly while
+    # missing the monitor. Neutral has no positive button reward to teach the
+    # camera gate, so enforce the physical sightline on every command.
+    cfg.rewards["camera_view"] = RewardTermCfg(
+        func=microduck_mdp.mario_camera_view_cost,
+        weight=CAMERA_VIEW_COST_WEIGHT,
+        params={
+            "camera_cfg": SceneEntityCfg("robot", site_names=("head_camera",)),
+            "full_view_alignment": FULL_VIEW_ALIGNMENT,
+            "alignment_scale": FULL_VIEW_ALIGNMENT - MIN_VIEW_ALIGNMENT,
         },
     )
     # Stationary manipulation should be quasi-static.  The old values were

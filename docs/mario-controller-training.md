@@ -82,8 +82,29 @@ fall rates help compare frequently and rarely sampled transitions, but do not
 prove causality. `failure_fractions_at_fall` captures failed checks on the actual
 falling state, before the simulator automatically resets it.
 
-These diagnostics leave the training rewards and exploration unchanged. Inspect
-the report before choosing between release, return-motion, or posture fixes.
+`seconds_before_fall` reports checks 0.2 and 0.5 seconds before each fall,
+excluding falls too early in an episode to have that history. The supplemental
+`com_balance` check uses the existing CoM/support-region reward score below
+0.5; it is not added to the definition of clean success. This helps distinguish
+loss of balance before a fall from the inevitable bad posture at the fall.
+
+### Camera-view correction after checkpoint 2750
+
+Measured neutral failures were dominated by sightline (94.8%), not low trunk
+height (3.2%) or lost support (3.9%). HOME forward kinematics gives a passing
+alignment of about 0.990, so changing the monitor or HOME target is unwarranted.
+The recipe now adds `camera_view`, a nonnegative physical sightline deficit
+with a negative weight (-0.2) on every command. Unlike the activation gate, it
+can teach looking toward the monitor while neutral or before touching a key.
+It is zero above the existing full-alignment threshold (0.95). There is no
+new positive idle reward, and the success thresholds remain unchanged.
+
+This is a training objective correction, not a change to the checkpoint's
+actions: re-evaluating the old checkpoint will not make it look forward.
+Preserve checkpoint 2750 and collect the pre-fall report before choosing a
+balance intervention. The camera correction can be learned by resuming saved
+weights; it does not require another fresh initialization. Retain std/entropy
+settings and compare short continuations under the same evaluation setup.
 
 `--mode mean` evaluates the exported policy's action convention, without an
 extra training/consolidation phase. `--include-combinations` tests both chords.

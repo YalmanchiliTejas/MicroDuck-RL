@@ -78,6 +78,42 @@ class TransitionDiagnostics:
         return result
 
 
+class PreFallDiagnostics:
+    """Sample failed checks before a fall, never from a preceding episode."""
+
+    def __init__(self, num_envs, num_checks, step_dt, device):
+        self.lags = {str(seconds): max(1, round(seconds / step_dt)) for seconds in (.2, .5)}
+        self.history = torch.zeros(max(self.lags.values()) + 1, num_envs, num_checks,
+                                   dtype=torch.bool, device=device)
+        self.age = torch.zeros(num_envs, dtype=torch.long, device=device)
+        self.t = 0
+        self.totals = {key: torch.zeros(num_checks, dtype=torch.long, device=device) for key in self.lags}
+        self.samples = {key: torch.zeros((), dtype=torch.long, device=device) for key in self.lags}
+
+    def update(self, failed, fallen, done):
+        self.history[self.t % len(self.history)] = failed
+        for key, lag in self.lags.items():
+            valid = fallen.bool() & (self.age >= lag)
+            past = self.history[(self.t - lag) % len(self.history)]
+            self.totals[key] += (past & valid[:, None]).sum(0)
+            self.samples[key] += valid.sum()
+        self.age = torch.where(done.bool(), 0, self.age + 1)
+        self.t += 1
+
+    def report(self, names):
+        return {
+            key: {
+                "eligible_falls": self.samples[key].item(),
+                "failure_fractions": {
+                    name.removeprefix("diagnostic_"): n / self.samples[key].item()
+                    if self.samples[key].item() else None
+                    for name, n in zip(names, self.totals[key].cpu().tolist(), strict=True)
+                },
+            }
+            for key in self.lags
+        }
+
+
 def command_counts(commands, ready, success, fallen):
     """Keep neutral, transitions and terminal failures out of active success."""
     counts = []
@@ -137,6 +173,12 @@ def main():
             params={**cfg.metrics["camera_ready"].params, "component": component},
         )
         diagnostic_names.append(name)
+    # Supplemental balance diagnostic, NOT a new clean-success requirement.
+    cfg.metrics["diagnostic_com_balance"] = MetricsTermCfg(
+        func=cfg.rewards["commanded_trunk_offset"].func,
+        params=dict(cfg.rewards["commanded_trunk_offset"].params),
+    )
+    diagnostic_names.append("diagnostic_com_balance")
     agent_cfg = load_rl_cfg(task)
     raw_env = ManagerBasedRlEnv(cfg=cfg, device=args.device)
     try:
@@ -157,6 +199,7 @@ def main():
                                dtype=torch.long, device=args.device)
         fall_failures = torch.zeros(len(diagnostic_names), dtype=torch.long, device=args.device)
         transitions = TransitionDiagnostics(args.num_envs, args.device)
+        prefall = PreFallDiagnostics(args.num_envs, len(diagnostic_names), raw_env.step_dt, args.device)
         readiness_threshold = success_params.get("readiness_threshold", 0.5)
         with torch.inference_mode():
             for _ in range(args.steps):
@@ -181,6 +224,7 @@ def main():
                     failures[i] += (failed & eligible[:, None]).sum(0)
                 fall_failures += (failed & fallen[:, None]).sum(0)
                 transitions.update(commands, ages, fallen, done)
+                prefall.update(failed, fallen, done)
         report = {
             "checkpoint": str(args.checkpoint.resolve()),
             "mode": args.mode, "seed": args.seed,
@@ -193,8 +237,10 @@ def main():
                 "Camera subgate failures use the same readiness threshold; several mildly reduced subgates can also fail the product.",
                 "Transition attribution is association, not proof of cause. Windows still active at evaluation end are censored.",
                 "Failure measurements are captured before automatic episode reset.",
+                "com_balance is supplemental: existing CoM support-region score below 0.5; it is not part of clean success.",
             ],
             "transitions": transitions.report(raw_env.step_dt),
+            "seconds_before_fall": prefall.report(diagnostic_names),
         }
         failure_rows = failures.cpu().tolist()
         for i, (name, (eligible, successful)) in enumerate(zip(COMMANDS, counts.cpu().tolist(), strict=True)):

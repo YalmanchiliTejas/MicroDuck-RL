@@ -85,3 +85,16 @@ def test_neutral_failure_components_match_success_without_changing_it(monkeypatc
     released = mdp.mario_clean_button_success(env, component="left_released_if_unrequested", **params)
     assert released.tolist() == [1., 0., 1., 1., 1., 1.]
     assert mdp.mario_clean_button_success(env, component="jump_released_if_unrequested", **params).all()
+
+
+def test_prefall_history_uses_past_state_and_excludes_previous_episode():
+    module = load_evaluator()
+    history = module.PreFallDiagnostics(1, 1, .1, "cpu")
+    for failed, fall, done in ((True, False, False), (False, False, False),
+                              (False, True, True), (False, True, True)):
+        history.update(torch.tensor([[failed]]), torch.tensor([fall]), torch.tensor([done]))
+    report = history.report(["diagnostic_support"])
+    assert report["0.2"]["eligible_falls"] == 1
+    assert report["0.2"]["failure_fractions"]["support"] == 1.
+    assert report["0.5"]["eligible_falls"] == 0
+    assert report["0.5"]["failure_fractions"]["support"] is None

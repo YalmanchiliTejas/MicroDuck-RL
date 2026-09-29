@@ -15,6 +15,28 @@ from scipy.spatial.transform import Rotation
 ROBOT_DIR = Path(__file__).parents[1] / "src/mjlab_microduck/robot/microduck"
 
 
+def test_home_head_pose_satisfies_monitor_view_target():
+    """HOME regularization and the physical view objective must be compatible."""
+    import re
+    import mjlab_microduck.tasks  # register before importing robot constants
+    from mjlab_microduck.robot.microduck_constants import HOME_FRAME
+    from mjlab_microduck.tasks.microduck_mario_env_cfg import STAND_HEIGHT, FULL_VIEW_ALIGNMENT
+    model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "scene_controller_nes.xml"))
+    data = mujoco.MjData(model)
+    root = model.joint("trunk_base_freejoint").qposadr[0]
+    data.qpos[root:root + 7] = (0, 0, STAND_HEIGHT, 1, 0, 0, 0)
+    for index in range(model.njnt):
+        for pattern, value in HOME_FRAME.joint_pos.items():
+            if re.fullmatch(pattern, model.joint(index).name):
+                data.qpos[model.jnt_qposadr[index]] = value
+    mujoco.mj_forward(model, data)
+    site = model.site("head_camera").id
+    delta = np.array([.445, 0, .205]) - data.site_xpos[site]
+    optical_axis = data.site_xmat[site].reshape(3, 3)[:, 0]
+    alignment = np.dot(optical_axis, delta / np.linalg.norm(delta))
+    assert alignment >= FULL_VIEW_ALIGNMENT
+
+
 def sole_vertices(side):
     model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "robot_groundcontact.xml"))
     geom = model.geom(f"{side}_foot_collision").id
