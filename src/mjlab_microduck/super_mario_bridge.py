@@ -18,7 +18,7 @@ DEFAULT_REQUEST_PORT = 55356
 
 @dataclass(frozen=True, slots=True)
 class FlybrainRequest:
-    """High-level request; run is virtual and never enters robot observations."""
+    """High-level physical request; run is derived and never enters observations."""
 
     left: bool = False
     right: bool = False

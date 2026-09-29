@@ -34,7 +34,7 @@ def _load_processed(path: Path) -> set[str]:
     if not path.exists():
         return set()
     data = json.loads(path.read_text())
-    if data.get("schema") != 1 or not isinstance(data.get("rollouts"), list):
+    if data.get("schema") != 2 or not isinstance(data.get("rollouts"), list):
         raise ValueError(f"invalid processed-rollout manifest: {path}")
     return {str(value) for value in data["rollouts"]}
 
@@ -42,7 +42,7 @@ def _load_processed(path: Path) -> set[str]:
 def _save_processed(path: Path, processed: set[str]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
-        json.dumps({"schema": 1, "rollouts": sorted(processed)}, indent=2) + "\n"
+        json.dumps({"schema": 2, "rollouts": sorted(processed)}, indent=2) + "\n"
     )
     temporary.replace(path)
 
@@ -63,9 +63,15 @@ def ingest_rollout(
             (state[1:], arrays["post_action_frames"][index, None]), axis=0
         )
         done = bool(arrays["terminated"][index] or arrays["truncated"][index])
+        action = int(arrays["actions"][index])
+        if not 0 <= action < agent.config.num_actions:
+            raise ValueError(
+                f"rollout {path} contains action {action}, but this flybrain "
+                f"has {agent.config.num_actions} actions"
+            )
         replay.add(
             state,
-            int(arrays["actions"][index]),
+            action,
             float(arrays["training_rewards"][index]),
             next_state,
             done,

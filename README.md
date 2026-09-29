@@ -217,18 +217,20 @@ python3.13 -m venv .super-mario-venv
 
 For physical control, omit `--demo`. The emulator listens for measured pad
 levels on UDP `127.0.0.1:55355`; `SuperMarioUdpClient` sends those frames from
-the Microduck process. JUMP maps to NES `A`; the flybrain independently
-selects whether a measured direction also receives virtual NES `B` for
-running. A 250 ms deadman timer releases all buttons if controller packets
-stop.
+the Microduck process. JUMP maps to NES `A`; every measured LEFT or RIGHT also
+receives virtual NES `B`, so Mario runs automatically without requiring a run
+pad or a separate flybrain action. A 250 ms deadman timer releases all buttons
+if controller packets stop.
 
 #### Flybrain (high-level DQN)
 
 The flybrain is deliberately separate from the 50 Hz PPO motor controller. It
-sees four stacked 84×84 grayscale game frames and chooses one of ten actions:
-the six `idle`/walk/jump combinations plus `left+run`, `right+run`,
-`left+run+jump`, and `right+run+jump`. A dueling Double DQN learns those
-actions with prioritized replay. PER priorities belong to whole transitions
+sees four stacked 84×84 grayscale game frames and chooses one of the six
+physical commands: `idle`, `left`, `right`, `jump`, `left+jump`, or
+`right+jump`. Mario automatically holds virtual NES `B` whenever a measured
+LEFT or RIGHT pad is active, so running is not a separate DQN action and does
+not require a fourth physical button. A dueling Double DQN learns those actions
+with prioritized replay. PER priorities belong to whole transitions
 `(frame stack, action, reward, next frame stack, done)`, not to individual raw
 frames. Every replay item is self-contained: it stores its uint8 pre-action
 stack plus the post-action frame, so random PER sampling and circular-buffer

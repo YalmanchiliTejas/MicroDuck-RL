@@ -1,9 +1,10 @@
 """Pixel-based Double-DQN "flybrain" for the Microduck Mario controller.
 
-The flybrain chooses one of ten compact controller actions.  During training
-the action is applied directly to the emulator.  During physical play it is
-sent as a *request* to the robot.  Left/right/jump remain gated by measured pad
-levels, while ``run`` controls the emulator-side virtual B button.
+The flybrain chooses exactly one of the six commands the physical controller
+can execute. During direct training the command is applied to the emulator;
+during combined MuJoCo training it is first sent as a request to the robot.
+NES B is derived automatically from measured LEFT/RIGHT and is not a learned
+action or a physical button.
 """
 
 from __future__ import annotations
@@ -28,33 +29,28 @@ class FlybrainAction(IntEnum):
     JUMP = 3
     LEFT_JUMP = 4
     RIGHT_JUMP = 5
-    LEFT_RUN = 6
-    RIGHT_RUN = 7
-    LEFT_RUN_JUMP = 8
-    RIGHT_RUN_JUMP = 9
 
 
 ACTION_LEVELS: tuple[tuple[bool, bool, bool, bool], ...] = (
-    # left, right, jump, run
+    # left, right, jump, derived virtual run (NES B)
     (False, False, False, False),
-    (True, False, False, False),
-    (False, True, False, False),
-    (False, False, True, False),
-    (True, False, True, False),
-    (False, True, True, False),
     (True, False, False, True),
     (False, True, False, True),
+    (False, False, True, False),
     (True, False, True, True),
     (False, True, True, True),
 )
 
 
 def action_levels(action: int | FlybrainAction) -> tuple[bool, bool, bool, bool]:
-    """Map an action to ``(left, right, jump, virtual_run)`` levels."""
+    """Map an action to physical levels plus automatically derived run."""
 
     try:
-        return ACTION_LEVELS[int(action)]
-    except (IndexError, ValueError) as exc:
+        index = int(action)
+        if not 0 <= index < len(ACTION_LEVELS):
+            raise IndexError(index)
+        return ACTION_LEVELS[index]
+    except (IndexError, TypeError, ValueError) as exc:
         raise ValueError(f"invalid flybrain action: {action}") from exc
 
 
@@ -123,8 +119,12 @@ class FlybrainConfig:
     def __post_init__(self) -> None:
         if self.frame_size < 36:
             raise ValueError("frame_size must be at least 36 for the CNN")
-        if self.stack_depth <= 0 or self.num_actions <= 1:
-            raise ValueError("invalid observation or action dimensions")
+        if self.stack_depth != 4:
+            raise ValueError("flybrain temporal input must contain exactly four frames")
+        if self.num_actions != len(ACTION_LEVELS):
+            raise ValueError(
+                f"flybrain action space must contain exactly {len(ACTION_LEVELS)} commands"
+            )
         if self.replay_start < self.batch_size:
             raise ValueError("replay_start must be at least batch_size")
         if self.replay_capacity <= self.replay_start:
@@ -343,7 +343,8 @@ class FlybrainAgent:
         output.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "schema": 1,
+                "schema": 2,
+                "actions": [action.name.lower() for action in FlybrainAction],
                 "config": asdict(self.config),
                 "online": self.online.state_dict(),
                 "target": self.target.state_dict(),
@@ -359,8 +360,11 @@ class FlybrainAgent:
         cls, path: str | Path, device: str | torch.device = "cpu"
     ) -> "FlybrainAgent":
         checkpoint = torch.load(path, map_location=device, weights_only=False)
-        if checkpoint.get("schema") != 1:
-            raise ValueError("unsupported flybrain checkpoint schema")
+        if checkpoint.get("schema") != 2:
+            raise ValueError(
+                "unsupported flybrain checkpoint schema; start a fresh six-action "
+                "checkpoint because run is now automatic"
+            )
         agent = cls(FlybrainConfig(**checkpoint["config"]), device=device)
         agent.online.load_state_dict(checkpoint["online"])
         agent.target.load_state_dict(checkpoint["target"])

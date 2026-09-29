@@ -52,8 +52,9 @@ def run(args: argparse.Namespace) -> None:
 
     if config.num_actions != len(nes_actions()):
         raise ValueError(
-            f"checkpoint has {config.num_actions} actions, but dynamic walk/run "
-            f"training requires {len(nes_actions())}; start a fresh flybrain"
+            f"checkpoint has {config.num_actions} actions, but six-command "
+            f"automatic-run training requires {len(nes_actions())}; "
+            "start a fresh flybrain"
         )
     env = gym.make(args.env, render_mode="rgb_array")
     env = JoypadSpace(env, nes_actions())
