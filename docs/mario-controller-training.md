@@ -106,6 +106,51 @@ balance intervention. The camera correction can be learned by resuming saved
 weights; it does not require another fresh initialization. Retain std/entropy
 settings and compare short continuations under the same evaluation setup.
 
+### Balance recovery from the measured checkpoint
+
+The pre-fall evaluation found CoM-support failure in 82% of cases 0.2 seconds
+before falling, versus only 26% losing foot support. At 0.5 seconds the rates
+were 22% and 10%. This supports growing instability while feet are still
+planted; it does not identify a specific actuator or prove a single cause.
+
+The new `support_margin` cost uses the exact same whole-body CoM, contacting
+feet, 12 mm safe radius and 8 mm error scale as the existing balance reward.
+Its weight is -0.5. Inside that support region its cost is zero; outside it,
+each additional 8 mm adds 0.5 of negative reward rate (0.01 per 50 Hz step).
+No-contact states incur an additional cost rather than an exemption. The
+Gaussian standing reward remains, but further drift now keeps increasing the
+cost even where that reward has flattened near zero. This is a quasi-static
+support proxy, not a dynamic stability guarantee. The weight is a candidate
+for the recovery experiment, not a validated converged recipe.
+
+Preserve the original run and initialize a separate full-PPO continuation from
+the exact evaluated checkpoint. On the submission host:
+
+```bash
+cd /home/tyalaman/MicroDuck-RL
+git pull --ff-only origin Mario-Fly-Duck
+export MICRODUCK_RUN_ROOT=/scratch/scholar/tyalaman/microduck-rl
+export MARIO_CONTROLLER_RUN_TAG="nes-balance-recovery-$(date +%Y%m%d-%H%M%S)"
+recovery_seed_dir="${MICRODUCK_RUN_ROOT}/mario-nes-controller-${MARIO_CONTROLLER_RUN_TAG}/tensorboard/seed"
+mkdir -p "$recovery_seed_dir"
+cp -n /scratch/scholar/tyalaman/microduck-rl/mario-nes-controller-nes-v2/tensorboard/2026-09-28_18-58-28_mario-nes-controller-470791/model_2750.pt \
+  "$recovery_seed_dir/model_2750.pt"
+
+MARIO_BALANCE_CHECKPOINT= MARIO_VIDEO_ONLY=0 NUM_ENVS=2048 \
+TARGET_ITERATIONS=3001 ITERATIONS_PER_JOB=250 CHECKPOINT_INTERVAL=50 \
+MAX_JOBS=1 ./slurm_mario_controller.sh
+```
+
+This preserves actor, critic, learned std and observation normalization, then
+trains against the corrected reward. `init_std=0.20` is not reapplied to a full
+resume. The launcher should print `Resuming: .../seed/model_2750.pt`; it should
+not print random initialization or actor-only warm start. It stops at iteration
+3000. Evaluate checkpoint 3000 with the same mean-mode report before submitting
+more work. Desired outcomes are improved neutral view and fewer falls while
+retaining all active button skills. Reward totals across recipes are not
+directly comparable. If falls persist or active skills collapse, do not simply
+extend the run or increase penalties again.
+
 `--mode mean` evaluates the exported policy's action convention, without an
 extra training/consolidation phase. `--include-combinations` tests both chords.
 The script loads the actor and its observation normalizer through the standard

@@ -63,6 +63,7 @@ ALIVE_WEIGHT = 1.0
 FALL_PENALTY_WEIGHT = -500.0
 UPRIGHT_WEIGHT = 2.0
 TRUNK_BALANCE_WEIGHT = 1.0
+SUPPORT_MARGIN_COST_WEIGHT = -0.5
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.060
 # Presses come from a short foot reposition, not from throwing the trunk in
@@ -297,6 +298,18 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "std": 0.012,
             "asset_cfg": SceneEntityCfg("robot"),
         },
+    )
+    # The Gaussian balance score loses nearly all variation once the CoM
+    # drifts outside support. Continue charging further drift without changing
+    # the existing safe margin or taxing motion inside that margin.
+    balance_params = cfg.rewards["commanded_trunk_offset"].params
+    cfg.rewards["support_margin"] = RewardTermCfg(
+        func=microduck_mdp.mario_support_margin_cost,
+        weight=SUPPORT_MARGIN_COST_WEIGHT,
+        params={
+            key: value for key, value in balance_params.items()
+            if key not in ("std", "transition_grace_s")
+        } | {"error_scale": balance_params["std"]},
     )
     # The Gaussian above becomes nearly flat once a policy discovers a deep
     # crouch.  This shortfall cost keeps a useful slope back toward a usable

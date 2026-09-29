@@ -842,6 +842,30 @@ def test_mario_balance_uses_whole_body_com_and_only_contacting_feet():
     assert score[1] < 1e-6
     assert score[2] == pytest.approx(1.0)
     assert score[3] == 0.0
+    cost = microduck_mdp.mario_support_margin_cost(
+        env, error_scale=.004, support_radius=.005, sensor_name="feet",
+        robot_cfg=_resolved_cfg("robot", site_ids=[0, 1]),
+    )
+    assert cost.tolist() == pytest.approx([0., 8.75, 0., 4.75])
+
+
+def test_support_margin_cost_stays_informative_outside_gaussian(monkeypatch):
+    cfg = make_microduck_mario_env_cfg()
+    term = cfg.rewards["support_margin"]
+    balance = cfg.rewards["commanded_trunk_offset"]
+    assert term.weight < 0
+    assert term.params["support_radius"] == balance.params["support_radius"]
+    assert term.params["error_scale"] == balance.params["std"]
+    assert term.params["sensor_name"] == balance.params["sensor_name"]
+    errors = torch.tensor([0., .008, .016, .024, .032])
+    monkeypatch.setattr(microduck_mdp, "_mario_support_region_error",
+                        lambda *a, **k: (errors, torch.full((5,), 2)))
+    cost = term.func(SimpleNamespace(), **term.params)
+    assert cost.tolist() == pytest.approx([0., 1., 2., 3., 4.])
+    assert (cost * term.weight <= 0).all()
+    score = balance.func(SimpleNamespace(), **balance.params)
+    assert score[-1] < .000001
+    assert cost[-1] > cost[-2]
 
 
 def test_button_reward_drops_to_zero_when_either_foot_leaves_its_pad():

@@ -7152,17 +7152,15 @@ def mario_foot_planar_speed_cost(
     return cost
 
 
-def mario_commanded_trunk_offset_reward(
+def _mario_support_region_error(
     env: ManagerBasedRlEnv,
     command_name: str = "twist",
     forward_offset: float = 0.012,
     lateral_offset: float = 0.010,
-    std: float = 0.008,
     support_radius: float = 0.012,
     sensor_name: str | None = None,
-    transition_grace_s: float = 0.0,
     robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """Keep the whole-robot CoM over the feet that actually support it.
 
     NES ``UP/DOWN`` command forward/backward trunk motion. ``RIGHT/LEFT`` command
@@ -7219,6 +7217,51 @@ def mario_commanded_trunk_offset_reward(
     )
     distance = torch.linalg.vector_norm(query - closest, dim=-1)
     error = (distance - support_radius).clamp(min=0.0)
+    return error, contact_count
+
+
+def mario_support_margin_cost(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    forward_offset: float = 0.0,
+    lateral_offset: float = 0.0,
+    support_radius: float = 0.012,
+    error_scale: float = 0.008,
+    sensor_name: str | None = None,
+    robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
+) -> torch.Tensor:
+    """Charge CoM drift beyond the existing contact-based support margin.
+
+    Unlike the Gaussian standing reward, this cost continues growing outside
+    the safe region. Zero contact adds a cost instead of making it free to
+    lift both feet. This is a quasi-static support proxy, not a guarantee of
+    dynamic stability; no velocity or action filtering is introduced.
+    """
+    if error_scale <= 0 or support_radius < 0:
+        raise ValueError("Support margin scales must be positive/nonnegative")
+    error, contact_count = _mario_support_region_error(
+        env, command_name, forward_offset, lateral_offset,
+        support_radius, sensor_name, robot_cfg,
+    )
+    return error / error_scale + (contact_count == 0).to(error.dtype)
+
+
+def mario_commanded_trunk_offset_reward(
+    env: ManagerBasedRlEnv,
+    command_name: str = "twist",
+    forward_offset: float = 0.012,
+    lateral_offset: float = 0.010,
+    std: float = 0.008,
+    support_radius: float = 0.012,
+    sensor_name: str | None = None,
+    transition_grace_s: float = 0.0,
+    robot_cfg: SceneEntityCfg = _MARIO_FEET_CFG,
+) -> torch.Tensor:
+    """Reward whole-body CoM inside the contacting feet's support region."""
+    error, contact_count = _mario_support_region_error(
+        env, command_name, forward_offset, lateral_offset,
+        support_radius, sensor_name, robot_cfg,
+    )
     score = torch.exp(-torch.square(error / std))
     score = score * (contact_count > 0).to(dtype=score.dtype)
     if transition_grace_s > 0.0:
