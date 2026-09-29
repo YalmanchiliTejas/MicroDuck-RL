@@ -6445,6 +6445,7 @@ def mario_camera_ready(
     max_tilt_deg: float = 20.0,
     min_view_alignment: float = 0.85,
     full_view_alignment: float = 0.95,
+    component: str | None = None,
 ) -> torch.Tensor:
     """Smooth 0–1 gate: button credit requires a usable monitor sightline.
 
@@ -6480,6 +6481,12 @@ def mario_camera_ready(
     view_gate = smooth_ramp(
         view_alignment, min_view_alignment, full_view_alignment
     )
+    if component is not None:
+        components = {"trunk_height": trunk_gate, "camera_height": camera_gate,
+                      "trunk_tilt": tilt_gate, "view_alignment": view_gate}
+        if component not in components:
+            raise ValueError(f"Unknown camera readiness component: {component}")
+        return torch.nan_to_num(components[component], nan=0.0)
     return torch.nan_to_num(
         trunk_gate * camera_gate * tilt_gate * view_gate, nan=0.0
     )
@@ -7269,6 +7276,7 @@ def mario_clean_button_success(
     success_threshold: float = 0.95,
     wrong_threshold: float = 0.05,
     readiness_threshold: float = 0.5,
+    component: str | None = None,
     **reward_params,
 ) -> torch.Tensor:
     """Componentwise clean-success diagnostic, including neutral release.
@@ -7309,6 +7317,24 @@ def mario_clean_button_success(
         requested_min >= success_threshold
     )
     wrong_max = (activation * (1.0 - requested) * enabled).amax(dim=-1)
+    # These exact component checks are also available as evaluation metrics.
+    # MetricsManager captures them BEFORE automatic reset, unlike inspecting
+    # scene state after env.step(), which would inspect a fresh robot on falls.
+    components = None if component is None else {
+        "requested_pressed": requested_ok,
+        "wrong_buttons_released": wrong_max <= wrong_threshold,
+        "support": torch.ones_like(requested_ok),
+        "camera": torch.ones_like(requested_ok),
+        "leg_pose": torch.ones_like(requested_ok),
+        "foot_pose": torch.ones_like(requested_ok),
+        "command_ready": torch.ones_like(requested_ok),
+    }
+    if component is not None:
+        for index, name in ((2, "left"), (3, "right"), (4, "jump"), (5, "b")):
+            components[f"{name}_released_if_unrequested"] = (
+                activation[:, index] * (1.0 - requested[:, index])
+                * enabled.expand_as(activation)[:, index] <= wrong_threshold
+            )
     success = requested_ok & (wrong_max <= wrong_threshold)
     if reward_params.get("leg") is not None:
         # An idle foot is not a successful requested press.
@@ -7322,6 +7348,8 @@ def mario_clean_button_success(
         reward_params.get("controller_cfg"),
     )
     if anchor_gate is not None:
+        if components is not None:
+            components["support"] = anchor_gate.bool()
         success &= anchor_gate.bool()
 
     camera_cfg = reward_params.get("camera_cfg")
@@ -7339,6 +7367,8 @@ def mario_clean_button_success(
             full_view_alignment=reward_params.get("full_view_alignment", 0.95),
         )
         success &= camera_score >= readiness_threshold
+        if components is not None:
+            components["camera"] = camera_score >= readiness_threshold
 
     standing_pose_cfg = reward_params.get("standing_pose_cfg")
     if standing_pose_cfg is not None:
@@ -7349,6 +7379,8 @@ def mario_clean_button_success(
             max_error=reward_params.get("max_pose_error", 0.40),
         )
         success &= pose_score >= readiness_threshold
+        if components is not None:
+            components["leg_pose"] = pose_score >= readiness_threshold
 
     foot_pose_params = reward_params.get("foot_pose_params")
     if foot_pose_params is not None:
@@ -7368,15 +7400,25 @@ def mario_clean_button_success(
         )
         # Neutral release has no active foot target; active commands must be
         # mechanically close to the measured rocker pose.
-        success &= (requested_count == 0.0) | (
+        foot_pose_ok = (requested_count == 0.0) | (
             foot_pose_score >= readiness_threshold
         )
+        success &= foot_pose_ok
+        if components is not None:
+            components["foot_pose"] = foot_pose_ok
 
     transition_grace_s = reward_params.get("transition_grace_s", 0.0)
     if transition_grace_s > 0.0:
-        success &= mario_command_ready(
+        command_ready = mario_command_ready(
             env, command_name, transition_grace_s
         ).bool()
+        success &= command_ready
+        if components is not None:
+            components["command_ready"] = command_ready
+    if component is not None:
+        if component not in components:
+            raise ValueError(f"Unknown clean-success component: {component}")
+        return components[component].to(dtype=activation.dtype)
     return success.to(dtype=activation.dtype)
 
 

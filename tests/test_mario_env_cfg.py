@@ -1115,6 +1115,18 @@ def test_camera_readiness_rejects_crouch_low_camera_tilt_and_bad_view():
     readiness = microduck_mdp.mario_camera_ready(env, camera_cfg)
     crouch = microduck_mdp.mario_crouch_cost(env, camera_cfg)
     assert readiness.tolist() == pytest.approx([1.0, 0.0, 0.0, 0.0, 0.0])
+    components = torch.stack([
+        microduck_mdp.mario_camera_ready(env, camera_cfg, component=name)
+        for name in ("trunk_height", "camera_height", "trunk_tilt", "view_alignment")
+    ], dim=-1)
+    assert torch.allclose(components.prod(-1), readiness)
+    assert (components < .5).tolist() == [
+        [False, False, False, False],
+        [True, False, False, False],
+        [False, True, False, False],
+        [False, False, True, False],
+        [False, False, False, True],
+    ]
     assert crouch[0].item() == 0.0
     assert crouch[1].item() > 0.0
     assert crouch[2].item() > 0.0

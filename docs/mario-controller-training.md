@@ -58,6 +58,33 @@ time fractions, not the probability of completing an entire command sequence.
 Evaluation uses the play environment; it does not reproduce every training
 randomization.
 
+To diagnose a saved policy that falls or fails neutral, save a detailed report:
+
+```bash
+uv run python scripts/evaluate_mario_controller.py /absolute/path/model_2750.pt \
+  --mode mean --output mario-2750-diagnostics.json
+```
+
+Each command now includes `failure_fractions`. These are failures of the named
+check, not pass rates: `wrong_buttons_released: 0.8` means an unrequested button
+was above the release tolerance on 80% of ready timesteps. Individual LEFT,
+RIGHT, JUMP and B release checks identify the offending switch. `support`
+combines the existing foot-anchor and contact gate. `camera` is the existing
+combined height/tilt/sightline gate; its four subchecks are also reported.
+Several moderately reduced subchecks can fail the combined camera gate even
+when none individually fails its threshold. Causes overlap; do not add them.
+
+`transitions` associates falls with the most recent command window (including
+same-command resamples). It reports starts, exposure seconds, falls, and falls
+within the first 0.5 seconds. Episode resets begin at `episode_start`, so a fall
+does not create a spurious transition into the next episode. Exposure-normalized
+fall rates help compare frequently and rarely sampled transitions, but do not
+prove causality. `failure_fractions_at_fall` captures failed checks on the actual
+falling state, before the simulator automatically resets it.
+
+These diagnostics leave the training rewards and exploration unchanged. Inspect
+the report before choosing between release, return-motion, or posture fixes.
+
 `--mode mean` evaluates the exported policy's action convention, without an
 extra training/consolidation phase. `--include-combinations` tests both chords.
 The script loads the actor and its observation normalizer through the standard
