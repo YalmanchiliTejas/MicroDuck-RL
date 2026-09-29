@@ -63,7 +63,7 @@ ALIVE_WEIGHT = 1.0
 FALL_PENALTY_WEIGHT = -500.0
 UPRIGHT_WEIGHT = 2.0
 TRUNK_BALANCE_WEIGHT = 1.0
-SUPPORT_MARGIN_COST_WEIGHT = -0.5
+SUPPORT_MARGIN_COST_WEIGHT = 0.0  # Disabled after recovery run degraded active skills.
 STAND_HEIGHT = 0.130  # measured walk-model equilibrium (0.115 m) + 15 mm pad top
 FOOT_ANCHOR_RADIUS = 0.060
 # Presses come from a short foot reposition, not from throwing the trunk in
@@ -299,9 +299,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "asset_cfg": SceneEntityCfg("robot"),
         },
     )
-    # The Gaussian balance score loses nearly all variation once the CoM
-    # drifts outside support. Continue charging further drift without changing
-    # the existing safe margin or taxing motion inside that margin.
+    # Keep the failed support-margin experiment available for diagnostics,
+    # but disabled: its recovery run did not improve balance or active skills.
     balance_params = cfg.rewards["commanded_trunk_offset"].params
     cfg.rewards["support_margin"] = RewardTermCfg(
         func=microduck_mdp.mario_support_margin_cost,
@@ -343,9 +342,8 @@ def make_microduck_mario_env_cfg(play: bool = False):
             ),
         },
     )
-    # The policy can satisfy HOME joint regularization imperfectly while
-    # missing the monitor. Neutral has no positive button reward to teach the
-    # camera gate, so enforce the physical sightline on every command.
+    # Restrict the correction to the measured neutral sightline failure.
+    # Active commands retain their existing camera-gated button objective.
     cfg.rewards["camera_view"] = RewardTermCfg(
         func=microduck_mdp.mario_camera_view_cost,
         weight=CAMERA_VIEW_COST_WEIGHT,
@@ -353,6 +351,7 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "camera_cfg": SceneEntityCfg("robot", site_names=("head_camera",)),
             "full_view_alignment": FULL_VIEW_ALIGNMENT,
             "alignment_scale": FULL_VIEW_ALIGNMENT - MIN_VIEW_ALIGNMENT,
+            "neutral_only": True,
         },
     )
     # Stationary manipulation should be quasi-static.  The old values were

@@ -1,5 +1,30 @@
 # Mario controller: discovery and verification
 
+## Current recovery recipe (supersedes the combined-penalty experiment below)
+
+The combined camera/support correction degraded the evaluated policy. Resume
+the original checkpoint 2750, not the degraded continuation. Support-margin
+weight is now zero; camera-view cost applies only to exact neutral commands.
+Active commands retain the earlier physical button and posture objectives.
+
+Submit a preserved-copy continuation with one command on the Slurm host:
+
+```bash
+bash scripts/recover_mario.sh /absolute/path/model_2750.pt
+```
+
+This creates a unique directory beside the source run, copies the checkpoint,
+and submits 250 further iterations with fixed learning rate 0.0001. The Mario
+runner reapplies this fixed rate after optimizer loading (which otherwise
+silently restores the old optimizer rate). Actor, critic, normalizers, learned
+exploration std and optimizer moments are retained. Entropy stays at 0.002.
+It does not restart training or alter the source checkpoint. The submission
+prints the new directory. The run stops at checkpoint 3000 for comparison.
+
+This removes the failed broad penalty change and limits adaptation to the
+measured neutral problem. It is an unvalidated recovery recipe; it does not
+establish that the existing balance failures are solved.
+
 The earlier fresh run earned about 74 return while active button success was
 0.0004. Return alone therefore cannot be the acceptance criterion. The earlier
 0.20/std, 0.002/entropy runs discovered presses, but did not demonstrate a
@@ -106,7 +131,7 @@ balance intervention. The camera correction can be learned by resuming saved
 weights; it does not require another fresh initialization. Retain std/entropy
 settings and compare short continuations under the same evaluation setup.
 
-### Balance recovery from the measured checkpoint
+### Previous combined balance recovery experiment (superseded)
 
 The pre-fall evaluation found CoM-support failure in 82% of cases 0.2 seconds
 before falling, versus only 26% losing foot support. At 0.5 seconds the rates

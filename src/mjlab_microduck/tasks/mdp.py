@@ -6457,8 +6457,10 @@ def mario_camera_view_cost(
     camera_cfg: SceneEntityCfg,
     full_view_alignment: float = 0.95,
     alignment_scale: float = 0.10,
+    neutral_only: bool = False,
+    command_name: str = "twist",
 ) -> torch.Tensor:
-    """Nonnegative sightline deficit on ALL commands, including neutral.
+    """Nonnegative sightline deficit, optionally restricted to neutral.
 
     The button gate alone provides no view incentive when no button is
     requested. This cost remains informative below the gate's zero cutoff,
@@ -6468,7 +6470,11 @@ def mario_camera_view_cost(
         raise ValueError("Invalid camera alignment cost parameters")
     alignment = _mario_camera_view_alignment(env, camera_cfg)
     alignment = torch.nan_to_num(alignment, nan=-1.0)
-    return (full_view_alignment - alignment).clamp(min=0.0) / alignment_scale
+    cost = (full_view_alignment - alignment).clamp(min=0.0) / alignment_scale
+    if neutral_only:
+        command = env.command_manager.get_command(command_name)
+        cost = cost * (command == 0.0).all(dim=-1)
+    return cost
 
 
 def mario_camera_ready(

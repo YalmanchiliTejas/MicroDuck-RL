@@ -37,6 +37,20 @@ class MicroduckOnPolicyRunner(VelocityOnPolicyRunner):
             alg["symmetry_cfg"] = {k: v for k, v in sym.items() if k != "_env"}
 
 
+class MarioOnPolicyRunner(MicroduckOnPolicyRunner):
+    """Honor an explicitly fixed recovery LR after loading optimizer state."""
+
+    def load(self, *args, **kwargs):
+        result = super().load(*args, **kwargs)
+        if self.alg.schedule == "fixed":
+            # PyTorch load_state_dict restores param-group LR from the old
+            # checkpoint. Fixed PPO schedules never overwrite it in update().
+            for group in self.alg.optimizer.param_groups:
+                group["lr"] = self.alg.learning_rate
+            print(f"[INFO] Mario fixed resume learning rate: {self.alg.learning_rate}")
+        return result
+
+
 from .microduck_velocity_env_cfg import (
     make_microduck_velocity_env_cfg,
     MicroduckRlCfg,
@@ -201,7 +215,7 @@ register_mjlab_task(
     env_cfg=make_microduck_mario_env_cfg(),
     play_env_cfg=make_microduck_mario_env_cfg(play=True),
     rl_cfg=MicroduckMarioRlCfg,
-    runner_cls=MicroduckOnPolicyRunner,
+    runner_cls=MarioOnPolicyRunner,
 )
 
 register_mjlab_task(

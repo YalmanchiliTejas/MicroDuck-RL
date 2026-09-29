@@ -853,7 +853,7 @@ def test_support_margin_cost_stays_informative_outside_gaussian(monkeypatch):
     cfg = make_microduck_mario_env_cfg()
     term = cfg.rewards["support_margin"]
     balance = cfg.rewards["commanded_trunk_offset"]
-    assert term.weight < 0
+    assert term.weight == 0  # Failed experiment is disabled during recovery.
     assert term.params["support_radius"] == balance.params["support_radius"]
     assert term.params["error_scale"] == balance.params["std"]
     assert term.params["sensor_name"] == balance.params["sensor_name"]
@@ -1167,6 +1167,13 @@ def test_camera_view_cost_teaches_neutral_below_readiness_cutoff(monkeypatch):
     # The function does not require an active command or a switch contact.
     monkeypatch.setattr(microduck_mdp, "_mario_camera_view_alignment",
                         lambda *a, **k: torch.tensor([1., .95, .90, .80, .5, -1.]))
-    costs = reward.func(SimpleNamespace(), **reward.params)
+    env = SimpleNamespace(command_manager=SimpleNamespace(
+        get_command=lambda _: torch.zeros(6, 3)))
+    costs = reward.func(env, **reward.params)
     assert costs.tolist() == pytest.approx([0., 0., .5, 1.5, 4.5, 19.5], abs=1e-5)
     assert (costs * reward.weight <= 0).all()
+    env.command_manager.get_command = lambda _: torch.tensor([
+        [-1., 0., 0.], [1., 0., 0.], [0., 0., 1.],
+        [-1., 0., 1.], [1., 0., 1.], [0., 0., 0.],
+    ])
+    assert reward.func(env, **reward.params).tolist() == pytest.approx([0., 0., 0., 0., 0., 19.5])
