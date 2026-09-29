@@ -193,6 +193,8 @@ def main() -> int:
                 args.dashboard_host,
                 "--port",
                 args.dashboard_port,
+                "--frame-shm",
+                args.frame_shm,
             )
             if args.spike_file:
                 dashboard_command.extend(("--spike-file", str(args.spike_file)))

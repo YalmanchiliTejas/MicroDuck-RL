@@ -46,7 +46,11 @@ def _load_visualizer():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(path.parent))
     return module
 
 
@@ -208,6 +212,32 @@ def test_visualizer_reads_only_real_spike_telemetry(tmp_path):
     spikes = visualizer._tail_json(spike_file, 10)
     assert [row["population"] for row in spikes] == ["KC", "MBON"]
     assert visualizer._tail_json(tmp_path / "missing.jsonl", 10) == []
+
+
+def test_visualizer_encodes_a_consistent_shared_frame_as_jpeg():
+    visualizer = _load_visualizer()
+    width, height, channels = 3, 2, 3
+    rgb = np.arange(width * height * channels, dtype=np.uint8).reshape(
+        height, width, channels
+    )
+    buffer = bytearray(visualizer.FRAME_HEADER.size + rgb.nbytes)
+    visualizer.FRAME_HEADER.pack_into(
+        buffer,
+        0,
+        visualizer.FRAME_MAGIC,
+        width,
+        height,
+        channels,
+        rgb.nbytes,
+        2,
+    )
+    buffer[visualizer.FRAME_HEADER.size :] = rgb.tobytes()
+    reader = visualizer.FrameReader("unused")
+    reader._shm = type("FakeShm", (), {"buf": buffer, "close": lambda self: None})()
+    jpeg = reader.read_jpeg()
+    assert jpeg is not None
+    assert jpeg.startswith(b"\xff\xd8")
+    assert jpeg.endswith(b"\xff\xd9")
 
 
 def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
