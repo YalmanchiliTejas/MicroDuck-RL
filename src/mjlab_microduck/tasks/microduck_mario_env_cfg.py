@@ -36,6 +36,7 @@ from mjlab_microduck.tasks.microduck_velocity_env_cfg import (
 EPISODE_LENGTH_S = 20.0
 BUTTON_RESAMPLE_S = (1.5, 2.5)
 BUTTON_TRANSITION_GRACE_S = 0.25
+NEUTRAL_TRANSITION_SETTLE_S = (0.5, 0.5)
 # Legacy names are retained in reward params, but these values are now vertical
 # slider travel in metres: 0.7 mm activates, 0.3 mm releases.
 ACTIVATE_ANGLE = 0.0007
@@ -80,7 +81,6 @@ FULL_CAMERA_TILT_DEG = 12.0
 MAX_CAMERA_TILT_DEG = 20.0
 MIN_VIEW_ALIGNMENT = 0.85
 FULL_VIEW_ALIGNMENT = 0.95
-CAMERA_VIEW_COST_WEIGHT = -0.2
 FULL_LEG_POSE_ERROR = 0.30
 MAX_LEG_POSE_ERROR = 0.80
 # Full-sole physics probes show that the stable controller motion is a planted
@@ -212,6 +212,9 @@ def make_microduck_mario_env_cfg(play: bool = False):
 
     cfg.commands["twist"] = microduck_mdp.MarioNesCommandCfg(
         resampling_time_range=BUTTON_RESAMPLE_S,
+        neutral_transition_time_range=(
+            None if play else NEUTRAL_TRANSITION_SETTLE_S
+        ),
         category_weights=(
             # Evaluation must not silently test combinations that the stage-0
             # checkpoint has never seen. Combo videos can opt in explicitly
@@ -340,18 +343,6 @@ def make_microduck_mario_env_cfg(play: bool = False):
             "asset_cfg": SceneEntityCfg(
                 "robot", joint_names=(r"^(?!passive_).*(neck|head).*",)
             ),
-        },
-    )
-    # Restrict the correction to the measured neutral sightline failure.
-    # Active commands retain their existing camera-gated button objective.
-    cfg.rewards["camera_view"] = RewardTermCfg(
-        func=microduck_mdp.mario_camera_view_cost,
-        weight=CAMERA_VIEW_COST_WEIGHT,
-        params={
-            "camera_cfg": SceneEntityCfg("robot", site_names=("head_camera",)),
-            "full_view_alignment": FULL_VIEW_ALIGNMENT,
-            "alignment_scale": FULL_VIEW_ALIGNMENT - MIN_VIEW_ALIGNMENT,
-            "neutral_only": True,
         },
     )
     # Stationary manipulation should be quasi-static.  The old values were
@@ -747,6 +738,25 @@ def make_microduck_mario_env_cfg(play: bool = False):
                     # Introduce LEFT+JUMP and RIGHT+JUMP only after the single
                     # buttons have had most of the run to consolidate.
                     {"step": 2_500 * 24, "weights": TWO_BUTTON_WEIGHTS},
+                ],
+            },
+        )
+        # Direct active-to-active switches were the dominant fall mode in the
+        # model-2750 evaluation. Start with a full neutral recovery window,
+        # shorten it only after every single button reaches the combination
+        # competence gate, then expose direct switches late in the run.
+        cfg.curriculum["mario_transition_stage"] = CurriculumTermCfg(
+            func=microduck_mdp.mario_transition_settle_curriculum,
+            params={
+                "command_name": "twist",
+                "stages": [
+                    {"step": 0, "settle_range": (0.5, 0.5)},
+                    {"step": 2_500 * 24, "settle_range": (0.25, 0.25)},
+                    {
+                        "step": 3_500 * 24,
+                        "min_steps_since_unlock": 1_000 * 24,
+                        "settle_range": None,
+                    },
                 ],
             },
         )

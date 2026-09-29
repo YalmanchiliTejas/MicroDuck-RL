@@ -29,6 +29,7 @@ def test_mario_command_uses_existing_three_dimensional_twist_slot():
         0, 1, 2, 5
     ]
     assert cfg.commands["twist"].resampling_time_range == (1.5, 2.5)
+    assert cfg.commands["twist"].neutral_transition_time_range == (0.5, 0.5)
     assert "head_pose" not in cfg.commands
     assert "body_pose" not in cfg.commands
     for group in ("actor", "critic"):
@@ -99,6 +100,7 @@ def test_task_reward_dominates_idle_posture_credit():
     assert rewards["upright"].params["lean_angle"] == 0.0
     assert rewards["standing_height"].params["target_height"] == 0.130
     assert rewards["camera_crouch"].weight < 0.0
+    assert "camera_view" not in rewards
     assert rewards["camera_crouch"].params["trunk_floor"] == 0.128
     assert rewards["camera_crouch"].params["camera_floor"] == 0.230
     assert rewards["leg_pose_l1"].weight < 0.0
@@ -243,7 +245,70 @@ def test_mario_command_curriculum_stages_singles_then_jump_combos():
     assert curriculum.params["discovery_unlock_success"] == pytest.approx(0.25)
     assert train_cfg.commands["twist"].category_weights == stages[0]["weights"]
     assert "mario_command_stage" not in play_cfg.curriculum
+    assert "mario_transition_stage" not in play_cfg.curriculum
+    assert play_cfg.commands["twist"].neutral_transition_time_range is None
     assert play_cfg.commands["twist"].category_weights == stages[1]["weights"]
+
+
+def test_mario_transition_curriculum_waits_for_competence_before_direct_switches():
+    cfg = make_microduck_mario_env_cfg()
+    params = cfg.curriculum["mario_transition_stage"].params
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term.cfg = SimpleNamespace(neutral_transition_time_range=(0.5, 0.5))
+    env = SimpleNamespace(
+        common_step_counter=4_000 * 24,
+        device=torch.device("cpu"),
+        command_manager=SimpleNamespace(get_term=lambda _name: term),
+    )
+    stage = microduck_mdp.mario_transition_settle_curriculum(
+        env, torch.arange(1), **params
+    )
+    assert stage.item() == 0.0
+    assert term.cfg.neutral_transition_time_range == (0.5, 0.5)
+
+    term._mario_combo_unlocked = True
+    term._mario_combo_unlocked_step = 2_500 * 24
+    env.common_step_counter = 3_000 * 24
+    stage = microduck_mdp.mario_transition_settle_curriculum(
+        env, torch.arange(1), **params
+    )
+    assert stage.item() == 1.0
+    assert term.cfg.neutral_transition_time_range == (0.25, 0.25)
+
+    # A late competence unlock must still receive a full 1000 iterations at
+    # the shorter settling stage instead of jumping directly to no buffer.
+    term._mario_combo_unlocked_step = 3_400 * 24
+    env.common_step_counter = 3_500 * 24
+    stage = microduck_mdp.mario_transition_settle_curriculum(
+        env, torch.arange(1), **params
+    )
+    assert stage.item() == 1.0
+    assert term.cfg.neutral_transition_time_range == (0.25, 0.25)
+
+    env.common_step_counter = 4_400 * 24
+    stage = microduck_mdp.mario_transition_settle_curriculum(
+        env, torch.arange(1), **params
+    )
+    assert stage.item() == 2.0
+    assert term.cfg.neutral_transition_time_range is None
+
+
+def test_mario_command_inserts_neutral_between_active_requests():
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term._env = SimpleNamespace(
+        num_envs=2, device=torch.device("cpu"), step_dt=0.02
+    )
+    term.cfg = SimpleNamespace(
+        category_weights=(0.0, 1.0) + (0.0,) * 12,
+        neutral_transition_time_range=(0.5, 0.5),
+    )
+    term._command = torch.tensor([[-1.0, 0.0, 0.0], [0.0, 0.0, 0.0]])
+    term.command_age = torch.ones(2)
+    term.time_left = torch.full((2,), 2.0)
+    term._resample_command(torch.arange(2))
+    assert term._command.tolist() == [[0.0, 0.0, 0.0], [-1.0, 0.0, 0.0]]
+    assert term.time_left.tolist() == pytest.approx([0.5, 2.0])
+    assert term.command_age.tolist() == pytest.approx([-0.02, -0.02])
 
 
 def test_mario_balance_reward_closes_press_then_crash_loophole():
@@ -1157,23 +1222,3 @@ def test_camera_readiness_rejects_crouch_low_camera_tilt_and_bad_view():
     view_cost = microduck_mdp.mario_camera_view_cost(env, camera_cfg)
     assert view_cost[:4].tolist() == pytest.approx([0.] * 4)
     assert view_cost[4] > 0
-
-
-def test_camera_view_cost_teaches_neutral_below_readiness_cutoff(monkeypatch):
-    cfg = make_microduck_mario_env_cfg()
-    reward = cfg.rewards["camera_view"]
-    assert reward.weight < 0
-    assert reward.params["full_view_alignment"] == cfg.metrics["camera_ready"].params["full_view_alignment"]
-    # The function does not require an active command or a switch contact.
-    monkeypatch.setattr(microduck_mdp, "_mario_camera_view_alignment",
-                        lambda *a, **k: torch.tensor([1., .95, .90, .80, .5, -1.]))
-    env = SimpleNamespace(command_manager=SimpleNamespace(
-        get_command=lambda _: torch.zeros(6, 3)))
-    costs = reward.func(env, **reward.params)
-    assert costs.tolist() == pytest.approx([0., 0., .5, 1.5, 4.5, 19.5], abs=1e-5)
-    assert (costs * reward.weight <= 0).all()
-    env.command_manager.get_command = lambda _: torch.tensor([
-        [-1., 0., 0.], [1., 0., 0.], [0., 0., 1.],
-        [-1., 0., 1.], [1., 0., 1.], [0., 0., 0.],
-    ])
-    assert reward.func(env, **reward.params).tolist() == pytest.approx([0., 0., 0., 0., 0., 19.5])

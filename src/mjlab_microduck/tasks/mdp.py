@@ -5743,6 +5743,15 @@ class MarioNesCommand(CommandTerm):
         super().__init__(cfg, env)
         self._command = torch.zeros(self.num_envs, 3, device=self.device)
         self.command_age = torch.zeros(self.num_envs, device=self.device)
+        settle_range = self.cfg.neutral_transition_time_range
+        if settle_range is not None and (
+            len(settle_range) != 2
+            or settle_range[0] <= 0.0
+            or settle_range[1] < settle_range[0]
+        ):
+            raise ValueError(
+                "neutral_transition_time_range must be None or a positive (min, max)"
+            )
 
     @property
     def command(self) -> torch.Tensor:
@@ -5786,8 +5795,34 @@ class MarioNesCommand(CommandTerm):
             raise ValueError(
                 "Mario category weights must be non-negative and non-zero"
             )
-        category = torch.multinomial(probabilities, n, replacement=True)
-        self._command[env_ids] = commands[category]
+        settle_range = self.cfg.neutral_transition_time_range
+        previous_active = self._command[env_ids].abs().sum(dim=-1) > 0.0
+        if settle_range is not None:
+            # Active commands always release through an explicit neutral
+            # window. This gives the legs and heavy head time to return to a
+            # balanced configuration before the next requested press.
+            settle_ids = env_ids[previous_active]
+            self._command[settle_ids] = 0.0
+            if len(settle_ids) > 0:
+                self.time_left[settle_ids] = self.time_left[settle_ids].uniform_(
+                    *settle_range
+                )
+            sample_ids = env_ids[~previous_active]
+            # Neutral experience is supplied by the mandatory settling
+            # windows; sampling another neutral here would create long idle
+            # stretches and reduce active-button learning.
+            probabilities = probabilities.clone()
+            probabilities[0] = 0.0
+        else:
+            sample_ids = env_ids
+        if len(sample_ids) > 0:
+            if probabilities.sum() <= 0.0:
+                raise ValueError(
+                    "Mario command weights need an active category while "
+                    "neutral transition settling is enabled"
+                )
+            category = torch.multinomial(probabilities, len(sample_ids), replacement=True)
+            self._command[sample_ids] = commands[category]
         # ``CommandManager.compute(dt=0)`` still calls ``_update_command``
         # immediately after a reset. Start one tick negative so that both a
         # reset-time sample and an in-episode sample have age zero when first
@@ -5805,6 +5840,9 @@ class MarioNesCommand(CommandTerm):
 @_dataclass(kw_only=True)
 class MarioNesCommandCfg(CommandTermCfg):
     class_type: type = MarioNesCommand
+    # When set, every active command is followed by a neutral release window
+    # of this duration before another active category may be sampled.
+    neutral_transition_time_range: tuple[float, float] | None = None
     # Same order as the explicit command table above. Sums to 1.0 by default.
     category_weights: tuple[float, ...] = (
         0.10,  # neutral
@@ -5825,6 +5863,40 @@ class MarioNesCommandCfg(CommandTermCfg):
 
     def build(self, env: ManagerBasedRlEnv) -> "MarioNesCommand":
         return MarioNesCommand(self, env)
+
+
+def mario_transition_settle_curriculum(
+    env: ManagerBasedRlEnv,
+    env_ids: torch.Tensor,
+    command_name: str,
+    stages: list[dict],
+) -> torch.Tensor:
+    """Shorten neutral settling only after the single-button skills mature."""
+
+    del env_ids
+    if not stages or stages[0].get("step") != 0:
+        raise ValueError("Mario transition stages must begin at step 0")
+    term = env.command_manager.get_term(command_name)
+    if not isinstance(term, MarioNesCommand):
+        raise TypeError(f"{command_name} is not a MarioNesCommand")
+    combo_unlocked = getattr(term, "_mario_combo_unlocked", False)
+    stage_index = 0
+    if combo_unlocked:
+        unlock_step = getattr(
+            term, "_mario_combo_unlocked_step", env.common_step_counter
+        )
+        for index, stage in enumerate(stages[1:], start=1):
+            if (
+                env.common_step_counter >= stage["step"]
+                and env.common_step_counter - unlock_step
+                >= stage.get("min_steps_since_unlock", 0)
+            ):
+                stage_index = index
+    settle_range = stages[stage_index]["settle_range"]
+    if settle_range is not None:
+        settle_range = tuple(settle_range)
+    term.cfg.neutral_transition_time_range = settle_range
+    return torch.tensor(float(stage_index), device=env.device)
 
 
 def mario_command_category_curriculum(
@@ -5917,6 +5989,7 @@ def mario_command_category_curriculum(
                 button_scores.append(score / valid.sum().clamp(min=1))
             if torch.stack(button_scores).amin() >= combo_unlock_success:
                 term._mario_combo_unlocked = True
+                term._mario_combo_unlocked_step = env.common_step_counter
         if getattr(term, "_mario_combo_unlocked", False):
             stage_index = combo_stage
     weights = tuple(weight_stages[stage_index]["weights"])
