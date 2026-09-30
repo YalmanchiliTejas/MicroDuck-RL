@@ -1,4 +1,4 @@
-"""Train the pixel-based flybrain directly in the Mario emulator."""
+"""Train a DQN readout over the real MaleCNS connectome in Mario."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ import time
 import numpy as np
 import torch
 
-from flybrain import (
+from male_cns import MaleCNS
+from mario_dqn import (
+    ActivityStack,
     FlybrainAgent,
     FlybrainConfig,
-    FrameStack,
     PrioritizedReplay,
-    preprocess_frame,
 )
 from mario_sidecar import nes_actions
 
@@ -34,18 +34,25 @@ def run(args: argparse.Namespace) -> None:
     from nes_py.wrappers import JoypadSpace
     import gym_super_mario_bros  # noqa: F401 -- registers environments
 
+    connectome = MaleCNS(
+        data=args.male_cns_data,
+        device=args.male_cns_device,
+        seed=args.seed,
+        spike_file=args.spike_file,
+    )
     if args.resume:
         agent = FlybrainAgent.load(args.resume, device=_device(args.device))
         config = agent.config
     else:
         config = FlybrainConfig(
+            feature_dim=connectome.feature_dim,
             replay_capacity=args.replay_capacity,
             replay_start=args.replay_start,
         )
         agent = FlybrainAgent(config, device=_device(args.device), seed=args.seed)
     replay = PrioritizedReplay(
         config.replay_capacity,
-        (config.stack_depth, config.frame_size, config.frame_size),
+        (config.stack_depth, config.feature_dim),
         alpha=config.per_alpha,
         seed=args.seed,
     )
@@ -59,8 +66,8 @@ def run(args: argparse.Namespace) -> None:
     env = gym.make(args.env, render_mode="rgb_array")
     env = JoypadSpace(env, nes_actions())
     observation, _ = env.reset(seed=args.seed)
-    stack = FrameStack(config.stack_depth)
-    state = stack.reset(preprocess_frame(observation, config.frame_size))
+    stack = ActivityStack(config.stack_depth)
+    state = stack.reset(connectome.reset(observation))
     episode_reward = 0.0
     episode = 0
     last_loss = float("nan")
@@ -71,20 +78,13 @@ def run(args: argparse.Namespace) -> None:
             action = agent.act(state)
             reward_sum = 0.0
             terminated = truncated = False
-            frames = []
             for _ in range(args.action_repeat):
                 observation, reward, terminated, truncated, _ = env.step(action)
                 reward_sum += float(reward)
-                frames.append(observation)
+                stack.append(connectome.observe(observation, action_sequence=environment_step))
                 if terminated or truncated:
                     break
-            # Max over the last two frames suppresses sprite flicker.
-            visible = (
-                np.maximum(frames[-1], frames[-2])
-                if len(frames) > 1
-                else frames[-1]
-            )
-            next_state = stack.append(preprocess_frame(visible, config.frame_size))
+            next_state = stack.state
             done = terminated or truncated
             replay.add(state, action, np.sign(reward_sum), next_state, done)
             loss = agent.learn(replay)
@@ -100,7 +100,7 @@ def run(args: argparse.Namespace) -> None:
                     f"epsilon={agent.epsilon():.3f} loss={last_loss:.4f}"
                 )
                 observation, _ = env.reset()
-                state = stack.reset(preprocess_frame(observation, config.frame_size))
+                state = stack.reset(connectome.reset(observation))
                 episode_reward = 0.0
 
             if environment_step % args.save_every == 0:
@@ -117,7 +117,7 @@ def run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Train a Double/Dueling DQN flybrain from stacked Mario frames"
+        description="Train a dueling DQN from MaleCNS descending-neuron traces"
     )
     parser.add_argument("--env", default="SuperMarioBros-1-1-v0")
     parser.add_argument("--steps", type=int, default=1_000_000)
@@ -131,6 +131,11 @@ def main() -> None:
         "--device", choices=("auto", "cpu", "cuda", "mps"), default="auto"
     )
     parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--male-cns-data", type=Path)
+    parser.add_argument(
+        "--male-cns-device", choices=("auto", "cpu", "cuda"), default="auto"
+    )
+    parser.add_argument("--spike-file", type=Path)
     args = parser.parse_args()
     if args.steps <= 0 or args.action_repeat <= 0:
         parser.error("--steps and --action-repeat must be positive")

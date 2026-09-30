@@ -2,6 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import types
 
 import numpy as np
 import pytest
@@ -9,7 +10,7 @@ import torch
 
 
 def _load_flybrain():
-    path = Path(__file__).parents[1] / "integrations/super_mario/flybrain.py"
+    path = Path(__file__).parents[1] / "integrations/super_mario/mario_dqn.py"
     spec = importlib.util.spec_from_file_location("microduck_test_flybrain", path)
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
@@ -29,7 +30,7 @@ def _load_rollouts():
 
 
 def _load_rollout_trainer(flybrain, rollouts):
-    sys.modules["flybrain"] = flybrain
+    sys.modules["mario_dqn"] = flybrain
     sys.modules["rollouts"] = rollouts
     path = Path(__file__).parents[1] / "integrations/super_mario/train_rollouts.py"
     spec = importlib.util.spec_from_file_location("microduck_test_rollout_trainer", path)
@@ -54,6 +55,16 @@ def _load_visualizer():
     return module
 
 
+def _load_male_cns():
+    path = Path(__file__).parents[1] / "integrations/super_mario/male_cns.py"
+    spec = importlib.util.spec_from_file_location("microduck_test_male_cns", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_flybrain_actions_cover_combinations_without_opposite_directions():
     flybrain = _load_flybrain()
     assert [flybrain.action_levels(i) for i in range(10)] == [
@@ -73,27 +84,14 @@ def test_flybrain_actions_cover_combinations_without_opposite_directions():
             flybrain.action_levels(invalid)
 
 
-def test_frame_preprocessing_and_stack_have_cnn_shape():
+def test_activity_stack_has_four_malecns_trace_frames():
     flybrain = _load_flybrain()
-    rgb = np.zeros((240, 256, 3), dtype=np.uint8)
-    rgb[:, :, 1] = 200
-    frame = flybrain.preprocess_frame(rgb)
-    stack = flybrain.FrameStack(4)
+    frame = np.arange(12, dtype=np.float32)
+    stack = flybrain.ActivityStack(4)
     state = stack.reset(frame)
-    assert frame.shape == (84, 84)
-    assert frame.dtype == np.uint8
-    assert state.shape == (4, 84, 84)
+    assert state.shape == (4, 12)
+    assert state.dtype == np.float32
     assert np.array_equal(state[0], state[-1])
-
-
-def test_frame_preprocessing_accepts_negative_stride_emulator_views():
-    flybrain = _load_flybrain()
-    rgb = np.zeros((240, 256, 3), dtype=np.uint8)
-    negative_stride_view = rgb[:, ::-1, :]
-    assert negative_stride_view.strides[1] < 0
-    frame = flybrain.preprocess_frame(negative_stride_view)
-    assert frame.shape == (84, 84)
-    assert frame.dtype == np.uint8
 
 
 def test_flybrain_config_locks_four_frames_and_ten_intents():
@@ -108,12 +106,10 @@ def test_flybrain_config_locks_four_frames_and_ten_intents():
 
 def test_replay_samples_self_contained_pre_and_post_action_states():
     flybrain = _load_flybrain()
-    replay = flybrain.PrioritizedReplay(2, (4, 36, 36), seed=3)
+    replay = flybrain.PrioritizedReplay(2, (4, 6), seed=3)
 
     def stack(*values):
-        return np.stack(
-            [np.full((36, 36), value, dtype=np.uint8) for value in values]
-        )
+        return np.stack([np.full(6, value, dtype=np.float32) for value in values])
 
     replay.add(stack(1, 2, 3, 4), 0, 0.0, stack(2, 3, 4, 5), False)
     replay.add(stack(11, 12, 13, 14), 1, 1.0, stack(12, 13, 14, 15), True)
@@ -121,10 +117,10 @@ def test_replay_samples_self_contained_pre_and_post_action_states():
     # not need that old entry to reconstruct its own current state.
     replay.add(stack(21, 22, 23, 24), 2, 2.0, stack(22, 23, 24, 25), False)
     sample = replay.sample(2, beta=0.4)
-    assert sample[0].shape == (2, 4, 36, 36)
-    assert sample[3].shape == (2, 4, 36, 36)
+    assert sample[0].shape == (2, 4, 6)
+    assert sample[3].shape == (2, 4, 6)
     transitions = {
-        int(action): (state[:, 0, 0].tolist(), next_state[:, 0, 0].tolist())
+        int(action): (state[:, 0].tolist(), next_state[:, 0].tolist())
         for state, action, next_state in zip(sample[0], sample[1], sample[3], strict=True)
     }
     assert transitions == {
@@ -135,18 +131,65 @@ def test_replay_samples_self_contained_pre_and_post_action_states():
 
 def test_replay_rejects_a_next_state_that_is_not_after_the_action():
     flybrain = _load_flybrain()
-    replay = flybrain.PrioritizedReplay(2, (4, 36, 36))
-    state = np.zeros((4, 36, 36), dtype=np.uint8)
-    invalid_next_state = np.ones((4, 36, 36), dtype=np.uint8)
+    replay = flybrain.PrioritizedReplay(2, (4, 6))
+    state = np.zeros((4, 6), dtype=np.float32)
+    invalid_next_state = np.ones((4, 6), dtype=np.float32)
     with pytest.raises(ValueError, match="observation after the action"):
         replay.add(state, 0, 0.0, invalid_next_state, False)
 
 
 def test_dueling_network_outputs_one_q_value_per_action():
     flybrain = _load_flybrain()
-    network = flybrain.DuelingQNetwork(frame_size=84)
-    output = network(torch.zeros(2, 4, 84, 84, dtype=torch.uint8))
+    network = flybrain.DuelingQNetwork(feature_dim=16)
+    output = network(torch.zeros(2, 4, 16))
     assert output.shape == (2, 10)
+
+
+def test_male_cns_backend_uses_real_step_and_only_descending_trace(tmp_path, monkeypatch):
+    class FakeBrain:
+        def __init__(self, **_kwargs):
+            self.n = 8
+            self.steps = 0
+            self.azimuth = np.asarray((-1.0, 1.0), dtype=np.float32)
+
+        def cells(self, names, side=None):
+            if names == ["descending_neuron"]:
+                return np.asarray((4, 5), dtype=np.int64)
+            return np.asarray((0 if side == "L" else 1,), dtype=np.int64)
+
+        def step(self, **_kwargs):
+            self.steps += 1
+            return np.asarray((0, 4), dtype=np.int64)
+
+        def reset(self):
+            self.steps = 0
+
+    class FakeTrace:
+        def __init__(self, _brain, idx, **_kwargs):
+            assert idx.tolist() == [4, 5]
+
+        def observe(self, fired):
+            assert fired.tolist() == [0, 4]
+            return np.asarray((1.0, 0.0), dtype=np.float32)
+
+        def reset(self):
+            pass
+
+    monkeypatch.setitem(
+        sys.modules,
+        "flybrain",
+        types.SimpleNamespace(FlyBrain=FakeBrain, Trace=FakeTrace),
+    )
+    male_cns = _load_male_cns()
+    spikes = tmp_path / "spikes.jsonl"
+    backend = male_cns.MaleCNS(spike_file=spikes)
+    frame = np.zeros((12, 16, 3), dtype=np.uint8)[:, ::-1]
+    assert frame.strides[1] < 0
+    assert backend.observe(frame, action_sequence=7).tolist() == [1.0, 0.0]
+    row = json.loads(spikes.read_text())
+    assert row["population"] == "MaleCNS descending_neuron"
+    assert row["neuron_ids"] == [4]
+    assert row["all_spikes"] == 2
 
 
 def test_reward_packet_preserves_action_sequence_components_and_terminal():
@@ -169,12 +212,10 @@ def test_reward_packet_preserves_action_sequence_components_and_terminal():
 
 def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
     rollouts = _load_rollouts()
-    recorder = rollouts.RolloutRecorder(tmp_path, 4, 36, run_id="run")
+    recorder = rollouts.RolloutRecorder(tmp_path, 4, 6, run_id="run")
 
     def stack(*values):
-        return np.stack(
-            [np.full((36, 36), value, dtype=np.uint8) for value in values]
-        )
+        return np.stack([np.full(6, value, dtype=np.float32) for value in values])
 
     recorder.add(
         state=stack(1, 2, 3, 4),
@@ -209,7 +250,7 @@ def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
     reconstructed = np.concatenate(
         (arrays["states"][1, 1:], arrays["post_action_frames"][1, None]), axis=0
     )
-    assert reconstructed[:, 0, 0].tolist() == [3, 4, 5, 6]
+    assert reconstructed[:, 0].tolist() == [3, 4, 5, 6]
     assert not list(tmp_path.glob("*.tmp"))
     transitions = [json.loads(line) for line in (tmp_path / "transitions.jsonl").read_text().splitlines()]
     assert [row["action_sequence"] for row in transitions] == [10, 11]
@@ -258,12 +299,10 @@ def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
     flybrain = _load_flybrain()
     rollouts = _load_rollouts()
     trainer = _load_rollout_trainer(flybrain, rollouts)
-    recorder = rollouts.RolloutRecorder(tmp_path, 4, 36, run_id="training")
+    recorder = rollouts.RolloutRecorder(tmp_path, 4, 6, run_id="training")
 
     def stack(*values):
-        return np.stack(
-            [np.full((36, 36), value, dtype=np.uint8) for value in values]
-        )
+        return np.stack([np.full(6, value, dtype=np.float32) for value in values])
 
     recorder.add(
         state=stack(1, 2, 3, 4), action=2, reward=2.0,
@@ -276,7 +315,7 @@ def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
         reward_components={"death": -25.0}, action_sequence=1, emulator_steps=2,
     )
     config = flybrain.FlybrainConfig(
-        frame_size=36,
+        feature_dim=6,
         stack_depth=4,
         batch_size=1,
         replay_capacity=3,
@@ -284,7 +323,7 @@ def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
         train_every=1,
     )
     agent = flybrain.FlybrainAgent(config, seed=4)
-    replay = flybrain.PrioritizedReplay(3, (4, 36, 36), seed=4)
+    replay = flybrain.PrioritizedReplay(3, (4, 6), seed=4)
     count, reward, loss = trainer.ingest_rollout(
         next(tmp_path.glob("rollout-*.npz")), replay, agent
     )

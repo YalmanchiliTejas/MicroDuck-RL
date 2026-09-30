@@ -108,11 +108,11 @@ class RewardReceiver:
 
 @dataclass(slots=True)
 class RolloutRecorder:
-    """Write one atomic, replay-ready NPZ per completed episode."""
+    """Write one atomic, replay-ready MaleCNS activity episode."""
 
     root: Path
     stack_depth: int
-    frame_size: int
+    feature_dim: int
     run_id: str = ""
     _episode: int = field(default=0, init=False)
     _rows: list[dict] = field(default_factory=list, init=False)
@@ -139,9 +139,9 @@ class RolloutRecorder:
         action_sequence: int,
         emulator_steps: int,
     ) -> dict:
-        state = np.asarray(state, dtype=np.uint8)
-        next_state = np.asarray(next_state, dtype=np.uint8)
-        expected = (self.stack_depth, self.frame_size, self.frame_size)
+        state = np.asarray(state, dtype=np.float16)
+        next_state = np.asarray(next_state, dtype=np.float16)
+        expected = (self.stack_depth, self.feature_dim)
         if state.shape != expected or next_state.shape != expected:
             raise ValueError(f"rollout states must have shape {expected}")
         if not np.array_equal(state[1:], next_state[:-1]):
@@ -189,9 +189,11 @@ class RolloutRecorder:
         destination = self.root / name
         temporary = self.root / f".{name}.{uuid.uuid4().hex}.tmp"
         metadata = {
-            # Schema 3 records ten game intents. Direction/jump are physically
-            # measured; run is a virtual intent applied to that measured direction.
-            "schema": 3,
+            # Schema 4 stores genuine MaleCNS descending-neuron traces rather
+            # than Mario pixels.
+            "schema": 4,
+            "input": "malecns_descending_neuron_trace",
+            "feature_dim": self.feature_dim,
             "run_id": self.run_id,
             "episode": self._episode,
             "complete": bool(rows[-1]["terminated"] or rows[-1]["truncated"]),
@@ -250,7 +252,7 @@ def load_rollout(path: Path) -> tuple[dict, dict[str, np.ndarray]]:
     with np.load(path, allow_pickle=False) as archive:
         metadata = json.loads(str(archive["metadata"]))
         arrays = {key: archive[key].copy() for key in archive.files if key != "metadata"}
-    if metadata.get("schema") != 3:
+    if metadata.get("schema") != 4:
         raise ValueError("unsupported rollout schema")
     lengths = {len(value) for value in arrays.values()}
     if len(lengths) != 1:

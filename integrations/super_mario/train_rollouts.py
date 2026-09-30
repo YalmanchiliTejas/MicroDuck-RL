@@ -10,7 +10,7 @@ import time
 import numpy as np
 import torch
 
-from flybrain import FlybrainAgent, FlybrainConfig, PrioritizedReplay
+from mario_dqn import FlybrainAgent, FlybrainConfig, PrioritizedReplay
 from rollouts import DEFAULT_REWARD_PORT, RewardReceiver, load_rollout
 
 
@@ -24,6 +24,21 @@ def _device(name: str) -> str:
     return "cpu"
 
 
+def _male_cns_feature_dim(data: Path | None) -> int:
+    """Read the real descending-neuron count without loading the 205 MB matrix."""
+
+    from flybrain.data import ensure_data
+
+    root = ensure_data(data)
+    with np.load(root / "brain.npz", allow_pickle=False) as metadata:
+        if "superclass" not in metadata.files:
+            raise RuntimeError("MaleCNS brain.npz has no superclass metadata")
+        feature_dim = int(np.count_nonzero(metadata["superclass"] == "descending_neuron"))
+    if feature_dim <= 0:
+        raise RuntimeError("MaleCNS metadata contains no descending neurons")
+    return feature_dim
+
+
 def _atomic_save(agent: FlybrainAgent, path: Path) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     agent.save(temporary)
@@ -34,7 +49,7 @@ def _load_processed(path: Path) -> set[str]:
     if not path.exists():
         return set()
     data = json.loads(path.read_text())
-    if data.get("schema") != 3 or not isinstance(data.get("rollouts"), list):
+    if data.get("schema") != 4 or not isinstance(data.get("rollouts"), list):
         raise ValueError(f"invalid processed-rollout manifest: {path}")
     return {str(value) for value in data["rollouts"]}
 
@@ -42,7 +57,7 @@ def _load_processed(path: Path) -> set[str]:
 def _save_processed(path: Path, processed: set[str]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
-        json.dumps({"schema": 3, "rollouts": sorted(processed)}, indent=2) + "\n"
+        json.dumps({"schema": 4, "rollouts": sorted(processed)}, indent=2) + "\n"
     )
     temporary.replace(path)
 
@@ -92,14 +107,17 @@ def run(args: argparse.Namespace) -> None:
         config = agent.config
         print(f"resumed {resume}")
     else:
+        feature_dim = _male_cns_feature_dim(args.male_cns_data)
+        print(f"MaleCNS metadata: {feature_dim:,} descending-neuron features")
         config = FlybrainConfig(
+            feature_dim=feature_dim,
             replay_capacity=args.replay_capacity,
             replay_start=args.replay_start,
         )
         agent = FlybrainAgent(config, device=device, seed=args.seed)
     replay = PrioritizedReplay(
         config.replay_capacity,
-        (config.stack_depth, config.frame_size, config.frame_size),
+        (config.stack_depth, config.feature_dim),
         alpha=config.per_alpha,
         seed=args.seed,
     )
@@ -161,6 +179,7 @@ def main() -> None:
         "--device", choices=("auto", "cpu", "cuda", "mps"), default="auto"
     )
     parser.add_argument("--seed", type=int, default=123)
+    parser.add_argument("--male-cns-data", type=Path)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
     if args.poll_seconds <= 0 or not 1 <= args.port <= 65535:

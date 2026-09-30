@@ -223,28 +223,35 @@ whichever direction the duck actually presses. Otherwise the same physical
 press makes Mario walk. A 250 ms deadman timer releases all buttons if
 controller packets stop.
 
-#### Flybrain (high-level DQN)
+#### MaleCNS fly brain + high-level DQN readout
 
-The flybrain is deliberately separate from the 50 Hz PPO motor controller. It
-sees four stacked 84×84 grayscale game frames and chooses one of ten game
-intents: idle, walk left/right, jump, walk+jump, run left/right, or run+jump.
+The published MaleCNS v1.0 connectome is deliberately separate from the 50 Hz
+PPO motor controller. Mario pixels stimulate its compound-eye photoreceptors
+and identified visual-projection cells (LPLC2, LC4, LPLC1 and LC10a). The
+166,700-neuron LIF network is frozen: its connectome weights are never trained.
+The policy sees only four consecutive exponential traces from the connectome's
+1,314 descending neurons and chooses one of ten game intents: idle, walk
+left/right, jump, walk+jump, run left/right, or run+jump.
 The robot still has only three physical controls (LEFT, RIGHT, JUMP). The run
 bit is sent alongside the physical request but never enters the PPO observation;
 after the duck responds, the sidecar applies virtual NES `B` only to its
-measured direction. A dueling Double DQN learns those intents with prioritized
-replay. PER priorities belong to whole transitions
-`(frame stack, action, reward, next frame stack, done)`, not to individual raw
-frames. Every replay item is self-contained: it stores its uint8 pre-action
-stack plus the post-action frame, so random PER sampling and circular-buffer
-overwrites cannot detach an action from its resulting state.
+measured direction. A temporal CNN and dueling Double-DQN readout learn from
+the four real descending-neuron traces with prioritized replay. There is no
+pixel-to-action bypass. PER priorities belong to whole transitions
+`(activity stack, action, reward, next activity stack, done)`. Every replay
+item stores its float16 pre-action stack plus the post-action trace, so random
+sampling cannot detach an action from its resulting connectome state.
 
 The physical pads are now a tight, non-overlapping triangle (5–20 mm edge gaps)
 so a request change does not require crossing the original large empty spaces.
 Changing this layout changes the controller task: retrain the Mario PPO before
 using a checkpoint trained against the old geometry.
 
-Install the Python 3.13 sidecar, then train the visual flybrain directly in the
-emulator:
+Install the Python 3.13 sidecar, then train the MaleCNS readout directly in the
+emulator. On first use the `flybrain` package downloads its prebuilt MaleCNS
+files (about 260 MB) to `$FLY_DATA` (default `~/fly-data`). The simulator and
+reservoir interface come from [fly.ai](https://github.com/alextitonis/fly.ai);
+this is the real MaleCNS model, not a locally invented network:
 
 ```bash
 python3.13 -m venv .super-mario-venv
@@ -322,18 +329,16 @@ is written to a temporary file and renamed only after it is complete; an
 interrupted rollout remains marked incomplete and is never trained. Episode
 summaries are appended to `episodes.jsonl`.
 
-The spike raster accepts real connectome telemetry as JSONL, one time bin per
-line, for example:
+The sidecar writes real MaleCNS descending-neuron telemetry to
+`rollouts/spikes.jsonl`, one time bin per emulator frame, for example:
 
 ```json
-{"time_s":1.25,"population":"KC","neuron_ids":[14,91,203],"action_sequence":8}
+{"time_s":1.25,"population":"MaleCNS descending_neuron","neuron_ids":[14,91,203],"action_sequence":8}
 ```
 
-Pass the file with `--spike-file` locally or `FLY_SPIKE_FILE` under Slurm. The
-current `flybrain.py` is still the visual Dueling Double-DQN and does **not**
-yet contain a MaleCNS/FlyWire spiking backend. Therefore the dashboard reports
-the connectome as disconnected until that backend writes genuine spike bins;
-it deliberately does not relabel CNN activations as biological neuron firing.
+Pass another file with `--spike-file` locally or `FLY_SPIKE_FILE` under Slurm.
+The raster is populated only from neurons returned by the MaleCNS simulator;
+CNN activations are never presented as biological spikes.
 
 The Mario sidecar also publishes its native 256×240 RGB framebuffer through
 shared memory (`microduck_mario_rgb` by default). The Mario-controller MuJoCo

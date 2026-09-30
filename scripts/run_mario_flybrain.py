@@ -69,6 +69,10 @@ def main() -> int:
     parser.add_argument("--dashboard-host", default="127.0.0.1")
     parser.add_argument("--dashboard-port", type=int, default=8765)
     parser.add_argument("--spike-file", type=Path)
+    parser.add_argument("--male-cns-data", type=Path)
+    parser.add_argument(
+        "--male-cns-device", choices=("auto", "cpu", "cuda"), default="auto"
+    )
     parser.add_argument("--frame-shm", default="microduck_mario_rgb")
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument(
@@ -108,22 +112,27 @@ def main() -> int:
     signal.signal(signal.SIGTERM, request_stop)
 
     try:
+        trainer_command = _command(
+            args.sidecar_python,
+            "train_rollouts.py",
+            "--rollout-dir",
+            rollout_dir,
+            "--output",
+            checkpoint,
+        )
+        if args.male_cns_data:
+            trainer_command.extend(("--male-cns-data", str(args.male_cns_data)))
         processes.append(
             _start(
                 "trainer",
-                _command(
-                    args.sidecar_python,
-                    "train_rollouts.py",
-                    "--rollout-dir",
-                    rollout_dir,
-                    "--output",
-                    checkpoint,
-                ),
+                trainer_command,
                 log_dir,
                 sidecar_env,
             )
         )
-        deadline = time.monotonic() + 120.0
+        # A fresh run may download the ~260 MB prebuilt MaleCNS files before
+        # creating the schema-4 readout checkpoint.
+        deadline = time.monotonic() + 900.0
         while not checkpoint.exists():
             trainer = processes[0][1]
             if trainer.poll() is not None:
@@ -132,28 +141,35 @@ def main() -> int:
                 )
             if time.monotonic() >= deadline:
                 raise TimeoutError(
-                    "trainer did not create its initial checkpoint within 120 seconds"
+                    "trainer did not create its initial checkpoint within 900 seconds"
                 )
             time.sleep(0.2)
 
+        sidecar_command = _command(
+            args.sidecar_python,
+            "mario_sidecar.py",
+            "--headless",
+            "--flybrain",
+            checkpoint,
+            "--flybrain-reload",
+            "--flybrain-use-scheduled-epsilon",
+            "--flybrain-decision-frames",
+            args.decision_frames,
+            "--frame-shm",
+            args.frame_shm,
+            "--rollout-dir",
+            rollout_dir,
+            "--male-cns-device",
+            args.male_cns_device,
+        )
+        if args.male_cns_data:
+            sidecar_command.extend(("--male-cns-data", str(args.male_cns_data)))
+        if args.spike_file:
+            sidecar_command.extend(("--spike-file", str(args.spike_file)))
         processes.append(
             _start(
                 "sidecar",
-                _command(
-                    args.sidecar_python,
-                    "mario_sidecar.py",
-                    "--headless",
-                    "--flybrain",
-                    checkpoint,
-                    "--flybrain-reload",
-                    "--flybrain-use-scheduled-epsilon",
-                    "--flybrain-decision-frames",
-                    args.decision_frames,
-                    "--frame-shm",
-                    args.frame_shm,
-                    "--rollout-dir",
-                    rollout_dir,
-                ),
+                sidecar_command,
                 log_dir,
                 sidecar_env,
             )

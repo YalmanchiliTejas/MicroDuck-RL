@@ -235,7 +235,8 @@ def run(args: argparse.Namespace) -> None:
     receiver = None if args.demo else PadReceiver(args.host, args.port, args.timeout)
     observation, info = env.reset(seed=args.seed)
     flybrain = None
-    flybrain_stack = None
+    activity_stack = None
+    male_cns = None
     request_sender = None
     requested = PadLevels()
     next_flybrain_decision = 0
@@ -252,13 +253,33 @@ def run(args: argparse.Namespace) -> None:
     rollout_transition = 0
     flybrain_mtime_ns = None
     if args.flybrain:
-        from flybrain import FlybrainAgent, FrameStack, action_levels, preprocess_frame
+        from male_cns import MaleCNS
+        from mario_dqn import ActivityStack, FlybrainAgent, action_levels
         from rollouts import RewardSender, RolloutRecorder
 
         flybrain = FlybrainAgent.load(args.flybrain, device=args.flybrain_device)
         flybrain_mtime_ns = args.flybrain.stat().st_mtime_ns
-        flybrain_stack = FrameStack(flybrain.config.stack_depth)
-        flybrain_stack.reset(preprocess_frame(observation, flybrain.config.frame_size))
+        spike_file = args.spike_file or (
+            args.rollout_dir / "spikes.jsonl" if args.rollout_dir is not None else None
+        )
+        male_cns = MaleCNS(
+            data=args.male_cns_data,
+            device=args.male_cns_device,
+            seed=args.seed,
+            spike_file=spike_file,
+        )
+        if male_cns.feature_dim != flybrain.config.feature_dim:
+            raise RuntimeError(
+                f"checkpoint expects {flybrain.config.feature_dim} descending neurons, "
+                f"but MaleCNS provides {male_cns.feature_dim}"
+            )
+        print(
+            f"MaleCNS ready: {male_cns.neuron_count:,} neurons; "
+            f"{male_cns.feature_dim:,} descending-neuron readout features",
+            flush=True,
+        )
+        activity_stack = ActivityStack(flybrain.config.stack_depth)
+        activity_stack.reset(male_cns.reset(observation))
         request_sender = RequestSender(args.request_host, args.request_port)
         if not args.no_reward_telemetry:
             reward_sender = RewardSender(args.reward_host, args.reward_port)
@@ -266,7 +287,7 @@ def run(args: argparse.Namespace) -> None:
             rollout_recorder = RolloutRecorder(
                 args.rollout_dir,
                 flybrain.config.stack_depth,
-                flybrain.config.frame_size,
+                flybrain.config.feature_dim,
                 run_id=run_id,
             )
     publisher = (
@@ -281,9 +302,7 @@ def run(args: argparse.Namespace) -> None:
         while args.max_steps <= 0 or step < args.max_steps:
             if flybrain is not None and step >= next_flybrain_decision:
                 if active_state is not None:
-                    next_state = flybrain_stack.append(
-                        preprocess_frame(observation, flybrain.config.frame_size)
-                    )
+                    next_state = activity_stack.state
                     if rollout_recorder is not None:
                         event = rollout_recorder.add(
                             state=active_state,
@@ -314,7 +333,7 @@ def run(args: argparse.Namespace) -> None:
                         reward_sender.send(event)
                     rollout_transition += 1
                 else:
-                    next_state = flybrain_stack.state
+                    next_state = activity_stack.state
                 if args.flybrain_reload:
                     current_mtime_ns = args.flybrain.stat().st_mtime_ns
                     if current_mtime_ns != flybrain_mtime_ns:
@@ -351,6 +370,12 @@ def run(args: argparse.Namespace) -> None:
             observation, reward, terminated, truncated, info = env.step(
                 action_index(levels, run=virtual_run)
             )
+            if male_cns is not None:
+                activity_stack.append(
+                    male_cns.observe(
+                        observation, action_sequence=active_action_sequence
+                    )
+                )
             if active_state is not None:
                 interval_reward += float(reward)
                 interval_steps += 1
@@ -363,9 +388,7 @@ def run(args: argparse.Namespace) -> None:
             step += 1
             if terminated or truncated:
                 if active_state is not None:
-                    terminal_state = flybrain_stack.append(
-                        preprocess_frame(observation, flybrain.config.frame_size)
-                    )
+                    terminal_state = activity_stack.state
                     if rollout_recorder is not None:
                         event = rollout_recorder.add(
                             state=active_state,
@@ -401,10 +424,8 @@ def run(args: argparse.Namespace) -> None:
                     rollout_episode += 1
                     rollout_transition = 0
                 observation, info = env.reset()
-                if flybrain_stack is not None:
-                    flybrain_stack.reset(
-                        preprocess_frame(observation, flybrain.config.frame_size)
-                    )
+                if activity_stack is not None:
+                    activity_stack.reset(male_cns.reset(observation))
                     next_flybrain_decision = step
             if not args.unthrottled:
                 next_frame_time += 1.0 / args.fps
@@ -453,6 +474,17 @@ def main() -> None:
     parser.add_argument("--max-steps", type=int, default=0, help="0 runs until interrupted")
     parser.add_argument("--flybrain", type=Path, help="DQN checkpoint; requests actions over UDP")
     parser.add_argument("--flybrain-device", default="cpu")
+    parser.add_argument(
+        "--male-cns-device", choices=("auto", "cpu", "cuda"), default="auto"
+    )
+    parser.add_argument(
+        "--male-cns-data", type=Path,
+        help="directory containing MaleCNS brain.npz and weights.npz",
+    )
+    parser.add_argument(
+        "--spike-file", type=Path,
+        help="write genuine MaleCNS descending-neuron spikes as JSONL",
+    )
     parser.add_argument("--flybrain-epsilon", type=float, default=0.0)
     parser.add_argument(
         "--flybrain-use-scheduled-epsilon",

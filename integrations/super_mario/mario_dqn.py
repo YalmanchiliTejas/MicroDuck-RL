@@ -1,6 +1,6 @@
-"""Pixel-based Double-DQN "flybrain" for the Microduck Mario controller.
+"""Dueling Double-DQN readout for MaleCNS descending-neuron activity.
 
-The flybrain chooses one of ten game intents. During direct training the intent
+The readout chooses one of ten game intents. During direct training the intent
 is applied to the emulator; during combined MuJoCo training its left/right/jump
 part is sent to the robot. NES B remains virtual: the sidecar applies it only
 when the chosen intent requires running and only in the direction the duck
@@ -62,25 +62,8 @@ def action_levels(action: int | FlybrainAction) -> tuple[bool, bool, bool, bool]
         raise ValueError(f"invalid flybrain action: {action}") from exc
 
 
-def preprocess_frame(rgb: np.ndarray, size: int = 84) -> np.ndarray:
-    """Convert an RGB emulator frame to one resized uint8 luminance frame."""
-
-    frame = np.asarray(rgb)
-    if frame.ndim != 3 or frame.shape[2] < 3:
-        raise ValueError("frame must have shape (height, width, 3 or 4)")
-    # Emulator wrappers can return channel-reversed NumPy views with negative
-    # strides. PyTorch cannot wrap those views, so materialize a compact RGB
-    # array at this boundary.
-    rgb = np.ascontiguousarray(frame[:, :, :3])
-    tensor = torch.as_tensor(rgb, dtype=torch.float32)
-    # ITU-R BT.601 luminance. Keeping replay as uint8 cuts memory by 4x.
-    gray = tensor @ tensor.new_tensor((0.299, 0.587, 0.114))
-    gray = F.interpolate(gray[None, None], size=(size, size), mode="area")[0, 0]
-    return gray.round().clamp_(0, 255).to(torch.uint8).cpu().numpy()
-
-
-class FrameStack:
-    """Hold the latest frames in oldest-to-newest channel order."""
+class ActivityStack:
+    """Hold four real MaleCNS descending-neuron traces."""
 
     def __init__(self, depth: int = 4) -> None:
         if depth <= 0:
@@ -90,15 +73,13 @@ class FrameStack:
 
     def reset(self, frame: np.ndarray) -> np.ndarray:
         self._frames.clear()
-        self._frames.extend(
-            np.asarray(frame, dtype=np.uint8).copy() for _ in range(self.depth)
-        )
+        self._frames.extend(np.asarray(frame, dtype=np.float32).copy() for _ in range(self.depth))
         return self.state
 
     def append(self, frame: np.ndarray) -> np.ndarray:
         if not self._frames:
             return self.reset(frame)
-        self._frames.append(np.asarray(frame, dtype=np.uint8).copy())
+        self._frames.append(np.asarray(frame, dtype=np.float32).copy())
         return self.state
 
     @property
@@ -110,7 +91,9 @@ class FrameStack:
 
 @dataclass(frozen=True, slots=True)
 class FlybrainConfig:
-    frame_size: int = 84
+    # MaleCNS v1.0 currently contains 1,314 descending neurons. The sidecar
+    # verifies this against the downloaded connectome before acting.
+    feature_dim: int = 1314
     stack_depth: int = 4
     num_actions: int = len(ACTION_LEVELS)
     gamma: float = 0.99
@@ -129,8 +112,8 @@ class FlybrainConfig:
     grad_clip_norm: float = 10.0
 
     def __post_init__(self) -> None:
-        if self.frame_size < 36:
-            raise ValueError("frame_size must be at least 36 for the CNN")
+        if self.feature_dim <= 0:
+            raise ValueError("feature_dim must be positive")
         if self.stack_depth != 4:
             raise ValueError("flybrain temporal input must contain exactly four frames")
         if self.num_actions != len(ACTION_LEVELS):
@@ -144,41 +127,43 @@ class FlybrainConfig:
 
 
 class DuelingQNetwork(nn.Module):
-    """Small Atari-style CNN with separate value and advantage heads."""
+    """Temporal CNN over four MaleCNS descending-neuron traces.
+
+    The network never sees Mario pixels. Each trace first gets a shared
+    per-frame projection; a 1-D convolution then learns temporal correlations
+    across the four biological activity frames.
+    """
 
     def __init__(
         self,
         stack_depth: int = 4,
         num_actions: int = len(ACTION_LEVELS),
-        frame_size: int = 84,
+        feature_dim: int = 1314,
     ) -> None:
         super().__init__()
-        self.features = nn.Sequential(
-            nn.Conv2d(stack_depth, 32, kernel_size=8, stride=4),
-            nn.ReLU(),
-            nn.Conv2d(32, 64, kernel_size=4, stride=2),
-            nn.ReLU(),
-            nn.Conv2d(64, 64, kernel_size=3, stride=1),
-            nn.ReLU(),
-            nn.Flatten(),
+        self.stack_depth = stack_depth
+        self.frame_projection = nn.Sequential(nn.Linear(feature_dim, 256), nn.ReLU())
+        self.temporal = nn.Sequential(
+            nn.Conv1d(256, 256, kernel_size=2), nn.ReLU(), nn.Flatten()
         )
-        with torch.no_grad():
-            sample = torch.zeros(1, stack_depth, frame_size, frame_size)
-            feature_dim = self.features(sample).shape[1]
-        self.value = nn.Sequential(nn.Linear(feature_dim, 512), nn.ReLU(), nn.Linear(512, 1))
+        encoded_dim = 256 * (stack_depth - 1)
+        self.value = nn.Sequential(nn.Linear(encoded_dim, 512), nn.ReLU(), nn.Linear(512, 1))
         self.advantage = nn.Sequential(
-            nn.Linear(feature_dim, 512), nn.ReLU(), nn.Linear(512, num_actions)
+            nn.Linear(encoded_dim, 512), nn.ReLU(), nn.Linear(512, num_actions)
         )
 
-    def forward(self, frames: torch.Tensor) -> torch.Tensor:
-        features = self.features(frames.float().div(255.0))
+    def forward(self, activity: torch.Tensor) -> torch.Tensor:
+        if activity.ndim != 3 or activity.shape[1] != self.stack_depth:
+            raise ValueError("activity must have shape (batch, 4, descending_neurons)")
+        projected = self.frame_projection(activity.float())
+        features = self.temporal(projected.transpose(1, 2))
         value = self.value(features)
         advantage = self.advantage(features)
         return value + advantage - advantage.mean(dim=1, keepdim=True)
 
 
 class PrioritizedReplay:
-    """PER over self-contained uint8 frame-stack transitions.
+    """PER over self-contained MaleCNS activity-stack transitions.
 
     A priority belongs to the complete transition, not to an individual video
     frame. Each item stores the complete pre-action stack and the newly observed
@@ -190,7 +175,7 @@ class PrioritizedReplay:
     def __init__(
         self,
         capacity: int,
-        state_shape: tuple[int, int, int],
+        state_shape: tuple[int, int],
         alpha: float = 0.6,
         seed: int = 0,
     ) -> None:
@@ -198,11 +183,11 @@ class PrioritizedReplay:
             raise ValueError("capacity must be positive and alpha non-negative")
         self.capacity = capacity
         self.alpha = alpha
-        self.stack_depth, height, width = state_shape
-        self.states = np.empty((capacity, *state_shape), dtype=np.uint8)
-        self.post_action_frames = np.empty(
-            (capacity, height, width), dtype=np.uint8
-        )
+        self.stack_depth, self.feature_dim = state_shape
+        # float16 keeps a 20k transition buffer near 210 MB while preserving
+        # the smooth exponential spike traces accurately enough for the readout.
+        self.states = np.empty((capacity, *state_shape), dtype=np.float16)
+        self.post_action_frames = np.empty((capacity, self.feature_dim), dtype=np.float16)
         self.actions = np.empty(capacity, dtype=np.int64)
         self.rewards = np.empty(capacity, dtype=np.float32)
         self.dones = np.empty(capacity, dtype=np.bool_)
@@ -223,8 +208,8 @@ class PrioritizedReplay:
         done: bool,
     ) -> None:
         index = self._position
-        state = np.asarray(state, dtype=np.uint8)
-        next_state = np.asarray(next_state, dtype=np.uint8)
+        state = np.asarray(state, dtype=np.float16)
+        next_state = np.asarray(next_state, dtype=np.float16)
         expected_shape = self.states.shape[1:]
         if state.shape != expected_shape or next_state.shape != expected_shape:
             raise ValueError(f"state shape must be {expected_shape}")
@@ -287,10 +272,10 @@ class FlybrainAgent:
         np.random.seed(seed)
         torch.manual_seed(seed)
         self.online = DuelingQNetwork(
-            config.stack_depth, config.num_actions, config.frame_size
+            config.stack_depth, config.num_actions, config.feature_dim
         ).to(self.device)
         self.target = DuelingQNetwork(
-            config.stack_depth, config.num_actions, config.frame_size
+            config.stack_depth, config.num_actions, config.feature_dim
         ).to(self.device)
         self.target.load_state_dict(self.online.state_dict())
         self.target.eval()
@@ -355,7 +340,8 @@ class FlybrainAgent:
         output.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "schema": 3,
+                "schema": 4,
+                "input": "malecns_descending_neuron_trace",
                 "actions": [action.name.lower() for action in FlybrainAction],
                 "config": asdict(self.config),
                 "online": self.online.state_dict(),
@@ -372,10 +358,10 @@ class FlybrainAgent:
         cls, path: str | Path, device: str | torch.device = "cpu"
     ) -> "FlybrainAgent":
         checkpoint = torch.load(path, map_location=device, weights_only=False)
-        if checkpoint.get("schema") != 3:
+        if checkpoint.get("schema") != 4:
             raise ValueError(
-                "unsupported flybrain checkpoint schema; start a fresh ten-intent "
-                "checkpoint with separate walk and virtual-run choices"
+                "unsupported pixel-only checkpoint; start a fresh MaleCNS readout "
+                "checkpoint (schema 4)"
             )
         agent = cls(FlybrainConfig(**checkpoint["config"]), device=device)
         agent.online.load_state_dict(checkpoint["online"])

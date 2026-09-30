@@ -83,12 +83,14 @@ export UV_PYTHON_INSTALL_DIR="${SCRATCH_ROOT}/uv-python"
 export WARP_CACHE_PATH="${SCRATCH_ROOT}/warp-cache"
 export MPLCONFIGDIR="${SCRATCH_ROOT}/matplotlib-cache"
 export WANDB_MODE=disabled
+export FLY_DATA="${FLY_DATA:-${SCRATCH_ROOT}/male-cns}"
 export OMP_NUM_THREADS="${SLURM_CPUS_PER_TASK:-16}"
 mkdir -p \
     "${UV_CACHE_DIR}" \
     "${UV_PYTHON_INSTALL_DIR}" \
     "${WARP_CACHE_PATH}" \
     "${MPLCONFIGDIR}"
+mkdir -p "${FLY_DATA}"
 
 echo "Job ID:       ${SLURM_JOB_ID}"
 echo "Host:         $(hostname)"
@@ -118,6 +120,8 @@ launcher_args=(
     --decision-frames "${DECISION_FRAMES}"
     --dashboard-host 0.0.0.0
     --dashboard-port 8765
+    --male-cns-data "${FLY_DATA}"
+    --male-cns-device "${MALE_CNS_DEVICE:-auto}"
     --headless
 )
 if [[ -n "${FLY_SPIKE_FILE:-}" ]]; then
