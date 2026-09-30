@@ -12,7 +12,11 @@ from mjlab_microduck.super_mario_bridge import (
     decode_flybrain_request_packet,
     encode_controller_packet,
 )
-from mjlab_microduck.mario_monitor import MarioFrameSubscriber
+from mjlab_microduck.mario_monitor import (
+    FRAME_HEADER,
+    FRAME_MAGIC,
+    MarioFrameSubscriber,
+)
 
 
 def _load_sidecar():
@@ -92,7 +96,9 @@ def test_sidecar_publishes_complete_rgb_frames():
     second = np.arange(4 * 5 * 3, dtype=np.uint8).reshape(4, 5, 3)
 
     publisher = sidecar.FramePublisher(first, name=name)
-    subscriber = MarioFrameSubscriber(name=name)
+    # Publisher and subscriber deliberately share this test process, so retain
+    # its single resource-tracker registration until the owner unlinks it.
+    subscriber = MarioFrameSubscriber(name=name, track=True)
     try:
         initial = subscriber.read()
         assert initial is not None
@@ -106,3 +112,44 @@ def test_sidecar_publishes_complete_rgb_frames():
     finally:
         subscriber.close()
         publisher.close()
+
+
+def test_frame_subscriber_retries_a_torn_header():
+    width, height, channels, sequence = 5, 4, 3, 8
+    rgb = np.arange(width * height * channels, dtype=np.uint8).reshape(
+        height, width, channels
+    )
+    header = FRAME_HEADER.pack(
+        FRAME_MAGIC,
+        width,
+        height,
+        channels,
+        rgb.nbytes,
+        sequence,
+    )
+
+    class FlakyBuffer:
+        def __init__(self):
+            self.header_reads = 0
+
+        def __len__(self):
+            return FRAME_HEADER.size + rgb.nbytes
+
+        def __getitem__(self, key):
+            start = 0 if key.start is None else key.start
+            if start == 0 and key.stop == FRAME_HEADER.size:
+                self.header_reads += 1
+                # Simulate observing the producer halfway through rewriting
+                # its multi-field header, then a stable header on retry.
+                return bytes(FRAME_HEADER.size) if self.header_reads == 1 else header
+            return rgb.reshape(-1).tobytes()[
+                start - FRAME_HEADER.size : key.stop - FRAME_HEADER.size
+            ]
+
+    fake = type("FakeShm", (), {"buf": FlakyBuffer(), "close": lambda self: None})()
+    subscriber = MarioFrameSubscriber(name="unused", track=True)
+    subscriber._shm = fake
+    frame = subscriber.read()
+    assert frame is not None
+    assert frame.sequence == sequence
+    assert np.array_equal(frame.rgb, rgb)

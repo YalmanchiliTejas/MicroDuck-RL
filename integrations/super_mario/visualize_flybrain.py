@@ -6,7 +6,7 @@ import argparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from io import BytesIO
 import json
-from multiprocessing import shared_memory
+from multiprocessing import resource_tracker, shared_memory
 from pathlib import Path
 
 import numpy as np
@@ -46,7 +46,17 @@ class FrameReader:
     def read_jpeg(self) -> bytes | None:
         if self._shm is None:
             try:
-                self._shm = shared_memory.SharedMemory(name=self.name, create=False)
+                try:
+                    self._shm = shared_memory.SharedMemory(
+                        name=self.name, create=False, track=False
+                    )
+                except TypeError:
+                    self._shm = shared_memory.SharedMemory(
+                        name=self.name, create=False
+                    )
+                    resource_tracker.unregister(
+                        self._shm._name, "shared_memory"
+                    )
             except FileNotFoundError:
                 return None
         buf = self._shm.buf

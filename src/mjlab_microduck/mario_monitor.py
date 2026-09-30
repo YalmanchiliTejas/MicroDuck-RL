@@ -9,7 +9,7 @@ sidecar may be changing underneath the renderer.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from multiprocessing import shared_memory
+from multiprocessing import resource_tracker, shared_memory
 import struct
 from typing import Final
 
@@ -35,8 +35,14 @@ class MarioFrame:
 class MarioFrameSubscriber:
     """Read the newest sidecar frame from named shared memory."""
 
-    def __init__(self, name: str = DEFAULT_FRAME_SHM) -> None:
+    def __init__(
+        self,
+        name: str = DEFAULT_FRAME_SHM,
+        *,
+        track: bool = False,
+    ) -> None:
         self.name = name
+        self.track = track
         self._shm: shared_memory.SharedMemory | None = None
 
     @property
@@ -45,7 +51,21 @@ class MarioFrameSubscriber:
 
     def connect(self) -> None:
         if self._shm is None:
-            self._shm = shared_memory.SharedMemory(name=self.name, create=False)
+            try:
+                # Python 3.13 lets an attaching process declare that it does
+                # not own the segment. The sidecar is the sole owner/unlinker.
+                self._shm = shared_memory.SharedMemory(
+                    name=self.name,
+                    create=False,
+                    track=self.track,
+                )
+            except TypeError:
+                # Python 3.12 has no public ``track`` argument. Undo its
+                # automatic registration so this independent reader neither
+                # warns about nor unlinks the sidecar-owned segment at exit.
+                self._shm = shared_memory.SharedMemory(name=self.name, create=False)
+                if not self.track:
+                    resource_tracker.unregister(self._shm._name, "shared_memory")
 
     def read(self, retries: int = 4) -> MarioFrame | None:
         """Return a complete new frame, or ``None`` during a concurrent write."""
@@ -58,17 +78,24 @@ class MarioFrameSubscriber:
         if len(buf) < FRAME_HEADER.size:
             raise RuntimeError("Mario framebuffer shared memory is too small")
 
+        invalid_header: str | None = None
+        saw_valid_header = False
         for _ in range(retries):
             first = FRAME_HEADER.unpack(bytes(buf[: FRAME_HEADER.size]))
             magic, width, height, channels, nbytes, sequence = first
             if magic != FRAME_MAGIC:
-                raise RuntimeError("Mario framebuffer has an incompatible protocol")
+                invalid_header = "Mario framebuffer has an incompatible protocol"
+                continue
             if channels != 3 or width <= 0 or height <= 0:
-                raise RuntimeError("Mario framebuffer has invalid dimensions")
+                invalid_header = "Mario framebuffer has invalid dimensions"
+                continue
             if nbytes != width * height * channels:
-                raise RuntimeError("Mario framebuffer byte count is inconsistent")
+                invalid_header = "Mario framebuffer byte count is inconsistent"
+                continue
             if FRAME_HEADER.size + nbytes > len(buf):
-                raise RuntimeError("Mario framebuffer payload exceeds shared memory")
+                invalid_header = "Mario framebuffer payload exceeds shared memory"
+                continue
+            saw_valid_header = True
             if sequence & 1:
                 continue
 
@@ -77,6 +104,8 @@ class MarioFrameSubscriber:
             if first == second and not (second[-1] & 1):
                 rgb = np.frombuffer(payload, dtype=np.uint8).reshape(height, width, 3)
                 return MarioFrame(sequence=sequence, rgb=rgb.copy())
+        if not saw_valid_header and invalid_header is not None:
+            raise RuntimeError(invalid_header)
         return None
 
     def close(self) -> None:
