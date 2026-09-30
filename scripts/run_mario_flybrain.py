@@ -8,7 +8,6 @@ import os
 from pathlib import Path
 import signal
 import subprocess
-import sys
 import time
 
 
@@ -73,6 +72,11 @@ def main() -> int:
         "--sidecar-python", type=Path, default=ROOT / ".super-mario-venv/bin/python"
     )
     parser.add_argument("--robot-python", type=Path, default=ROOT / ".venv/bin/python")
+    parser.add_argument(
+        "--robot-device",
+        default="cuda:0",
+        help="device for the exact mjlab Mario PPO environment",
+    )
     parser.add_argument("--run-dir", type=Path, default=ROOT / "runs/mario-flybrain")
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--decision-frames", type=int, default=30)
@@ -217,29 +221,19 @@ def main() -> int:
                 sidecar_env,
             )
         )
-        robot_executable = args.robot_python
-        if not args.headless and sys.platform == "darwin":
-            mjpython = args.robot_python.with_name("mjpython")
-            if not mjpython.exists():
-                parser.error(
-                    "the combined MuJoCo viewer requires mjpython on macOS; "
-                    f"expected {mjpython}"
-                )
-            robot_executable = mjpython
+        if not args.headless:
+            parser.error(
+                "the exact mjlab Mario bridge is headless; use the FlyBrain "
+                "dashboard for live visualization"
+            )
         robot_command = [
-            str(robot_executable),
-            str(ROOT / "scripts/infer_policy.py"),
-            "--scene",
-            str(ROOT / "src/mjlab_microduck/robot/microduck/scene_controller_nes.xml"),
-            "--walking",
+            str(args.robot_python),
+            str(ROOT / "scripts/run_mario_mjlab_bridge.py"),
+            "--policy",
             str(args.policy.resolve()),
-            "--new-cmd-obs",
-            "--flybrain-requests",
-            "--mario-frame-shm",
-            args.frame_shm,
+            "--device",
+            args.robot_device,
         ]
-        if args.headless:
-            robot_command.append("--headless")
         processes.append(_start("robot", robot_command, log_dir, robot_env))
 
         if not args.no_dashboard:

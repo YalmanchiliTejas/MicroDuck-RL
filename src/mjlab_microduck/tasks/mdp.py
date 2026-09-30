@@ -5743,6 +5743,11 @@ class MarioNesCommand(CommandTerm):
         super().__init__(cfg, env)
         self._command = torch.zeros(self.num_envs, 3, device=self.device)
         self.command_age = torch.zeros(self.num_envs, device=self.device)
+        # Deployment can take ownership of this command term.  Keeping the
+        # external value inside the term (instead of patching an observation
+        # tensor in a launcher) means automatic episode resets cannot briefly
+        # expose a randomly sampled training command to the policy.
+        self._external_command: torch.Tensor | None = None
         settle_range = self.cfg.neutral_transition_time_range
         if settle_range is not None and (
             len(settle_range) != 2
@@ -5757,9 +5762,44 @@ class MarioNesCommand(CommandTerm):
     def command(self) -> torch.Tensor:
         return self._command
 
+    def set_external_command(self, command: torch.Tensor) -> None:
+        """Hold an externally supplied command until explicitly replaced.
+
+        This is the deployment path used by the Mario FlyBrain bridge.  It
+        deliberately retains the normal command observation and all command-
+        conditioned MDP behavior while disabling the training-time sampler.
+        Command age resets only when the requested value actually changes.
+        """
+
+        value = torch.as_tensor(command, device=self.device, dtype=self._command.dtype)
+        if value.shape == (3,):
+            value = value.unsqueeze(0).expand(self.num_envs, -1)
+        if value.shape != self._command.shape:
+            raise ValueError(
+                f"external Mario command must have shape (3,) or "
+                f"{tuple(self._command.shape)}, got {tuple(value.shape)}"
+            )
+        changed = (self._command != value).any(dim=-1)
+        self._external_command = value.clone()
+        self._command.copy_(value)
+        self.time_left.fill_(float("inf"))
+        self.command_age[changed] = -self._env.step_dt
+
+    def clear_external_command(self) -> None:
+        """Return control to the configured training-time command sampler."""
+
+        self._external_command = None
+        self.time_left.zero_()
+
     def _resample_command(self, env_ids: torch.Tensor) -> None:
         n = len(env_ids)
         if n == 0:
+            return
+        external = getattr(self, "_external_command", None)
+        if external is not None:
+            self._command[env_ids] = external[env_ids]
+            self.time_left[env_ids] = float("inf")
+            self.command_age[env_ids] = -self._env.step_dt
             return
         # Explicit buckets keep rare-but-essential inputs alive. Independent
         # random axes would make exact neutral and A+B far too rare.

@@ -115,6 +115,7 @@ launcher_args=(
     --policy "${MARIO_POLICY}"
     --sidecar-python "${SIDECAR_VENV}/bin/python"
     --robot-python "${UV_PROJECT_ENVIRONMENT}/bin/python"
+    --robot-device "${MARIO_ROBOT_DEVICE:-cuda:0}"
     --run-dir "${RUN_DIR}"
     --duration-seconds "${RUN_SECONDS}"
     --decision-frames "${DECISION_FRAMES}"

@@ -391,6 +391,47 @@ def test_mario_command_can_sample_sustained_neutral_after_settling():
     assert term.command_age.tolist() == pytest.approx([-0.02])
 
 
+def test_mario_external_command_survives_episode_resampling():
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term._env = SimpleNamespace(
+        num_envs=2, device=torch.device("cpu"), step_dt=0.02
+    )
+    term._command = torch.zeros(2, 3)
+    term.command_age = torch.ones(2)
+    term.time_left = torch.zeros(2)
+    term._external_command = None
+
+    term.set_external_command(torch.tensor([1.0, 0.0, 1.0]))
+    assert term.command.tolist() == [[1.0, 0.0, 1.0]] * 2
+    assert torch.isinf(term.time_left).all()
+    assert term.command_age.tolist() == pytest.approx([-0.02, -0.02])
+
+    # This is the path CommandManager takes when an episode auto-resets.
+    term._command.zero_()
+    term.time_left.zero_()
+    term.command_age.fill_(3.0)
+    term._resample_command(torch.tensor([1]))
+    assert term.command.tolist() == [[0.0, 0.0, 0.0], [1.0, 0.0, 1.0]]
+    assert torch.isinf(term.time_left[1])
+    assert term.command_age[1].item() == pytest.approx(-0.02)
+
+
+def test_mario_external_command_age_resets_only_on_change():
+    term = object.__new__(microduck_mdp.MarioNesCommand)
+    term._env = SimpleNamespace(
+        num_envs=1, device=torch.device("cpu"), step_dt=0.02
+    )
+    term._command = torch.tensor([[1.0, 0.0, 0.0]])
+    term.command_age = torch.tensor([1.25])
+    term.time_left = torch.zeros(1)
+    term._external_command = None
+
+    term.set_external_command(torch.tensor([1.0, 0.0, 0.0]))
+    assert term.command_age.item() == pytest.approx(1.25)
+    term.set_external_command(torch.tensor([-1.0, 0.0, 0.0]))
+    assert term.command_age.item() == pytest.approx(-0.02)
+
+
 def test_mario_balance_reward_closes_press_then_crash_loophole():
     cfg = make_microduck_mario_env_cfg()
     rewards = cfg.rewards
