@@ -49,7 +49,7 @@ def _load_processed(path: Path) -> set[str]:
     if not path.exists():
         return set()
     data = json.loads(path.read_text())
-    if data.get("schema") != 4 or not isinstance(data.get("rollouts"), list):
+    if data.get("schema") != 5 or not isinstance(data.get("rollouts"), list):
         raise ValueError(f"invalid processed-rollout manifest: {path}")
     return {str(value) for value in data["rollouts"]}
 
@@ -57,7 +57,7 @@ def _load_processed(path: Path) -> set[str]:
 def _save_processed(path: Path, processed: set[str]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
-        json.dumps({"schema": 4, "rollouts": sorted(processed)}, indent=2) + "\n"
+        json.dumps({"schema": 5, "rollouts": sorted(processed)}, indent=2) + "\n"
     )
     temporary.replace(path)
 
@@ -74,9 +74,7 @@ def ingest_rollout(
     last_loss = None
     for index in range(count):
         state = arrays["states"][index]
-        next_state = np.concatenate(
-            (state[1:], arrays["post_action_frames"][index, None]), axis=0
-        )
+        next_state = arrays["next_states"][index]
         done = bool(arrays["terminated"][index] or arrays["truncated"][index])
         action = int(arrays["actions"][index])
         if not 0 <= action < agent.config.num_actions:

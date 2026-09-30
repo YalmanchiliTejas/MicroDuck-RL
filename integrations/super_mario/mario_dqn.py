@@ -166,10 +166,9 @@ class PrioritizedReplay:
     """PER over self-contained MaleCNS activity-stack transitions.
 
     A priority belongs to the complete transition, not to an individual video
-    frame. Each item stores the complete pre-action stack and the newly observed
-    post-action frame. The next stack is exactly ``state[1:] + post_action``.
-    Consequently a randomly sampled item never depends on adjacent replay slots,
-    even after the circular buffer has overwritten older transitions.
+    frame. An action is held for many emulator/MaleCNS steps, so its next stack
+    generally has no overlap with its pre-action stack. Each item therefore
+    stores both complete stacks and never depends on adjacent replay slots.
     """
 
     def __init__(
@@ -184,10 +183,10 @@ class PrioritizedReplay:
         self.capacity = capacity
         self.alpha = alpha
         self.stack_depth, self.feature_dim = state_shape
-        # float16 keeps a 20k transition buffer near 210 MB while preserving
+        # float16 keeps a 20k transition buffer near 420 MB while preserving
         # the smooth exponential spike traces accurately enough for the readout.
         self.states = np.empty((capacity, *state_shape), dtype=np.float16)
-        self.post_action_frames = np.empty((capacity, self.feature_dim), dtype=np.float16)
+        self.next_states = np.empty((capacity, *state_shape), dtype=np.float16)
         self.actions = np.empty(capacity, dtype=np.int64)
         self.rewards = np.empty(capacity, dtype=np.float32)
         self.dones = np.empty(capacity, dtype=np.bool_)
@@ -213,13 +212,8 @@ class PrioritizedReplay:
         expected_shape = self.states.shape[1:]
         if state.shape != expected_shape or next_state.shape != expected_shape:
             raise ValueError(f"state shape must be {expected_shape}")
-        if not np.array_equal(state[1:], next_state[:-1]):
-            raise ValueError(
-                "next_state must be the observation after the action: its first "
-                "frames must equal state[1:]"
-            )
         self.states[index] = state
-        self.post_action_frames[index] = next_state[-1]
+        self.next_states[index] = next_state
         self.actions[index] = int(action)
         self.rewards[index] = float(reward)
         self.dones[index] = bool(done)
@@ -239,9 +233,7 @@ class PrioritizedReplay:
         # Advanced indexing returns independent sampled stacks. Neither state in
         # this batch is reconstructed from another replay transition.
         states = self.states[indices]
-        next_states = np.concatenate(
-            (states[:, 1:], self.post_action_frames[indices, None]), axis=1
-        )
+        next_states = self.next_states[indices]
         return (
             states,
             self.actions[indices],

@@ -239,8 +239,10 @@ measured direction. A temporal CNN and dueling Double-DQN readout learn from
 the four real descending-neuron traces with prioritized replay. There is no
 pixel-to-action bypass. PER priorities belong to whole transitions
 `(activity stack, action, reward, next activity stack, done)`. Every replay
-item stores its float16 pre-action stack plus the post-action trace, so random
-sampling cannot detach an action from its resulting connectome state.
+item stores complete float16 pre-action and post-action stacks, because the
+30-frame action interval advances MaleCNS many times and those stacks need not
+overlap. Random sampling therefore cannot detach an action from its resulting
+connectome state.
 
 The physical pads are now a tight, non-overlapping triangle (5–20 mm edge gaps)
 so a request change does not require crossing the original large empty spaces.
@@ -323,7 +325,7 @@ For every held high-level action, the sidecar sends UDP telemetry on port
 `55357` containing the action sequence, accumulated raw reward, signed training
 reward, emulator reward components, terminal/truncation flags, and the number
 of emulator frames. The corresponding `rollout-*.npz` is authoritative: it
-contains the exact pre-action stacks and post-action frames needed to recreate
+contains the exact complete pre-action and post-action stacks needed to recreate
 every `(state, action, reward, next_state, done)` transition. A terminal rollout
 is written to a temporary file and renamed only after it is complete; an
 interrupted rollout remains marked incomplete and is never trained. Episode

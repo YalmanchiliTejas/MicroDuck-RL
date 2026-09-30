@@ -144,14 +144,12 @@ class RolloutRecorder:
         expected = (self.stack_depth, self.feature_dim)
         if state.shape != expected or next_state.shape != expected:
             raise ValueError(f"rollout states must have shape {expected}")
-        if not np.array_equal(state[1:], next_state[:-1]):
-            raise ValueError("rollout next state is not the post-action frame stack")
         components = {
             key: float(reward_components.get(key, 0.0)) for key in REWARD_COMPONENTS
         }
         row = {
             "state": state.copy(),
-            "post_action_frame": next_state[-1].copy(),
+            "next_state": next_state.copy(),
             "action": int(action),
             "reward": float(reward),
             "training_reward": float(np.sign(reward)),
@@ -189,9 +187,9 @@ class RolloutRecorder:
         destination = self.root / name
         temporary = self.root / f".{name}.{uuid.uuid4().hex}.tmp"
         metadata = {
-            # Schema 4 stores genuine MaleCNS descending-neuron traces rather
-            # than Mario pixels.
-            "schema": 4,
+            # Schema 5 stores both complete activity stacks because one action
+            # spans many MaleCNS steps, so consecutive stacks need not overlap.
+            "schema": 5,
             "input": "malecns_descending_neuron_trace",
             "feature_dim": self.feature_dim,
             "run_id": self.run_id,
@@ -205,7 +203,7 @@ class RolloutRecorder:
                 output,
                 metadata=np.asarray(json.dumps(metadata, sort_keys=True)),
                 states=np.stack([row["state"] for row in rows]),
-                post_action_frames=np.stack([row["post_action_frame"] for row in rows]),
+                next_states=np.stack([row["next_state"] for row in rows]),
                 actions=np.asarray([row["action"] for row in rows], dtype=np.int64),
                 rewards=np.asarray([row["reward"] for row in rows], dtype=np.float32),
                 training_rewards=np.asarray(
@@ -252,7 +250,7 @@ def load_rollout(path: Path) -> tuple[dict, dict[str, np.ndarray]]:
     with np.load(path, allow_pickle=False) as archive:
         metadata = json.loads(str(archive["metadata"]))
         arrays = {key: archive[key].copy() for key in archive.files if key != "metadata"}
-    if metadata.get("schema") != 4:
+    if metadata.get("schema") != 5:
         raise ValueError("unsupported rollout schema")
     lengths = {len(value) for value in arrays.values()}
     if len(lengths) != 1:

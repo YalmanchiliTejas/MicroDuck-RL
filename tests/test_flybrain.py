@@ -111,11 +111,11 @@ def test_replay_samples_self_contained_pre_and_post_action_states():
     def stack(*values):
         return np.stack([np.full(6, value, dtype=np.float32) for value in values])
 
-    replay.add(stack(1, 2, 3, 4), 0, 0.0, stack(2, 3, 4, 5), False)
-    replay.add(stack(11, 12, 13, 14), 1, 1.0, stack(12, 13, 14, 15), True)
+    replay.add(stack(1, 2, 3, 4), 0, 0.0, stack(5, 6, 7, 8), False)
+    replay.add(stack(11, 12, 13, 14), 1, 1.0, stack(15, 16, 17, 18), True)
     # Overwrite the oldest circular-buffer entry. The remaining transition must
     # not need that old entry to reconstruct its own current state.
-    replay.add(stack(21, 22, 23, 24), 2, 2.0, stack(22, 23, 24, 25), False)
+    replay.add(stack(21, 22, 23, 24), 2, 2.0, stack(25, 26, 27, 28), False)
     sample = replay.sample(2, beta=0.4)
     assert sample[0].shape == (2, 4, 6)
     assert sample[3].shape == (2, 4, 6)
@@ -124,18 +124,20 @@ def test_replay_samples_self_contained_pre_and_post_action_states():
         for state, action, next_state in zip(sample[0], sample[1], sample[3], strict=True)
     }
     assert transitions == {
-        1: ([11, 12, 13, 14], [12, 13, 14, 15]),
-        2: ([21, 22, 23, 24], [22, 23, 24, 25]),
+        1: ([11, 12, 13, 14], [15, 16, 17, 18]),
+        2: ([21, 22, 23, 24], [25, 26, 27, 28]),
     }
 
 
-def test_replay_rejects_a_next_state_that_is_not_after_the_action():
+def test_replay_accepts_non_overlapping_activity_stacks():
     flybrain = _load_flybrain()
     replay = flybrain.PrioritizedReplay(2, (4, 6))
     state = np.zeros((4, 6), dtype=np.float32)
-    invalid_next_state = np.ones((4, 6), dtype=np.float32)
-    with pytest.raises(ValueError, match="observation after the action"):
-        replay.add(state, 0, 0.0, invalid_next_state, False)
+    next_state = np.ones((4, 6), dtype=np.float32)
+    replay.add(state, 0, 0.0, next_state, False)
+    sample = replay.sample(1, beta=0.4)
+    assert np.array_equal(sample[0][0], state)
+    assert np.array_equal(sample[3][0], next_state)
 
 
 def test_dueling_network_outputs_one_q_value_per_action():
@@ -247,10 +249,7 @@ def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
     assert arrays["actions"].tolist() == [2, 4]
     assert arrays["training_rewards"].tolist() == [1.0, -1.0]
     assert arrays["action_sequences"].tolist() == [10, 11]
-    reconstructed = np.concatenate(
-        (arrays["states"][1, 1:], arrays["post_action_frames"][1, None]), axis=0
-    )
-    assert reconstructed[:, 0].tolist() == [3, 4, 5, 6]
+    assert arrays["next_states"][1, :, 0].tolist() == [3, 4, 5, 6]
     assert not list(tmp_path.glob("*.tmp"))
     transitions = [json.loads(line) for line in (tmp_path / "transitions.jsonl").read_text().splitlines()]
     assert [row["action_sequence"] for row in transitions] == [10, 11]
