@@ -1,5 +1,9 @@
 <mujoco model="microduck_nes_controller_scene">
-    <include file="robot_groundcontact.xml"/>
+    <!-- Mario training builds MICRODUCK_WALK_ROBOT_CFG from robot_walk.xml.
+         Keep deployment on that exact collision model: the ground-contact
+         variant adds world-colliding leg/hip/head meshes that can obstruct
+         the millimetre-scale planted-foot rocker used to press the keys. -->
+    <include file="robot_walk.xml"/>
     <include file="controller_nes.xml"/>
     <include file="mario_monitor.xml"/>
 

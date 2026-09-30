@@ -9,6 +9,12 @@ from mjlab_microduck.controller import NESController
 ROBOT_DIR = Path(__file__).parents[1] / "src/mjlab_microduck/robot/microduck"
 
 
+def test_controller_runtime_uses_same_robot_model_as_mario_training():
+    scene = (ROBOT_DIR / "scene_controller_nes.xml").read_text()
+    assert '<include file="robot_walk.xml"/>' in scene
+    assert '<include file="robot_groundcontact.xml"/>' not in scene
+
+
 def test_physical_controller_compiles_with_four_independent_slider_keys():
     model = mujoco.MjModel.from_xml_path(str(ROBOT_DIR / "controller_nes.xml"))
     expected = set(NESController.BUTTON_JOINTS)

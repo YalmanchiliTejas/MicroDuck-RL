@@ -1507,13 +1507,17 @@ def main():
                         left_mm, right_mm, a_mm, b_mm = (
                             travel * 1.0e3 for travel in button_travels
                         )
+                        left_action_rms = float(np.sqrt(np.mean(np.square(action[:5]))))
+                        right_action_rms = float(np.sqrt(np.mean(np.square(action[9:14]))))
                         print(
                             "[mario bridge 1s] "
                             f"requested={requested_intent} "
                             f"travel_mm L={left_mm:.3f} R={right_mm:.3f} "
                             f"A={a_mm:.3f} B={b_mm:.3f} "
                             f"decoded L={int(state.left)} R={int(state.right)} "
-                            f"J={int(state.a)} B={int(state.b)}",
+                            f"J={int(state.a)} B={int(state.b)} "
+                            f"action_rms L={left_action_rms:.3f} "
+                            f"R={right_action_rms:.3f}",
                             flush=True,
                         )
 
