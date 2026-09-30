@@ -73,6 +73,18 @@ def test_sidecar_maps_direction_and_jump_combinations():
         ["left", "A", "B"],
         ["right", "A", "B"],
     ]
+    assert [sidecar.action_name(index) for index in range(10)] == [
+        "idle",
+        "left",
+        "right",
+        "jump",
+        "left_jump",
+        "right_jump",
+        "left_run",
+        "right_run",
+        "left_run_jump",
+        "right_run_jump",
+    ]
 
 
 def test_flybrain_request_packet_uses_controller_protocol():

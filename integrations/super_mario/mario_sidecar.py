@@ -183,6 +183,24 @@ def action_index(levels: PadLevels, run: bool = False) -> int:
     return 3 if levels.jump else 0
 
 
+def action_name(index: int) -> str:
+    """Return the stable DQN intent name used by diagnostics."""
+
+    names = (
+        "idle",
+        "left",
+        "right",
+        "jump",
+        "left_jump",
+        "right_jump",
+        "left_run",
+        "right_run",
+        "left_run_jump",
+        "right_run_jump",
+    )
+    return names[index]
+
+
 class PadReceiver:
     """Non-blocking UDP receiver with sequence filtering and deadman timeout."""
 
@@ -367,9 +385,8 @@ def run(args: argparse.Namespace) -> None:
             # direction, B follows that measured direction rather than cheating
             # with the requested one.
             virtual_run = requested.run if flybrain is not None else levels.run
-            observation, reward, terminated, truncated, info = env.step(
-                action_index(levels, run=virtual_run)
-            )
+            applied_action = action_index(levels, run=virtual_run)
+            observation, reward, terminated, truncated, info = env.step(applied_action)
             if male_cns is not None:
                 activity_stack.append(
                     male_cns.observe(
@@ -386,6 +403,17 @@ def run(args: argparse.Namespace) -> None:
             if not args.headless:
                 env.render()
             step += 1
+            if step % max(1, int(round(args.fps))) == 0:
+                requested_action = action_index(requested, run=requested.run)
+                print(
+                    "[mario sidecar 1s] "
+                    f"requested={action_name(requested_action)} "
+                    f"measured L={int(levels.left)} R={int(levels.right)} "
+                    f"J={int(levels.jump)} "
+                    f"applied={action_name(applied_action)}({applied_action}) "
+                    f"x_pos={info.get('x_pos', 'n/a')}",
+                    flush=True,
+                )
             if terminated or truncated:
                 if active_state is not None:
                     terminal_state = activity_stack.state

@@ -1465,15 +1465,37 @@ def main():
                     mujoco.mj_step(model, data)
 
                 if mario_client is not None:
-                    state = mario_decoder.update(
-                        *(
-                            -float(data.qpos[mario_joint_qpos[name]])
-                            for name in NESController.BUTTON_JOINTS
-                        )
+                    button_travels = tuple(
+                        -float(data.qpos[mario_joint_qpos[name]])
+                        for name in NESController.BUTTON_JOINTS
                     )
+                    state = mario_decoder.update(*button_travels)
                     mario_client.send(
                         ControllerFrame(left=state.left, right=state.right, jump=state.a)
                     )
+                    if control_step_count % _vel_window_steps == 0:
+                        horizontal = (
+                            "left" if request.left else "right" if request.right else "idle"
+                        )
+                        requested_intent = horizontal
+                        if request.run and horizontal != "idle":
+                            requested_intent += "_run"
+                        if request.jump:
+                            requested_intent = (
+                                "jump" if horizontal == "idle" else requested_intent + "_jump"
+                            )
+                        left_mm, right_mm, a_mm, b_mm = (
+                            travel * 1.0e3 for travel in button_travels
+                        )
+                        print(
+                            "[mario bridge 1s] "
+                            f"requested={requested_intent} "
+                            f"travel_mm L={left_mm:.3f} R={right_mm:.3f} "
+                            f"A={a_mm:.3f} B={b_mm:.3f} "
+                            f"decoded L={int(state.left)} R={int(state.right)} "
+                            f"J={int(state.a)} B={int(state.b)}",
+                            flush=True,
+                        )
 
                 # The NES emulator lives in the Python 3.13 sidecar while this
                 # MuJoCo/BAM process is Python 3.12. Copy its newest complete
