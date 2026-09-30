@@ -1142,6 +1142,8 @@ def main():
     mario_client = None
     mario_decoder = None
     mario_joint_qpos = None
+    mario_foot_sites = None
+    mario_platform_bodies = None
     mario_frame_subscriber = None
     mario_monitor = None
     mario_frame_sequence = -1
@@ -1175,6 +1177,18 @@ def main():
                     f"with {name}"
                 )
             mario_joint_qpos[name] = int(model.jnt_qposadr[joint_id])
+        mario_foot_sites = {
+            side: mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SITE, f"{side}_foot")
+            for side in ("left", "right")
+        }
+        mario_platform_bodies = {
+            "left": mujoco.mj_name2id(
+                model, mujoco.mjtObj.mjOBJ_BODY, "dpad_platform"
+            ),
+            "right": mujoco.mj_name2id(
+                model, mujoco.mjtObj.mjOBJ_BODY, "ab_platform"
+            ),
+        }
         mario_frame_subscriber = MarioFrameSubscriber(args.mario_frame_shm)
         mario_monitor = MarioMonitorTexture(model)
         print(
@@ -1509,6 +1523,17 @@ def main():
                         )
                         left_action_rms = float(np.sqrt(np.mean(np.square(action[:5]))))
                         right_action_rms = float(np.sqrt(np.mean(np.square(action[9:14]))))
+                        joint_delta = policy.get_joint_pos_relative()
+                        tracking_error = data.ctrl - data.qpos[policy.joint_qpos_indices]
+                        actuator_force = data.actuator_force
+                        left_foot = (
+                            data.site_xpos[mario_foot_sites["left"]]
+                            - data.xpos[mario_platform_bodies["left"]]
+                        )
+                        right_foot = (
+                            data.site_xpos[mario_foot_sites["right"]]
+                            - data.xpos[mario_platform_bodies["right"]]
+                        )
                         print(
                             "[mario bridge 1s] "
                             f"requested={requested_intent} "
@@ -1517,7 +1542,17 @@ def main():
                             f"decoded L={int(state.left)} R={int(state.right)} "
                             f"J={int(state.a)} B={int(state.b)} "
                             f"action_rms L={left_action_rms:.3f} "
-                            f"R={right_action_rms:.3f}",
+                            f"R={right_action_rms:.3f} "
+                            f"joint_rms L={np.sqrt(np.mean(np.square(joint_delta[:5]))):.3f} "
+                            f"R={np.sqrt(np.mean(np.square(joint_delta[9:14]))):.3f} "
+                            f"track_err L={np.sqrt(np.mean(np.square(tracking_error[:5]))):.3f} "
+                            f"R={np.sqrt(np.mean(np.square(tracking_error[9:14]))):.3f} "
+                            f"force_rms L={np.sqrt(np.mean(np.square(actuator_force[:5]))):.3f} "
+                            f"R={np.sqrt(np.mean(np.square(actuator_force[9:14]))):.3f} "
+                            f"foot_mm Lx={left_foot[0] * 1e3:.2f} "
+                            f"Lz={left_foot[2] * 1e3:.2f} "
+                            f"Rx={right_foot[0] * 1e3:.2f} "
+                            f"Rz={right_foot[2] * 1e3:.2f}",
                             flush=True,
                         )
 
