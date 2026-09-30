@@ -55,6 +55,17 @@ def _stop(processes) -> None:
         log.close()
 
 
+def _log_contains(path: Path, marker: str, *, after: int = 0) -> bool:
+    """Return whether a line-buffered child log has emitted a readiness marker."""
+
+    try:
+        with path.open("r", encoding="utf-8", errors="replace") as log:
+            log.seek(after)
+            return marker in log.read()
+    except FileNotFoundError:
+        return False
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--policy", type=Path, required=True, help="61D Mario PPO ONNX")
@@ -66,6 +77,12 @@ def main() -> int:
     parser.add_argument("--checkpoint", type=Path)
     parser.add_argument("--decision-frames", type=int, default=30)
     parser.add_argument("--duration-seconds", type=float, default=0.0)
+    parser.add_argument(
+        "--startup-timeout-seconds",
+        type=float,
+        default=900.0,
+        help="maximum time for MaleCNS and robot initialization before run timing starts",
+    )
     parser.add_argument("--dashboard-host", default="127.0.0.1")
     parser.add_argument("--dashboard-port", type=int, default=8765)
     parser.add_argument("--spike-file", type=Path)
@@ -88,8 +105,15 @@ def main() -> int:
     ):
         if not path.exists():
             parser.error(f"{label} does not exist: {path}")
-    if args.decision_frames <= 0 or args.duration_seconds < 0:
-        parser.error("decision frames must be positive and duration non-negative")
+    if (
+        args.decision_frames <= 0
+        or args.duration_seconds < 0
+        or args.startup_timeout_seconds <= 0
+    ):
+        parser.error(
+            "decision frames and startup timeout must be positive; "
+            "duration must be non-negative"
+        )
 
     run_dir = args.run_dir.resolve()
     rollout_dir = run_dir / "rollouts"
@@ -98,9 +122,28 @@ def main() -> int:
     rollout_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
+    readiness = {
+        log_dir / "robot.log": "[mario bridge 1s]",
+        log_dir / "sidecar.log": "[mario sidecar 1s]",
+    }
+    # Logs append when a run directory is resumed. Only markers emitted by
+    # this invocation count as readiness.
+    readiness_offsets = {
+        path: path.stat().st_size if path.exists() else 0 for path in readiness
+    }
     base_env = os.environ.copy()
+    # Child stdout goes to regular files, where Python would otherwise use
+    # block buffering and lose startup diagnostics when the supervisor sends
+    # SIGTERM at the end of a timed run.
+    base_env["PYTHONUNBUFFERED"] = "1"
     sidecar_env = {**base_env, "PYTHONPATH": str(INTEGRATION)}
-    robot_env = {**base_env, "PYTHONPATH": str(ROOT / "src")}
+    robot_env = {
+        **base_env,
+        "PYTHONPATH": str(ROOT / "src"),
+        # The policy is tiny; four intra-op workers are ample and, unlike
+        # ONNX Runtime's host-wide default, stay inside a Slurm cpuset.
+        "MICRODUCK_ORT_THREADS": base_env.get("MICRODUCK_ORT_THREADS", "4"),
+    }
     processes = []
     stopping = False
 
@@ -222,6 +265,31 @@ def main() -> int:
                 flush=True,
             )
         print(f"Combined run: {run_dir}", flush=True)
+        startup_deadline = time.monotonic() + args.startup_timeout_seconds
+        while not all(
+            _log_contains(path, marker, after=readiness_offsets[path])
+            for path, marker in readiness.items()
+        ):
+            for name, process, _log in processes:
+                code = process.poll()
+                if code is not None:
+                    raise RuntimeError(
+                        f"{name} exited with status {code}; see {log_dir/name}.log"
+                    )
+            if time.monotonic() >= startup_deadline:
+                missing = [
+                    path.name
+                    for path, marker in readiness.items()
+                    if not _log_contains(
+                        path, marker, after=readiness_offsets[path]
+                    )
+                ]
+                raise TimeoutError(
+                    "combined control loops did not become ready; missing markers in "
+                    + ", ".join(missing)
+                )
+            time.sleep(0.5)
+        print("Robot and Mario sidecar ready; starting run timer", flush=True)
         started = time.monotonic()
         while not stopping:
             for name, process, _log in processes:

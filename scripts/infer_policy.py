@@ -37,6 +37,26 @@ BALL_OFFSET_X = 0.09
 BALL_OFFSET_ABS_Y = 0.042
 BALL_RADIUS = 0.035
 
+
+def create_ort_session(path: str) -> ort.InferenceSession:
+    """Create a small deterministic CPU session that respects Slurm cpusets."""
+
+    try:
+        thread_count = int(os.environ.get("MICRODUCK_ORT_THREADS", "4"))
+    except ValueError as exc:
+        raise ValueError("MICRODUCK_ORT_THREADS must be an integer") from exc
+    if thread_count <= 0:
+        raise ValueError("MICRODUCK_ORT_THREADS must be positive")
+    options = ort.SessionOptions()
+    options.intra_op_num_threads = thread_count
+    options.inter_op_num_threads = 1
+    options.execution_mode = ort.ExecutionMode.ORT_SEQUENTIAL
+    return ort.InferenceSession(
+        path,
+        sess_options=options,
+        providers=["CPUExecutionProvider"],
+    )
+
 # Default pose used by the policy (legs flexed, standing position)
 # This is the reference pose that:
 # - Actions are offsets from (motor_target = DEFAULT_POSE + action * scale)
@@ -174,7 +194,7 @@ class PolicyInference:
         self.default_gait_period_from_onnx = None
         if walking_onnx_path:
             print(f"Loading walking policy from: {walking_onnx_path}")
-            self.walking_session = ort.InferenceSession(walking_onnx_path)
+            self.walking_session = create_ort_session(walking_onnx_path)
             w_input_shape = self.walking_session.get_inputs()[0].shape
             w_output_shape = self.walking_session.get_outputs()[0].shape
             print(f"Walking policy input: {self.walking_session.get_inputs()[0].name}, shape: {w_input_shape}")
@@ -193,7 +213,7 @@ class PolicyInference:
         self.standing_session = None
         if standing_onnx_path:
             print(f"\nLoading standing policy from: {standing_onnx_path}")
-            self.standing_session = ort.InferenceSession(standing_onnx_path)
+            self.standing_session = create_ort_session(standing_onnx_path)
             s_input_shape = self.standing_session.get_inputs()[0].shape
             s_output_shape = self.standing_session.get_outputs()[0].shape
             print(f"Standing policy input: {self.standing_session.get_inputs()[0].name}, shape: {s_input_shape}")
@@ -208,7 +228,7 @@ class PolicyInference:
         self.ground_pick_period = ground_pick_period
         if ground_pick_onnx_path:
             print(f"\nLoading ground pick policy from: {ground_pick_onnx_path}")
-            self.ground_pick_session = ort.InferenceSession(ground_pick_onnx_path)
+            self.ground_pick_session = create_ort_session(ground_pick_onnx_path)
             gp_input_shape = self.ground_pick_session.get_inputs()[0].shape
             print(f"Ground pick policy input shape: {gp_input_shape}")
 
@@ -226,7 +246,7 @@ class PolicyInference:
             raise ValueError("Provide only one of --sit / --sitstand")
         if sit_onnx_path:
             print(f"\nLoading sit policy from: {sit_onnx_path}")
-            self.sit_session = ort.InferenceSession(sit_onnx_path)
+            self.sit_session = create_ort_session(sit_onnx_path)
             sit_input_shape = self.sit_session.get_inputs()[0].shape
             print(f"Sit policy input shape: {sit_input_shape}")
         elif sitstand_onnx_path:
@@ -235,7 +255,7 @@ class PolicyInference:
                     "--sitstand policies use the unified 13D command obs (61D); run with --new-cmd-obs"
                 )
             print(f"\nLoading sitstand policy from: {sitstand_onnx_path}")
-            self.sit_session = ort.InferenceSession(sitstand_onnx_path)
+            self.sit_session = create_ort_session(sitstand_onnx_path)
             self.is_sitstand = True
             ss_input_shape = self.sit_session.get_inputs()[0].shape
             print(f"Sitstand policy input shape: {ss_input_shape}")
@@ -245,7 +265,7 @@ class PolicyInference:
         self.slope_mode = False
         if slope_onnx_path:
             print(f"\nLoading slope policy from: {slope_onnx_path}")
-            self.slope_session = ort.InferenceSession(slope_onnx_path)
+            self.slope_session = create_ort_session(slope_onnx_path)
             sl_input_shape = self.slope_session.get_inputs()[0].shape
             print(f"Slope policy input shape: {sl_input_shape}")
 
@@ -271,7 +291,7 @@ class PolicyInference:
                     "command obs (61D); run with --new-cmd-obs"
                 )
             print(f"\nLoading {name} policy from: {path}")
-            self.behavior_sessions[name] = ort.InferenceSession(path)
+            self.behavior_sessions[name] = create_ort_session(path)
             self.behavior_durations[name] = duration
             print(f"{name} policy input shape: {self.behavior_sessions[name].get_inputs()[0].shape}"
                   f"  (auto-return after {duration:.1f}s)")
