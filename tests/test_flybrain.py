@@ -425,7 +425,7 @@ def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
     assert len(replay) == 2
 
 
-def test_hot_reload_can_continue_random_exploration_sequence(tmp_path):
+def test_checkpoint_continues_random_exploration_sequence(tmp_path):
     flybrain = _load_flybrain()
     config = flybrain.FlybrainConfig(
         feature_dim=6,
@@ -436,13 +436,11 @@ def test_hot_reload_can_continue_random_exploration_sequence(tmp_path):
     state = np.zeros((4, 6), dtype=np.float32)
     live = flybrain.FlybrainAgent(config, seed=17)
     live.act(state, epsilon=1.0)
-    continuation_state = live.exploration_state()
-    expected = [live.act(state, epsilon=1.0) for _ in range(20)]
 
     checkpoint = tmp_path / "flybrain.pt"
     live.save(checkpoint)
+    expected = [live.act(state, epsilon=1.0) for _ in range(20)]
     reloaded = flybrain.FlybrainAgent.load(checkpoint)
-    reloaded.restore_exploration_state(continuation_state)
     actual = [reloaded.act(state, epsilon=1.0) for _ in range(20)]
     assert actual == expected
 

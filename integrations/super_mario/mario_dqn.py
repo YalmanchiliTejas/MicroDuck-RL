@@ -448,6 +448,7 @@ class FlybrainAgent:
                 "optimizer": self.optimizer.state_dict(),
                 "steps": self.steps,
                 "updates": self.updates,
+                "action_rng_state": self._action_rng.getstate(),
             },
             output,
         )
@@ -468,4 +469,8 @@ class FlybrainAgent:
         agent.optimizer.load_state_dict(checkpoint["optimizer"])
         agent.steps = int(checkpoint["steps"])
         agent.updates = int(checkpoint["updates"])
+        # Older schema-4 files did not include this field.  Keep them loadable,
+        # while new checkpoints continue the exploration stream exactly.
+        if "action_rng_state" in checkpoint:
+            agent._action_rng.setstate(checkpoint["action_rng_state"])
         return agent
