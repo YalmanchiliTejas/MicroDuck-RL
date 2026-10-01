@@ -12,7 +12,7 @@ import uuid
 import numpy as np
 
 
-REWARD_PROTOCOL_VERSION = 1
+REWARD_PROTOCOL_VERSION = 2
 DEFAULT_REWARD_PORT = 55357
 REWARD_COMPONENTS = (
     "progress",
@@ -23,6 +23,25 @@ REWARD_COMPONENTS = (
     "completion",
     "death",
 )
+
+
+def training_reward(
+    components: dict[str, float], *, raw_reward: float | None = None
+) -> float:
+    """Scale informative Mario components without discarding their magnitude."""
+
+    value = (
+        float(components.get("progress", 0.0)) / 10.0
+        + float(components.get("time", 0.0)) / 20.0
+        + float(components.get("score", 0.0)) / 5.0
+        + float(components.get("coins", 0.0)) / 5.0
+        + float(components.get("powerup", 0.0)) / 5.0
+        + float(components.get("completion", 0.0)) / 10.0
+        + float(components.get("death", 0.0)) / 10.0
+    )
+    if not components and raw_reward is not None:
+        value = float(raw_reward) / 10.0
+    return float(np.clip(value, -5.0, 5.0))
 
 
 def encode_reward_packet(event: dict) -> bytes:
@@ -40,6 +59,7 @@ def encode_reward_packet(event: dict) -> bytes:
         "truncated",
         "reward_components",
         "emulator_steps",
+        "execution_fraction",
     }
     if set(event) != required:
         raise ValueError(f"reward event fields must be {sorted(required)}")
@@ -67,6 +87,13 @@ def decode_reward_packet(payload: bytes) -> dict:
         raise ValueError("terminal flags must be boolean")
     if not isinstance(message["reward_components"], dict):
         raise ValueError("reward_components must be an object")
+    execution_fraction = message["execution_fraction"]
+    if (
+        not isinstance(execution_fraction, (int, float))
+        or isinstance(execution_fraction, bool)
+        or not 0.0 <= execution_fraction <= 1.0
+    ):
+        raise ValueError("execution_fraction must be in [0, 1]")
     return message
 
 
@@ -138,6 +165,7 @@ class RolloutRecorder:
         reward_components: dict[str, float],
         action_sequence: int,
         emulator_steps: int,
+        execution_fraction: float = 1.0,
     ) -> dict:
         state = np.asarray(state, dtype=np.float16)
         next_state = np.asarray(next_state, dtype=np.float16)
@@ -147,17 +175,20 @@ class RolloutRecorder:
         components = {
             key: float(reward_components.get(key, 0.0)) for key in REWARD_COMPONENTS
         }
+        if not 0.0 <= execution_fraction <= 1.0:
+            raise ValueError("execution_fraction must be in [0, 1]")
         row = {
             "state": state.copy(),
             "next_state": next_state.copy(),
             "action": int(action),
             "reward": float(reward),
-            "training_reward": float(np.sign(reward)),
+            "training_reward": training_reward(components, raw_reward=reward),
             "terminated": bool(terminated),
             "truncated": bool(truncated),
             "components": components,
             "action_sequence": int(action_sequence),
             "emulator_steps": int(emulator_steps),
+            "execution_fraction": float(execution_fraction),
         }
         self._rows.append(row)
         event = {
@@ -172,6 +203,7 @@ class RolloutRecorder:
             "truncated": row["truncated"],
             "reward_components": components,
             "emulator_steps": row["emulator_steps"],
+            "execution_fraction": row["execution_fraction"],
         }
         with (self.root / "transitions.jsonl").open("a", encoding="utf-8") as output:
             output.write(json.dumps(event, sort_keys=True) + "\n")
@@ -187,9 +219,9 @@ class RolloutRecorder:
         destination = self.root / name
         temporary = self.root / f".{name}.{uuid.uuid4().hex}.tmp"
         metadata = {
-            # Schema 5 stores both complete activity stacks because one action
+            # Schema 6 stores magnitude-preserving component-shaped rewards and
             # spans many MaleCNS steps, so consecutive stacks need not overlap.
-            "schema": 5,
+            "schema": 6,
             "input": "malecns_descending_neuron_trace",
             "feature_dim": self.feature_dim,
             "run_id": self.run_id,
@@ -218,6 +250,9 @@ class RolloutRecorder:
                 ),
                 emulator_steps=np.asarray(
                     [row["emulator_steps"] for row in rows], dtype=np.int32
+                ),
+                execution_fractions=np.asarray(
+                    [row["execution_fraction"] for row in rows], dtype=np.float32
                 ),
                 reward_components=np.asarray(
                     [
@@ -250,7 +285,7 @@ def load_rollout(path: Path) -> tuple[dict, dict[str, np.ndarray]]:
     with np.load(path, allow_pickle=False) as archive:
         metadata = json.loads(str(archive["metadata"]))
         arrays = {key: archive[key].copy() for key in archive.files if key != "metadata"}
-    if metadata.get("schema") != 5:
+    if metadata.get("schema") != 6:
         raise ValueError("unsupported rollout schema")
     lengths = {len(value) for value in arrays.values()}
     if len(lengths) != 1:

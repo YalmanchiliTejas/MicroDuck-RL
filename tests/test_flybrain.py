@@ -65,6 +65,16 @@ def _load_male_cns():
     return module
 
 
+def _load_dopamine():
+    path = Path(__file__).parents[1] / "integrations/super_mario/dopamine.py"
+    spec = importlib.util.spec_from_file_location("microduck_test_dopamine", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_flybrain_actions_cover_combinations_without_opposite_directions():
     flybrain = _load_flybrain()
     assert [flybrain.action_levels(i) for i in range(10)] == [
@@ -213,8 +223,57 @@ def test_reward_packet_preserves_action_sequence_components_and_terminal():
         "truncated": False,
         "reward_components": {"death": -25.0},
         "emulator_steps": 9,
+        "execution_fraction": 0.75,
     }
     assert rollouts.decode_reward_packet(rollouts.encode_reward_packet(event)) == event
+
+
+def test_training_reward_preserves_progress_and_terminal_magnitude():
+    rollouts = _load_rollouts()
+    assert rollouts.training_reward({"progress": 3.0}) == pytest.approx(0.3)
+    assert rollouts.training_reward({"death": -25.0}) == pytest.approx(-2.5)
+    assert rollouts.training_reward({"completion": 50.0}) == pytest.approx(5.0)
+    assert rollouts.training_reward({}, raw_reward=12.0) == pytest.approx(1.2)
+
+
+def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):
+    dopamine = _load_dopamine()
+
+    class TinyBrain:
+        device = "cpu"
+        dt = 0.02
+        n = 6
+        # KC0, KC1, MBON0, MBON1, PAM0, PPL1-0
+        cell_type = np.asarray(("KCg-m", "KCab", "MBON01", "MBON02", "PAM01", "PPL101"))
+        # CSC edges: KC0->MBON0, KC1->MBON1, PAM0->MBON0, PPL1->MBON1.
+        indptr = np.asarray((0, 1, 2, 2, 2, 3, 4), dtype=np.int64)
+        indices = np.asarray((2, 3, 2, 3), dtype=np.int64)
+        weights = np.asarray((0.5, 0.6, 0.8, 0.9), dtype=np.float32)
+
+    state = tmp_path / "dopamine.npz"
+    brain = TinyBrain()
+    plasticity = dopamine.DopaminePlasticity(
+        brain, state_path=state, learning_rate=0.1, recovery_rate=0.0
+    )
+    plasticity.observe(np.asarray((0,), dtype=np.int64))
+    plasticity.reinforce(+1.0)
+    assert brain.weights[0] < 0.5
+    assert brain.weights[1] == pytest.approx(0.6)
+    assert plasticity.consume_injection()[0][0].tolist() == [4]
+
+    plasticity.reset_episode()
+    plasticity.observe(np.asarray((1,), dtype=np.int64))
+    plasticity.reinforce(-1.0)
+    assert brain.weights[1] < 0.6
+    assert plasticity.consume_injection()[0][0].tolist() == [5]
+    plasticity.save()
+
+    restored_brain = TinyBrain()
+    restored = dopamine.DopaminePlasticity(
+        restored_brain, state_path=state, learning_rate=0.1, recovery_rate=0.0
+    )
+    assert restored.updates == 2
+    assert np.allclose(restored_brain.weights[:2], brain.weights[:2])
 
 
 def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
@@ -252,11 +311,14 @@ def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
     metadata, arrays = rollouts.load_rollout(paths[0])
     assert metadata["complete"] is True
     assert arrays["actions"].tolist() == [2, 4]
-    assert arrays["training_rewards"].tolist() == [1.0, -1.0]
+    assert np.allclose(arrays["training_rewards"], [0.3, -2.5])
     assert arrays["action_sequences"].tolist() == [10, 11]
     assert arrays["next_states"][1, :, 0].tolist() == [3, 4, 5, 6]
     assert not list(tmp_path.glob("*.tmp"))
-    transitions = [json.loads(line) for line in (tmp_path / "transitions.jsonl").read_text().splitlines()]
+    transitions = [
+        json.loads(line)
+        for line in (tmp_path / "transitions.jsonl").read_text().splitlines()
+    ]
     assert [row["action_sequence"] for row in transitions] == [10, 11]
 
 

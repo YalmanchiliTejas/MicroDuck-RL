@@ -1,7 +1,8 @@
 """Real MaleCNS v1.0 connectome backend for Mario visual decisions.
 
-Pixels stimulate identified visual neurons in the frozen connectome.  Only the
-resulting descending-neuron spike trace is exposed to the trainable DQN.
+Pixels stimulate identified visual neurons in the connectome. The resulting
+descending-neuron spike trace is exposed to the DQN, while optional dopamine
+plasticity modifies anatomically identified KC->MBON synapses.
 """
 
 from __future__ import annotations
@@ -32,6 +33,8 @@ class MaleCNS:
         seed: int = 123,
         trace_tau: float = 0.12,
         spike_file: Path | None = None,
+        dopamine_state: Path | None = None,
+        dopamine_learning_rate: float = 0.02,
     ) -> None:
         try:
             from flybrain import FlyBrain, Trace
@@ -45,6 +48,15 @@ class MaleCNS:
         if data is not None:
             kwargs["data"] = data
         self.brain = FlyBrain(**kwargs)
+        self.dopamine = None
+        if dopamine_state is not None:
+            from dopamine import DopaminePlasticity
+
+            self.dopamine = DopaminePlasticity(
+                self.brain,
+                state_path=dopamine_state,
+                learning_rate=dopamine_learning_rate,
+            )
         self.descending = self.brain.cells(["descending_neuron"])
         if not len(self.descending):
             raise RuntimeError("MaleCNS metadata contains no descending neurons")
@@ -130,25 +142,61 @@ class MaleCNS:
 
     def observe(self, frame: np.ndarray, *, action_sequence: int = -1) -> np.ndarray:
         eye_drive, inject = self._encode(frame)
+        if self.dopamine is not None:
+            inject.extend(self.dopamine.consume_injection())
         fired = self.brain.step(eye_drive=eye_drive, inject=inject)
+        if self.dopamine is not None:
+            self.dopamine.observe(fired)
         activity = self.trace.observe(fired).astype(np.float32, copy=False)
         if self.spike_file is not None:
             fired = np.asarray(fired, dtype=np.int64)
             mask = np.isin(fired, self.descending, assume_unique=False)
-            row = {
+            rows = [{
                 "time_s": time.time(),
                 "brain_step": int(self.brain.steps),
                 "population": "MaleCNS descending_neuron",
                 "neuron_ids": fired[mask].tolist(),
                 "all_spikes": int(len(fired)),
                 "action_sequence": int(action_sequence),
-            }
+            }]
+            if self.dopamine is not None:
+                for name, neurons in (("PAM", self.dopamine.pam), ("PPL1", self.dopamine.ppl1)):
+                    dan_mask = np.isin(fired, neurons, assume_unique=False)
+                    if np.any(dan_mask):
+                        rows.append(
+                            {
+                                "time_s": rows[0]["time_s"],
+                                "brain_step": int(self.brain.steps),
+                                "population": f"MaleCNS {name} dopamine",
+                                "neuron_ids": fired[dan_mask].tolist(),
+                                "all_spikes": int(len(fired)),
+                                "action_sequence": int(action_sequence),
+                                "prediction_error": self.dopamine.last_signal,
+                            }
+                        )
             with self.spike_file.open("a", encoding="utf-8") as output:
-                output.write(json.dumps(row, separators=(",", ":")) + "\n")
+                for row in rows:
+                    output.write(json.dumps(row, separators=(",", ":")) + "\n")
         return activity.copy()
+
+    def reinforce(self, prediction_error: float) -> float | None:
+        """Apply one signed reward-prediction error to the mushroom body."""
+
+        if self.dopamine is None:
+            return None
+        return self.dopamine.reinforce(prediction_error)
+
+    def dopamine_stats(self) -> dict[str, float | int] | None:
+        return None if self.dopamine is None else self.dopamine.stats()
+
+    def save_plasticity(self) -> None:
+        if self.dopamine is not None:
+            self.dopamine.save()
 
     def reset(self, frame: np.ndarray) -> np.ndarray:
         self.brain.reset()
         self.trace.reset()
         self.previous_gray = None
+        if self.dopamine is not None:
+            self.dopamine.reset_episode()
         return self.observe(frame)

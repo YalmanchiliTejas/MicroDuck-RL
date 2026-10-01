@@ -50,7 +50,7 @@ def _load_processed(path: Path) -> set[str]:
     if not path.exists():
         return set()
     data = json.loads(path.read_text())
-    if data.get("schema") != 5 or not isinstance(data.get("rollouts"), list):
+    if data.get("schema") != 6 or not isinstance(data.get("rollouts"), list):
         raise ValueError(f"invalid processed-rollout manifest: {path}")
     return {str(value) for value in data["rollouts"]}
 
@@ -58,7 +58,7 @@ def _load_processed(path: Path) -> set[str]:
 def _save_processed(path: Path, processed: set[str]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
-        json.dumps({"schema": 5, "rollouts": sorted(processed)}, indent=2) + "\n"
+        json.dumps({"schema": 6, "rollouts": sorted(processed)}, indent=2) + "\n"
     )
     temporary.replace(path)
 
@@ -72,10 +72,13 @@ def ingest_rollout(
 ) -> tuple[int, float, float | None]:
     metadata, arrays = load_rollout(path)
     if not metadata.get("complete"):
-        return 0, 0.0, None
+        return -1, 0.0, None
     count = len(arrays["actions"])
+    accepted = 0
     last_loss = None
     for index in range(count):
+        if float(arrays["execution_fractions"][index]) < 0.5:
+            continue
         state = arrays["states"][index]
         next_state = arrays["next_states"][index]
         done = bool(arrays["terminated"][index] or arrays["truncated"][index])
@@ -92,11 +95,12 @@ def ingest_rollout(
             next_state,
             done,
         )
+        accepted += 1
         if learn:
             loss = agent.learn(replay)
             if loss is not None:
                 last_loss = loss
-    return count, float(arrays["rewards"].sum()), last_loss
+    return accepted, float(arrays["rewards"].sum()), last_loss
 
 
 def rebuild_replay(
@@ -114,7 +118,7 @@ def rebuild_replay(
         count, _reward, _loss = ingest_rollout(
             path, replay, agent, learn=False
         )
-        restored += count
+        restored += max(0, count)
     return restored
 
 
@@ -182,12 +186,13 @@ def run(args: argparse.Namespace) -> None:
                 if key in processed:
                     continue
                 count, reward, loss = ingest_rollout(path, replay, agent)
-                if count == 0:
+                if count < 0:
                     continue
                 processed.add(key)
                 changed = True
                 print(
-                    f"trained rollout={key} transitions={count} reward={reward:.1f} "
+                    f"trained rollout={key} accepted_transitions={count} "
+                    f"reward={reward:.1f} "
                     f"epsilon={agent.epsilon():.3f} loss={loss}"
                 )
             if changed:

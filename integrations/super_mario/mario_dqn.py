@@ -349,6 +349,27 @@ class FlybrainAgent:
             self.target.load_state_dict(self.online.state_dict())
         return float(loss.item())
 
+    def td_error(
+        self,
+        state: np.ndarray,
+        action: int,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+    ) -> float:
+        """Return Double-DQN reward prediction error for dopamine teaching."""
+
+        with torch.no_grad():
+            state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
+            next_t = torch.as_tensor(next_state, device=self.device).unsqueeze(0)
+            predicted = self.online(state_t)[0, int(action)]
+            next_action = self.online(next_t).argmax(dim=1, keepdim=True)
+            next_value = self.target(next_t).gather(1, next_action).squeeze(1)[0]
+            expected = torch.as_tensor(float(reward), device=self.device)
+            if not done:
+                expected = expected + self.config.gamma * next_value
+        return float((expected - predicted).item())
+
     def save(self, path: str | Path) -> None:
         output = Path(path)
         output.parent.mkdir(parents=True, exist_ok=True)

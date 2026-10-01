@@ -228,7 +228,11 @@ controller packets stop.
 The published MaleCNS v1.0 connectome is deliberately separate from the 50 Hz
 PPO motor controller. Mario pixels stimulate its compound-eye photoreceptors
 and identified visual-projection cells (LPLC2, LC4, LPLC1 and LC10a). The
-166,700-neuron LIF network is frozen: its connectome weights are never trained.
+166,700-neuron LIF network keeps its published wiring. Reward-modulated
+plasticity is restricted to its real KC-to-MBON synapses: recent Kenyon-cell
+activity forms an eligibility trace, while positive and negative DQN reward
+prediction errors stimulate PAM- and PPL1-targeted MBON compartments. Learned
+synaptic scales are persisted separately from the DQN checkpoint.
 The policy sees only four consecutive exponential traces from the connectome's
 1,314 descending neurons and chooses one of ten game intents: idle, walk
 left/right, jump, walk+jump, run left/right, or run+jump.
@@ -262,7 +266,8 @@ python3.13 -m venv .super-mario-venv
 # Fast emulator baseline. Use --action-repeat 30 for a first latency-matched
 # physical experiment; tune it from measured request-to-pad latency.
 .super-mario-venv/bin/microduck-train-flybrain \
-    --steps 1000000 --action-repeat 30 --output flybrain.pt
+    --steps 1000000 --action-repeat 30 --output flybrain.pt \
+    --male-cns-device cpu --dopamine-state dopamine-plasticity.npz
 ```
 
 For an end-to-end MuJoCo rehearsal, first export the trained
@@ -322,9 +327,12 @@ ssh -L 8765:<compute-host>:8765 <cluster-login>
 ```
 
 For every held high-level action, the sidecar sends UDP telemetry on port
-`55357` containing the action sequence, accumulated raw reward, signed training
-reward, emulator reward components, terminal/truncation flags, and the number
-of emulator frames. The corresponding `rollout-*.npz` is authoritative: it
+`55357` containing the action sequence, accumulated raw reward, component-scaled
+training reward, emulator reward components, terminal/truncation flags, the
+number of emulator frames, and the fraction for which the physical pad decoder
+actually matched the requested action. Intervals below 50% execution are kept
+for diagnosis but cannot train either DQN or dopamine plasticity. The
+corresponding `rollout-*.npz` is authoritative: it
 contains the exact complete pre-action and post-action stacks needed to recreate
 every `(state, action, reward, next_state, done)` transition. A terminal rollout
 is written to a temporary file and renamed only after it is complete; an
@@ -338,9 +346,13 @@ The sidecar writes real MaleCNS descending-neuron telemetry to
 {"time_s":1.25,"population":"MaleCNS descending_neuron","neuron_ids":[14,91,203],"action_sequence":8}
 ```
 
-Pass another file with `--spike-file` locally or `FLY_SPIKE_FILE` under Slurm.
-The raster is populated only from neurons returned by the MaleCNS simulator;
-CNN activations are never presented as biological spikes.
+PAM and PPL1 spike rows are emitted alongside descending-neuron rows whenever
+those real dopamine populations fire. Pass another file with `--spike-file`
+locally or `FLY_SPIKE_FILE` under Slurm. The raster is populated only from
+neurons returned by the MaleCNS simulator; CNN activations are never presented
+as biological spikes. Combined runs save the synaptic state as
+`run/dopamine-plasticity.npz` and resume it automatically when the same run
+directory is reused.
 
 The Mario sidecar also publishes its native 256×240 RGB framebuffer through
 shared memory (`microduck_mario_rgb` by default). The Mario-controller MuJoCo

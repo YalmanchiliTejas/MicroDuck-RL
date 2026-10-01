@@ -122,7 +122,8 @@ launcher_args=(
     --dashboard-host 0.0.0.0
     --dashboard-port 8765
     --male-cns-data "${FLY_DATA}"
-    --male-cns-device "${MALE_CNS_DEVICE:-auto}"
+    --male-cns-device cpu
+    --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.02}"
     --headless
 )
 if [[ -n "${FLY_SPIKE_FILE:-}" ]]; then

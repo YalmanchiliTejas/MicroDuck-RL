@@ -6,7 +6,6 @@ import argparse
 from pathlib import Path
 import time
 
-import numpy as np
 import torch
 
 from male_cns import MaleCNS
@@ -17,6 +16,7 @@ from mario_dqn import (
     PrioritizedReplay,
 )
 from mario_sidecar import nes_actions
+from rollouts import REWARD_COMPONENTS, training_reward
 
 
 def _device(name: str) -> str:
@@ -39,6 +39,8 @@ def run(args: argparse.Namespace) -> None:
         device=args.male_cns_device,
         seed=args.seed,
         spike_file=args.spike_file,
+        dopamine_state=args.dopamine_state,
+        dopamine_learning_rate=args.dopamine_learning_rate,
     )
     if args.resume:
         agent = FlybrainAgent.load(args.resume, device=_device(args.device))
@@ -77,16 +79,27 @@ def run(args: argparse.Namespace) -> None:
         for environment_step in range(1, args.steps + 1):
             action = agent.act(state)
             reward_sum = 0.0
+            reward_components = {key: 0.0 for key in REWARD_COMPONENTS}
             terminated = truncated = False
             for _ in range(args.action_repeat):
-                observation, reward, terminated, truncated, _ = env.step(action)
+                observation, reward, terminated, truncated, info = env.step(action)
                 reward_sum += float(reward)
+                for key, value in info.get("reward_components", {}).items():
+                    if key in reward_components:
+                        reward_components[key] += float(value)
                 stack.append(connectome.observe(observation, action_sequence=environment_step))
                 if terminated or truncated:
                     break
             next_state = stack.state
             done = terminated or truncated
-            replay.add(state, action, np.sign(reward_sum), next_state, done)
+            shaped_reward = training_reward(
+                reward_components, raw_reward=reward_sum
+            )
+            prediction_error = agent.td_error(
+                state, action, shaped_reward, next_state, done
+            )
+            connectome.reinforce(prediction_error)
+            replay.add(state, action, shaped_reward, next_state, done)
             loss = agent.learn(replay)
             if loss is not None:
                 last_loss = loss
@@ -105,12 +118,14 @@ def run(args: argparse.Namespace) -> None:
 
             if environment_step % args.save_every == 0:
                 agent.save(args.output)
+                connectome.save_plasticity()
                 rate = environment_step / max(time.monotonic() - started, 1.0e-6)
                 print(
                     f"saved={args.output} step={environment_step} "
                     f"env_steps_per_s={rate:.1f}"
                 )
         agent.save(args.output)
+        connectome.save_plasticity()
     finally:
         env.close()
 
@@ -136,11 +151,17 @@ def main() -> None:
         "--male-cns-device", choices=("auto", "cpu", "cuda"), default="auto"
     )
     parser.add_argument("--spike-file", type=Path)
+    parser.add_argument("--dopamine-state", type=Path)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=0.02)
     args = parser.parse_args()
     if args.steps <= 0 or args.action_repeat <= 0:
         parser.error("--steps and --action-repeat must be positive")
     if args.save_every <= 0:
         parser.error("--save-every must be positive")
+    if args.dopamine_learning_rate <= 0:
+        parser.error("--dopamine-learning-rate must be positive")
+    if args.dopamine_state is not None and args.male_cns_device != "cpu":
+        parser.error("--dopamine-state requires --male-cns-device cpu")
     run(args)
 
 

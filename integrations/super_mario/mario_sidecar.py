@@ -267,13 +267,14 @@ def run(args: argparse.Namespace) -> None:
     interval_reward = 0.0
     interval_components: dict[str, float] = {}
     interval_steps = 0
+    interval_execution_steps = 0
     rollout_episode = 0
     rollout_transition = 0
     flybrain_mtime_ns = None
     if args.flybrain:
         from male_cns import MaleCNS
         from mario_dqn import ActivityStack, FlybrainAgent, action_levels
-        from rollouts import RewardSender, RolloutRecorder
+        from rollouts import RewardSender, RolloutRecorder, training_reward
 
         flybrain = FlybrainAgent.load(args.flybrain, device=args.flybrain_device)
         flybrain_mtime_ns = args.flybrain.stat().st_mtime_ns
@@ -285,6 +286,8 @@ def run(args: argparse.Namespace) -> None:
             device=args.male_cns_device,
             seed=args.seed,
             spike_file=spike_file,
+            dopamine_state=args.dopamine_state,
+            dopamine_learning_rate=args.dopamine_learning_rate,
         )
         if male_cns.feature_dim != flybrain.config.feature_dim:
             raise RuntimeError(
@@ -321,6 +324,7 @@ def run(args: argparse.Namespace) -> None:
             if flybrain is not None and step >= next_flybrain_decision:
                 if active_state is not None:
                     next_state = activity_stack.state
+                    execution_fraction = interval_execution_steps / max(interval_steps, 1)
                     if rollout_recorder is not None:
                         event = rollout_recorder.add(
                             state=active_state,
@@ -332,6 +336,7 @@ def run(args: argparse.Namespace) -> None:
                             reward_components=interval_components,
                             action_sequence=active_action_sequence,
                             emulator_steps=interval_steps,
+                            execution_fraction=execution_fraction,
                         )
                     else:
                         event = {
@@ -341,12 +346,24 @@ def run(args: argparse.Namespace) -> None:
                             "action_sequence": active_action_sequence,
                             "action": active_action,
                             "reward": interval_reward,
-                            "training_reward": float(np.sign(interval_reward)),
+                            "training_reward": training_reward(
+                                interval_components, raw_reward=interval_reward
+                            ),
                             "terminated": False,
                             "truncated": False,
                             "reward_components": interval_components,
                             "emulator_steps": interval_steps,
+                            "execution_fraction": execution_fraction,
                         }
+                    if execution_fraction >= args.minimum_execution_fraction:
+                        prediction_error = flybrain.td_error(
+                            active_state,
+                            active_action,
+                            event["training_reward"],
+                            next_state,
+                            False,
+                        )
+                        male_cns.reinforce(prediction_error)
                     if reward_sender is not None:
                         reward_sender.send(event)
                     rollout_transition += 1
@@ -378,6 +395,7 @@ def run(args: argparse.Namespace) -> None:
                 interval_reward = 0.0
                 interval_components = {}
                 interval_steps = 0
+                interval_execution_steps = 0
                 next_flybrain_decision = step + args.flybrain_decision_frames
             if request_sender is not None:
                 # Refresh every frame so the robot-side deadman releases safely
@@ -401,6 +419,7 @@ def run(args: argparse.Namespace) -> None:
             if active_state is not None:
                 interval_reward += float(reward)
                 interval_steps += 1
+                interval_execution_steps += int(applied_action == active_action)
                 for key, value in info.get("reward_components", {}).items():
                     interval_components[key] = interval_components.get(key, 0.0) + float(value)
             if publisher is not None:
@@ -410,18 +429,27 @@ def run(args: argparse.Namespace) -> None:
             step += 1
             if step % max(1, int(round(args.fps))) == 0:
                 requested_action = action_index(requested, run=requested.run)
+                dopamine = male_cns.dopamine_stats() if male_cns is not None else None
+                dopamine_text = (
+                    ""
+                    if dopamine is None
+                    else " dopamine_rpe="
+                    f"{dopamine['signal']:+.3f} kc_mbon={dopamine['mean_kc_mbon_scale']:.4f}"
+                )
                 print(
                     "[mario sidecar 1s] "
                     f"requested={action_name(requested_action)} "
                     f"measured L={int(levels.left)} R={int(levels.right)} "
                     f"J={int(levels.jump)} "
                     f"applied={action_name(applied_action)}({applied_action}) "
-                    f"x_pos={info.get('x_pos', 'n/a')}",
+                    f"x_pos={info.get('x_pos', 'n/a')}"
+                    f"{dopamine_text}",
                     flush=True,
                 )
             if terminated or truncated:
                 if active_state is not None:
                     terminal_state = activity_stack.state
+                    execution_fraction = interval_execution_steps / max(interval_steps, 1)
                     if rollout_recorder is not None:
                         event = rollout_recorder.add(
                             state=active_state,
@@ -433,6 +461,7 @@ def run(args: argparse.Namespace) -> None:
                             reward_components=interval_components,
                             action_sequence=active_action_sequence,
                             emulator_steps=interval_steps,
+                            execution_fraction=execution_fraction,
                         )
                     else:
                         event = {
@@ -442,18 +471,31 @@ def run(args: argparse.Namespace) -> None:
                             "action_sequence": active_action_sequence,
                             "action": active_action,
                             "reward": interval_reward,
-                            "training_reward": float(np.sign(interval_reward)),
+                            "training_reward": training_reward(
+                                interval_components, raw_reward=interval_reward
+                            ),
                             "terminated": bool(terminated),
                             "truncated": bool(truncated),
                             "reward_components": interval_components,
                             "emulator_steps": interval_steps,
+                            "execution_fraction": execution_fraction,
                         }
+                    if execution_fraction >= args.minimum_execution_fraction:
+                        prediction_error = flybrain.td_error(
+                            active_state,
+                            active_action,
+                            event["training_reward"],
+                            terminal_state,
+                            True,
+                        )
+                        male_cns.reinforce(prediction_error)
                     if reward_sender is not None:
                         reward_sender.send(event)
                     active_state = None
                     interval_reward = 0.0
                     interval_components = {}
                     interval_steps = 0
+                    interval_execution_steps = 0
                     rollout_episode += 1
                     rollout_transition = 0
                 observation, info = env.reset()
@@ -486,6 +528,8 @@ def run(args: argparse.Namespace) -> None:
             reward_sender.close()
         if rollout_recorder is not None:
             rollout_recorder.close()
+        if male_cns is not None:
+            male_cns.save_plasticity()
         if publisher is not None:
             publisher.close()
         env.close()
@@ -514,6 +558,13 @@ def main() -> None:
         "--male-cns-data", type=Path,
         help="directory containing MaleCNS brain.npz and weights.npz",
     )
+    parser.add_argument(
+        "--dopamine-state",
+        type=Path,
+        help="persist reward-modulated KC-to-MBON synaptic scales here",
+    )
+    parser.add_argument("--dopamine-learning-rate", type=float, default=0.02)
+    parser.add_argument("--minimum-execution-fraction", type=float, default=0.5)
     parser.add_argument(
         "--spike-file", type=Path,
         help="write genuine MaleCNS descending-neuron spikes as JSONL",
@@ -569,6 +620,12 @@ def main() -> None:
         parser.error("--flybrain-decision-frames must be positive")
     if not 0.0 <= args.flybrain_epsilon <= 1.0:
         parser.error("--flybrain-epsilon must be in [0, 1]")
+    if args.dopamine_learning_rate <= 0.0:
+        parser.error("--dopamine-learning-rate must be positive")
+    if not 0.0 <= args.minimum_execution_fraction <= 1.0:
+        parser.error("--minimum-execution-fraction must be in [0, 1]")
+    if args.dopamine_state is not None and args.male_cns_device != "cpu":
+        parser.error("--dopamine-state requires --male-cns-device cpu")
     if not 1 <= args.reward_port <= 65535:
         parser.error("--reward-port must be in [1, 65535]")
     if args.demo and args.flybrain:

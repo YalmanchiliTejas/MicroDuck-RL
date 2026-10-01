@@ -92,8 +92,9 @@ def main() -> int:
     parser.add_argument("--spike-file", type=Path)
     parser.add_argument("--male-cns-data", type=Path)
     parser.add_argument(
-        "--male-cns-device", choices=("auto", "cpu", "cuda"), default="auto"
+        "--male-cns-device", choices=("cpu",), default="cpu"
     )
+    parser.add_argument("--dopamine-learning-rate", type=float, default=0.02)
     parser.add_argument("--frame-shm", default="microduck_mario_rgb")
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument(
@@ -113,9 +114,10 @@ def main() -> int:
         args.decision_frames <= 0
         or args.duration_seconds < 0
         or args.startup_timeout_seconds <= 0
+        or args.dopamine_learning_rate <= 0
     ):
         parser.error(
-            "decision frames and startup timeout must be positive; "
+            "decision frames, dopamine learning rate, and startup timeout must be positive; "
             "duration must be non-negative"
         )
 
@@ -123,6 +125,7 @@ def main() -> int:
     rollout_dir = run_dir / "rollouts"
     log_dir = run_dir / "logs"
     checkpoint = (args.checkpoint or run_dir / "flybrain-online.pt").resolve()
+    dopamine_state = (run_dir / "dopamine-plasticity.npz").resolve()
     rollout_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
     checkpoint.parent.mkdir(parents=True, exist_ok=True)
@@ -221,6 +224,10 @@ def main() -> int:
             rollout_dir,
             "--male-cns-device",
             args.male_cns_device,
+            "--dopamine-state",
+            dopamine_state,
+            "--dopamine-learning-rate",
+            args.dopamine_learning_rate,
         )
         if args.male_cns_data:
             sidecar_command.extend(("--male-cns-data", str(args.male_cns_data)))
