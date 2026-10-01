@@ -50,6 +50,16 @@ SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-flybrain-${MARIO_RUN_TAG}"
 OUTPUT_DIR="${SCRATCH_ROOT}/slurm"
 RUN_DIR="${SCRATCH_ROOT}/run"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
+PRETRAINED_CHECKPOINT="${RUN_DIR}/flybrain-online.pt"
+PRETRAINED_DOPAMINE="${RUN_DIR}/dopamine-plasticity.npz"
+if [[ "${MARIO_REQUIRE_PRETRAIN:-1}" == "1" ]] && {
+    [[ ! -f "${PRETRAINED_CHECKPOINT}" ]] || [[ ! -f "${PRETRAINED_DOPAMINE}" ]]
+}; then
+    echo "ERROR: physical fine-tuning requires emulator pretraining first." >&2
+    echo "Missing ${PRETRAINED_CHECKPOINT} or ${PRETRAINED_DOPAMINE}." >&2
+    echo "Run slurm_mario_flybrain_pretrain.sh with this MARIO_RUN_TAG first." >&2
+    exit 1
+fi
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     submit_args=(
@@ -97,6 +107,8 @@ echo "Host:         $(hostname)"
 echo "Repository:   ${REPO_DIR}"
 echo "Run:          ${RUN_DIR}"
 echo "Policy:       ${MARIO_POLICY}"
+echo "DQN preload:  ${PRETRAINED_CHECKPOINT}"
+echo "DA preload:   ${PRETRAINED_DOPAMINE}"
 echo "Dashboard:    ssh -L 8765:$(hostname):8765 <cluster-login>"
 
 # One job, two interpreters: mjlab/BAM is pinned to 3.12 while NES needs 3.13.
@@ -123,7 +135,7 @@ launcher_args=(
     --dashboard-port 8765
     --male-cns-data "${FLY_DATA}"
     --male-cns-device cpu
-    --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.02}"
+    --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.001}"
     --headless
 )
 if [[ -n "${FLY_SPIKE_FILE:-}" ]]; then

@@ -34,7 +34,7 @@ class MaleCNS:
         trace_tau: float = 0.12,
         spike_file: Path | None = None,
         dopamine_state: Path | None = None,
-        dopamine_learning_rate: float = 0.02,
+        dopamine_learning_rate: float = 0.001,
     ) -> None:
         try:
             from flybrain import FlyBrain, Trace

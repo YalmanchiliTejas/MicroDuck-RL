@@ -29,6 +29,15 @@ def _device(name: str) -> str:
     return "cpu"
 
 
+def _save(agent: FlybrainAgent, connectome: MaleCNS, output: Path) -> None:
+    """Atomically save both learned layers so Slurm termination is recoverable."""
+
+    temporary = output.with_name(f".{output.name}.tmp")
+    agent.save(temporary)
+    temporary.replace(output)
+    connectome.save_plasticity()
+
+
 def run(args: argparse.Namespace) -> None:
     import gymnasium as gym
     from nes_py.wrappers import JoypadSpace
@@ -108,25 +117,33 @@ def run(args: argparse.Namespace) -> None:
 
             if done:
                 episode += 1
+                dopamine = connectome.dopamine_stats()
+                dopamine_text = (
+                    ""
+                    if dopamine is None
+                    else f" dopamine_rpe={dopamine['signal']:+.3f}"
+                    f" kc_mbon={dopamine['mean_kc_mbon_scale']:.4f}"
+                )
                 print(
                     f"episode={episode} step={environment_step} reward={episode_reward:.1f} "
                     f"epsilon={agent.epsilon():.3f} loss={last_loss:.4f}"
+                    f"{dopamine_text}",
+                    flush=True,
                 )
                 observation, _ = env.reset()
                 state = stack.reset(connectome.reset(observation))
                 episode_reward = 0.0
 
             if environment_step % args.save_every == 0:
-                agent.save(args.output)
-                connectome.save_plasticity()
+                _save(agent, connectome, args.output)
                 rate = environment_step / max(time.monotonic() - started, 1.0e-6)
                 print(
                     f"saved={args.output} step={environment_step} "
-                    f"env_steps_per_s={rate:.1f}"
+                    f"env_steps_per_s={rate:.1f}",
+                    flush=True,
                 )
-        agent.save(args.output)
-        connectome.save_plasticity()
     finally:
+        _save(agent, connectome, args.output)
         env.close()
 
 
@@ -152,7 +169,7 @@ def main() -> None:
     )
     parser.add_argument("--spike-file", type=Path)
     parser.add_argument("--dopamine-state", type=Path)
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.02)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
     args = parser.parse_args()
     if args.steps <= 0 or args.action_repeat <= 0:
         parser.error("--steps and --action-repeat must be positive")

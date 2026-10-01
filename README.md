@@ -253,8 +253,9 @@ so a request change does not require crossing the original large empty spaces.
 Changing this layout changes the controller task: retrain the Mario PPO before
 using a checkpoint trained against the old geometry.
 
-Install the Python 3.13 sidecar, then train the MaleCNS readout directly in the
-emulator. On first use the `flybrain` package downloads its prebuilt MaleCNS
+Install the Python 3.13 sidecar, then train the MaleCNS readout and dopamine
+plasticity directly in the emulator. On first use the `flybrain` package
+downloads its prebuilt MaleCNS
 files (about 260 MB) to `$FLY_DATA` (default `~/fly-data`). The simulator and
 reservoir interface come from [fly.ai](https://github.com/alextitonis/fly.ai);
 this is the real MaleCNS model, not a locally invented network:
@@ -268,6 +269,29 @@ python3.13 -m venv .super-mario-venv
 .super-mario-venv/bin/microduck-train-flybrain \
     --steps 1000000 --action-repeat 30 --output flybrain.pt \
     --male-cns-device cpu --dopamine-state dopamine-plasticity.npz
+```
+
+On Slurm, use a fresh run tag for emulator pretraining. The pretraining wrapper
+refuses to reuse either an existing DQN checkpoint or dopamine state, preventing
+a saturated mushroom-body state from leaking into a new experiment:
+
+```bash
+MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
+MARIO_PRETRAIN_STEPS=20000 \
+DOPAMINE_LEARNING_RATE=0.001 \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+After that job finishes, use the same tag for physical fine-tuning. The physical
+wrapper now refuses to start unless both pretrained artifacts exist:
+
+```bash
+MARIO_POLICY=/scratch/scholar/tyalaman/microduck-rl/mario-controller-6150.onnx \
+MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
+MARIO_RUN_SECONDS=13800 \
+MARIO_DECISION_FRAMES=90 \
+DOPAMINE_LEARNING_RATE=0.001 \
+    ./slurm_mario_flybrain.sh
 ```
 
 For an end-to-end MuJoCo rehearsal, first export the trained

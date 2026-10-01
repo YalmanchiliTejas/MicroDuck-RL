@@ -23,7 +23,7 @@ class DopaminePlasticity:
         brain,
         *,
         state_path: Path,
-        learning_rate: float = 0.02,
+        learning_rate: float = 0.001,
         eligibility_tau_s: float = 2.0,
         min_scale: float = 0.2,
         recovery_rate: float = 2.0e-4,

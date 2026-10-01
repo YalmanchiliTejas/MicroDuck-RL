@@ -94,7 +94,7 @@ def main() -> int:
     parser.add_argument(
         "--male-cns-device", choices=("cpu",), default="cpu"
     )
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.02)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
     parser.add_argument("--frame-shm", default="microduck_mario_rgb")
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument(
