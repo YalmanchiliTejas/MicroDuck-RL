@@ -40,7 +40,10 @@ def _stop(processes) -> None:
                 os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-    deadline = time.monotonic() + 10.0
+    # Dopamine plasticity and the DQN checkpoint can be large.  Slurm warns the
+    # supervisor three minutes before the allocation ends, so give children a
+    # full minute to finish their atomic final saves before forcing a stop.
+    deadline = time.monotonic() + 60.0
     for _name, process, _log in reversed(processes):
         if process.poll() is None:
             try:

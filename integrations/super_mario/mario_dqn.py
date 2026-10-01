@@ -262,7 +262,10 @@ class PrioritizedReplay:
         output.parent.mkdir(parents=True, exist_ok=True)
         temporary = output.with_name(f".{output.name}.tmp")
         with temporary.open("wb") as stream:
-            np.savez_compressed(
+            # The full replay can be hundreds of MB.  An uncompressed archive
+            # is intentionally used here: checkpoint latency matters more than
+            # scratch-space efficiency when Slurm has already sent SIGTERM.
+            np.savez(
                 stream,
                 schema=np.asarray(1),
                 capacity=np.asarray(self.capacity),

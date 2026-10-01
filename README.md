@@ -271,9 +271,11 @@ python3.13 -m venv .super-mario-venv
     --male-cns-device cpu --dopamine-state dopamine-plasticity.npz
 ```
 
-On Slurm, use a fresh run tag for emulator pretraining. The pretraining wrapper
-refuses to reuse either an existing DQN checkpoint or dopamine state, preventing
-a saturated mushroom-body state from leaking into a new experiment:
+On Slurm, use a fresh run tag for the first emulator-pretraining job. The job is
+capped at four hours and receives `SIGTERM` three minutes before the hard limit.
+It atomically checkpoints the DQN and optimizer (`flybrain-online.pt`), dopamine
+plasticity (`dopamine-plasticity.npz`), and the complete PER buffer including its
+sampling state (`flybrain-replay.npz`):
 
 ```bash
 MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
@@ -282,8 +284,27 @@ DOPAMINE_LEARNING_RATE=0.001 \
     ./slurm_mario_flybrain_pretrain.sh
 ```
 
+`MARIO_PRETRAIN_STEPS` is the target total decision count, not the number added
+by each job. If Slurm stops this job early, submit the exact same command and
+tag again; the wrapper restores all three files and continues from the saved
+step. Its header will say `Mode: resume`. If 20,000 finishes and more training
+is useful, resubmit with `MARIO_PRETRAIN_STEPS=40000` to train only decisions
+20,001 through 40,000. Choose a new tag (for example `...-v3`) only when a truly
+fresh DQN and dopamine state is intended; do not delete a partially saved run.
+
+Progress and checkpoint state are available at:
+
+```bash
+ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2"
+tail -f "$ROOT"/slurm/pretrain-*.log
+ls -lh "$ROOT"/run/{flybrain-online.pt,dopamine-plasticity.npz,flybrain-replay.npz}
+```
+
 After that job finishes, use the same tag for physical fine-tuning. The physical
-wrapper now refuses to start unless both pretrained artifacts exist:
+wrapper refuses to start unless both pretrained artifacts exist. It has the same
+four-hour limit and advance termination signal; rerunning it with the same tag
+loads the DQN and dopamine state, rebuilds PER from saved rollout files, and
+skips rollouts already listed in the processed manifest:
 
 ```bash
 MARIO_POLICY=/scratch/scholar/tyalaman/microduck-rl/mario-controller-6150.onnx \

@@ -13,6 +13,9 @@
 #SBATCH --mem=64G
 #SBATCH --time=04:00:00
 #SBATCH --partition=gpu
+# Give the supervisor time to stop every child cleanly.  The trainer saves the
+# DQN/optimizer and processed-rollout manifest; the sidecar saves dopamine.
+#SBATCH --signal=TERM@180
 
 set -euo pipefail
 
