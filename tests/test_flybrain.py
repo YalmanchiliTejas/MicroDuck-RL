@@ -155,6 +155,32 @@ def test_replay_accepts_non_overlapping_activity_stacks():
     assert np.array_equal(sample[3][0], next_state)
 
 
+def test_prioritized_replay_checkpoint_restores_data_position_and_rng(tmp_path):
+    flybrain = _load_flybrain()
+    replay = flybrain.PrioritizedReplay(3, (4, 6), seed=19)
+    for index in range(4):
+        state = np.full((4, 6), index, dtype=np.float32)
+        next_state = np.full((4, 6), index + 1, dtype=np.float32)
+        replay.add(state, index, float(index), next_state, index == 3)
+    path = tmp_path / "replay.npz"
+    replay.save(path)
+
+    restored = flybrain.PrioritizedReplay(3, (4, 6), seed=999)
+    restored.load(path)
+    assert len(restored) == 3
+    assert restored._position == replay._position
+    assert np.array_equal(restored.states, replay.states)
+    assert np.array_equal(restored.next_states, replay.next_states)
+    assert np.array_equal(restored.actions, replay.actions)
+    assert np.array_equal(restored.rewards, replay.rewards)
+    assert np.array_equal(restored.dones, replay.dones)
+    assert np.array_equal(restored.priorities, replay.priorities)
+    # The RNG state is part of the checkpoint, so PER sampling also continues.
+    original_sample = replay.sample(2, beta=0.4)
+    restored_sample = restored.sample(2, beta=0.4)
+    assert np.array_equal(original_sample[-1], restored_sample[-1])
+
+
 def test_dueling_network_outputs_one_q_value_per_action():
     flybrain = _load_flybrain()
     network = flybrain.DuelingQNetwork(feature_dim=16)

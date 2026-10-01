@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import asdict, dataclass
 from enum import IntEnum
+import json
 import random
 from pathlib import Path
 from typing import Iterable
@@ -253,6 +254,66 @@ class PrioritizedReplay:
     def update_priorities(self, indices: Iterable[int], errors: Iterable[float]) -> None:
         for index, error in zip(indices, errors, strict=True):
             self.priorities[int(index)] = abs(float(error)) + 1.0e-5
+
+    def save(self, path: str | Path) -> None:
+        """Atomically persist the populated replay region and sampling state."""
+
+        output = Path(path)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        temporary = output.with_name(f".{output.name}.tmp")
+        with temporary.open("wb") as stream:
+            np.savez_compressed(
+                stream,
+                schema=np.asarray(1),
+                capacity=np.asarray(self.capacity),
+                stack_depth=np.asarray(self.stack_depth),
+                feature_dim=np.asarray(self.feature_dim),
+                alpha=np.asarray(self.alpha),
+                position=np.asarray(self._position),
+                size=np.asarray(self._size),
+                rng_state=np.asarray(json.dumps(self._rng.bit_generator.state)),
+                states=self.states[: self._size],
+                next_states=self.next_states[: self._size],
+                actions=self.actions[: self._size],
+                rewards=self.rewards[: self._size],
+                dones=self.dones[: self._size],
+                priorities=self.priorities[: self._size],
+            )
+        temporary.replace(output)
+
+    def load(self, path: str | Path) -> None:
+        """Restore a replay file produced by :meth:`save`."""
+
+        with np.load(path, allow_pickle=False) as archive:
+            if int(archive["schema"]) != 1:
+                raise ValueError("unsupported prioritized-replay schema")
+            expected = (self.capacity, self.stack_depth, self.feature_dim)
+            actual = (
+                int(archive["capacity"]),
+                int(archive["stack_depth"]),
+                int(archive["feature_dim"]),
+            )
+            if actual != expected or float(archive["alpha"]) != self.alpha:
+                raise ValueError("replay state does not match the DQN configuration")
+            size = int(archive["size"])
+            position = int(archive["position"])
+            if not 0 <= size <= self.capacity or not 0 <= position < self.capacity:
+                raise ValueError("invalid replay size or position")
+            for name, destination in (
+                ("states", self.states),
+                ("next_states", self.next_states),
+                ("actions", self.actions),
+                ("rewards", self.rewards),
+                ("dones", self.dones),
+                ("priorities", self.priorities),
+            ):
+                source = archive[name]
+                if len(source) != size or source.shape[1:] != destination.shape[1:]:
+                    raise ValueError(f"invalid replay array: {name}")
+                destination[:size] = source
+            self._size = size
+            self._position = position
+            self._rng.bit_generator.state = json.loads(str(archive["rng_state"]))
 
 
 class FlybrainAgent:

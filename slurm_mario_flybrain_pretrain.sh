@@ -9,8 +9,11 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
-#SBATCH --time=08:00:00
+#SBATCH --time=04:00:00
 #SBATCH --partition=gpu
+# Ask Slurm to notify the Python process three minutes before the hard limit so
+# it can atomically save the network, optimizer, dopamine state, and PER buffer.
+#SBATCH --signal=TERM@180
 
 set -euo pipefail
 
@@ -29,12 +32,19 @@ OUTPUT_DIR="${SCRATCH_ROOT}/slurm"
 RUN_DIR="${SCRATCH_ROOT}/run"
 CHECKPOINT="${RUN_DIR}/flybrain-online.pt"
 DOPAMINE_STATE="${RUN_DIR}/dopamine-plasticity.npz"
+REPLAY_STATE="${RUN_DIR}/flybrain-replay.npz"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
-    if [[ -e "${CHECKPOINT}" || -e "${DOPAMINE_STATE}" ]]; then
-        echo "ERROR: refusing to reuse learned state in ${RUN_DIR}" >&2
-        echo "Choose a fresh MARIO_RUN_TAG to reset DQN and dopamine plasticity." >&2
+    if { [[ -e "${CHECKPOINT}" ]] && [[ ! -e "${DOPAMINE_STATE}" ]]; } ||
+       { [[ ! -e "${CHECKPOINT}" ]] && [[ -e "${DOPAMINE_STATE}" ]]; }; then
+        echo "ERROR: incomplete pretraining state in ${RUN_DIR}" >&2
+        echo "Checkpoint and dopamine state must either both exist or both be absent." >&2
+        exit 1
+    fi
+    if [[ -e "${REPLAY_STATE}" && ! -e "${CHECKPOINT}" ]]; then
+        echo "ERROR: replay exists without a matching DQN checkpoint: ${REPLAY_STATE}" >&2
+        echo "Choose a fresh MARIO_RUN_TAG for a clean reset." >&2
         exit 1
     fi
     submit_args=(
@@ -56,9 +66,13 @@ command -v uv >/dev/null 2>&1 || {
     echo "ERROR: uv is not available on the compute node PATH." >&2
     exit 1
 }
-if [[ -e "${CHECKPOINT}" || -e "${DOPAMINE_STATE}" ]]; then
-    echo "ERROR: learned state appeared before pretraining started: ${RUN_DIR}" >&2
-    echo "This job requires a fresh MARIO_RUN_TAG." >&2
+if { [[ -e "${CHECKPOINT}" ]] && [[ ! -e "${DOPAMINE_STATE}" ]]; } ||
+   { [[ ! -e "${CHECKPOINT}" ]] && [[ -e "${DOPAMINE_STATE}" ]]; }; then
+    echo "ERROR: incomplete pretraining state in ${RUN_DIR}" >&2
+    exit 1
+fi
+if [[ -e "${REPLAY_STATE}" && ! -e "${CHECKPOINT}" ]]; then
+    echo "ERROR: replay exists without a matching DQN checkpoint: ${REPLAY_STATE}" >&2
     exit 1
 fi
 
@@ -89,18 +103,30 @@ echo "Action repeat:       ${ACTION_REPEAT} frames"
 echo "Dopamine rate:       ${DOPAMINE_RATE}"
 echo "Checkpoint:          ${CHECKPOINT}"
 echo "Dopamine state:      ${DOPAMINE_STATE}"
+echo "Replay state:        ${REPLAY_STATE}"
+
+resume_args=()
+if [[ -f "${CHECKPOINT}" && -f "${DOPAMINE_STATE}" ]]; then
+    resume_args+=(--resume "${CHECKPOINT}")
+    echo "Mode:                resume"
+else
+    echo "Mode:                fresh"
+fi
 
 srun "${SIDECAR_VENV}/bin/python" \
     "${REPO_DIR}/integrations/super_mario/train_flybrain.py" \
     --steps "${PRETRAIN_STEPS}" \
     --action-repeat "${ACTION_REPEAT}" \
     --save-every "${SAVE_EVERY}" \
+    --replay-state "${REPLAY_STATE}" \
+    --replay-save-every "${MARIO_REPLAY_SAVE_EVERY:-5000}" \
     --output "${CHECKPOINT}" \
     --device "${MARIO_DQN_DEVICE:-auto}" \
     --male-cns-data "${FLY_DATA}" \
     --male-cns-device cpu \
     --dopamine-state "${DOPAMINE_STATE}" \
     --dopamine-learning-rate "${DOPAMINE_RATE}" \
+    "${resume_args[@]}" \
     2>&1 | tee "${OUTPUT_DIR}/pretrain-${SLURM_JOB_ID}.log"
 
 echo "Pretraining completed. Reuse MARIO_RUN_TAG=${MARIO_RUN_TAG} for physical fine-tuning."
