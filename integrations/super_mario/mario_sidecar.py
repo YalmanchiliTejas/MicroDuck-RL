@@ -355,9 +355,14 @@ def run(args: argparse.Namespace) -> None:
                 if args.flybrain_reload:
                     current_mtime_ns = args.flybrain.stat().st_mtime_ns
                     if current_mtime_ns != flybrain_mtime_ns:
-                        flybrain = FlybrainAgent.load(
+                        exploration_state = flybrain.exploration_state()
+                        reloaded_flybrain = FlybrainAgent.load(
                             args.flybrain, device=args.flybrain_device
                         )
+                        reloaded_flybrain.restore_exploration_state(
+                            exploration_state
+                        )
+                        flybrain = reloaded_flybrain
                         flybrain_mtime_ns = current_mtime_ns
                         print(f"reloaded flybrain checkpoint: {args.flybrain}")
                 epsilon = (

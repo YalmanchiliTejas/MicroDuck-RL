@@ -123,7 +123,7 @@ def main() -> None:
     parser.add_argument("--steps", type=int, default=1_000_000)
     parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--replay-capacity", type=int, default=20_000)
-    parser.add_argument("--replay-start", type=int, default=2_000)
+    parser.add_argument("--replay-start", type=int, default=500)
     parser.add_argument("--save-every", type=int, default=25_000)
     parser.add_argument("--output", type=Path, default=Path("flybrain.pt"))
     parser.add_argument("--resume", type=Path)

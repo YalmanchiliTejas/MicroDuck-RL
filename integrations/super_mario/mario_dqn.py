@@ -100,15 +100,21 @@ class FlybrainConfig:
     learning_rate: float = 1.0e-4
     batch_size: int = 32
     replay_capacity: int = 20_000
-    replay_start: int = 2_000
+    # Physical actions take roughly three wall-clock seconds at the deployed
+    # 90-frame hold.  A 2k warmup therefore wastes most of a short Slurm job
+    # on random collection before the first update.
+    replay_start: int = 500
     train_every: int = 4
-    target_update_every: int = 5_000
+    target_update_every: int = 1_000
     per_alpha: float = 0.6
     per_beta_start: float = 0.4
-    per_beta_steps: int = 500_000
+    per_beta_steps: int = 10_000
     epsilon_start: float = 1.0
     epsilon_final: float = 0.05
-    epsilon_steps: int = 500_000
+    # 500k decisions would take weeks in the physical-controller loop.  Ten
+    # thousand preserves exploration across multiple jobs while producing a
+    # useful policy/exploration mixture during the first four-hour run.
+    epsilon_steps: int = 10_000
     grad_clip_norm: float = 10.0
 
     def __post_init__(self) -> None:
@@ -260,15 +266,21 @@ class FlybrainAgent:
     ) -> None:
         self.config = config
         self.device = torch.device(device)
-        random.seed(seed)
-        np.random.seed(seed)
-        torch.manual_seed(seed)
-        self.online = DuelingQNetwork(
-            config.stack_depth, config.num_actions, config.feature_dim
-        ).to(self.device)
-        self.target = DuelingQNetwork(
-            config.stack_depth, config.num_actions, config.feature_dim
-        ).to(self.device)
+        # Exploration must be agent-local.  Hot-reloading a checkpoint used to
+        # call random.seed(0) here after every episode, replaying the same
+        # random action prefix and creating the observed LEFT-heavy dataset.
+        self._action_rng = random.Random(seed)
+        # Network initialization is reproducible without resetting global
+        # torch RNG state owned by the live MaleCNS process during a reload.
+        rng_devices = [self.device] if self.device.type == "cuda" else []
+        with torch.random.fork_rng(devices=rng_devices):
+            torch.manual_seed(seed)
+            self.online = DuelingQNetwork(
+                config.stack_depth, config.num_actions, config.feature_dim
+            ).to(self.device)
+            self.target = DuelingQNetwork(
+                config.stack_depth, config.num_actions, config.feature_dim
+            ).to(self.device)
         self.target.load_state_dict(self.online.state_dict())
         self.target.eval()
         self.optimizer = torch.optim.Adam(
@@ -285,11 +297,21 @@ class FlybrainAgent:
 
     def act(self, state: np.ndarray, epsilon: float | None = None) -> int:
         explore = self.epsilon() if epsilon is None else epsilon
-        if random.random() < explore:
-            return random.randrange(self.config.num_actions)
+        if self._action_rng.random() < explore:
+            return self._action_rng.randrange(self.config.num_actions)
         with torch.no_grad():
             tensor = torch.as_tensor(state, device=self.device).unsqueeze(0)
             return int(self.online(tensor).argmax(dim=1).item())
+
+    def exploration_state(self) -> object:
+        """Return the local exploration RNG state for a live hot reload."""
+
+        return self._action_rng.getstate()
+
+    def restore_exploration_state(self, state: object) -> None:
+        """Continue, rather than restart, a live exploration sequence."""
+
+        self._action_rng.setstate(state)
 
     def learn(self, replay: PrioritizedReplay) -> float | None:
         self.steps += 1

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from dataclasses import replace
 import json
 from pathlib import Path
 import time
@@ -66,6 +67,8 @@ def ingest_rollout(
     path: Path,
     replay: PrioritizedReplay,
     agent: FlybrainAgent,
+    *,
+    learn: bool = True,
 ) -> tuple[int, float, float | None]:
     metadata, arrays = load_rollout(path)
     if not metadata.get("complete"):
@@ -89,10 +92,30 @@ def ingest_rollout(
             next_state,
             done,
         )
-        loss = agent.learn(replay)
-        if loss is not None:
-            last_loss = loss
+        if learn:
+            loss = agent.learn(replay)
+            if loss is not None:
+                last_loss = loss
     return count, float(arrays["rewards"].sum()), last_loss
+
+
+def rebuild_replay(
+    rollout_dir: Path,
+    processed: set[str],
+    replay: PrioritizedReplay,
+    agent: FlybrainAgent,
+) -> int:
+    """Restore processed transitions to PER without training them twice."""
+
+    restored = 0
+    for path in sorted(rollout_dir.glob("rollout-*-episode-*.npz")):
+        if path.name not in processed:
+            continue
+        count, _reward, _loss = ingest_rollout(
+            path, replay, agent, learn=False
+        )
+        restored += count
+    return restored
 
 
 def run(args: argparse.Namespace) -> None:
@@ -102,7 +125,15 @@ def run(args: argparse.Namespace) -> None:
         resume = args.output
     if resume:
         agent = FlybrainAgent.load(resume, device=device)
-        config = agent.config
+        config = replace(
+            agent.config,
+            replay_capacity=args.replay_capacity,
+            replay_start=args.replay_start,
+            target_update_every=args.target_update_every,
+            per_beta_steps=args.per_beta_steps,
+            epsilon_steps=args.epsilon_steps,
+        )
+        agent.config = config
         print(f"resumed {resume}")
     else:
         feature_dim = _male_cns_feature_dim(args.male_cns_data)
@@ -111,6 +142,9 @@ def run(args: argparse.Namespace) -> None:
             feature_dim=feature_dim,
             replay_capacity=args.replay_capacity,
             replay_start=args.replay_start,
+            target_update_every=args.target_update_every,
+            per_beta_steps=args.per_beta_steps,
+            epsilon_steps=args.epsilon_steps,
         )
         agent = FlybrainAgent(config, device=device, seed=args.seed)
     replay = PrioritizedReplay(
@@ -123,6 +157,12 @@ def run(args: argparse.Namespace) -> None:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     manifest = args.processed_manifest or args.output.with_suffix(".processed.json")
     processed = _load_processed(manifest)
+    restored = rebuild_replay(args.rollout_dir, processed, replay, agent)
+    if restored:
+        print(
+            f"rebuilt replay from {restored} processed transitions "
+            f"(retained {len(replay)})"
+        )
     receiver = RewardReceiver(args.host, args.port)
     _atomic_save(agent, args.output)
     print(f"listening for sidecar rewards on udp://{args.host}:{args.port}")
@@ -172,7 +212,10 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=DEFAULT_REWARD_PORT)
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--replay-capacity", type=int, default=20_000)
-    parser.add_argument("--replay-start", type=int, default=2_000)
+    parser.add_argument("--replay-start", type=int, default=500)
+    parser.add_argument("--target-update-every", type=int, default=1_000)
+    parser.add_argument("--per-beta-steps", type=int, default=10_000)
+    parser.add_argument("--epsilon-steps", type=int, default=10_000)
     parser.add_argument(
         "--device", choices=("auto", "cpu", "cuda", "mps"), default="auto"
     )
@@ -180,8 +223,17 @@ def main() -> None:
     parser.add_argument("--male-cns-data", type=Path)
     parser.add_argument("--once", action="store_true")
     args = parser.parse_args()
-    if args.poll_seconds <= 0 or not 1 <= args.port <= 65535:
-        parser.error("--poll-seconds must be positive and --port must be valid")
+    if (
+        args.poll_seconds <= 0
+        or not 1 <= args.port <= 65535
+        or args.replay_start <= 0
+        or args.target_update_every <= 0
+        or args.per_beta_steps <= 0
+        or args.epsilon_steps <= 0
+    ):
+        parser.error(
+            "poll/schedule values must be positive and --port must be valid"
+        )
     run(args)
 
 

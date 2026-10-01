@@ -135,6 +135,10 @@ def main() -> int:
     readiness_offsets = {
         path: path.stat().st_size if path.exists() else 0 for path in readiness
     }
+    trainer_log = log_dir / "trainer.log"
+    trainer_readiness_offset = (
+        trainer_log.stat().st_size if trainer_log.exists() else 0
+    )
     base_env = os.environ.copy()
     # Child stdout goes to regular files, where Python would otherwise use
     # block buffering and lose startup diagnostics when the supervisor sends
@@ -180,15 +184,24 @@ def main() -> int:
         # A fresh run may download the ~260 MB prebuilt MaleCNS files before
         # creating the schema-4 readout checkpoint.
         deadline = time.monotonic() + 900.0
-        while not checkpoint.exists():
+        while not (
+            checkpoint.exists()
+            and _log_contains(
+                trainer_log,
+                "watching rollouts in ",
+                after=trainer_readiness_offset,
+            )
+        ):
             trainer = processes[0][1]
             if trainer.poll() is not None:
                 raise RuntimeError(
-                    f"trainer exited before checkpoint creation; see {log_dir/'trainer.log'}"
+                    "trainer exited before becoming ready; see "
+                    f"{log_dir/'trainer.log'}"
                 )
             if time.monotonic() >= deadline:
                 raise TimeoutError(
-                    "trainer did not create its initial checkpoint within 900 seconds"
+                    "trainer did not restore replay and publish its checkpoint "
+                    "within 900 seconds"
                 )
             time.sleep(0.2)
 

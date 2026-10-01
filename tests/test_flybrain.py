@@ -96,8 +96,13 @@ def test_activity_stack_has_four_malecns_trace_frames():
 
 def test_flybrain_config_locks_four_frames_and_ten_intents():
     flybrain = _load_flybrain()
-    assert flybrain.FlybrainConfig().stack_depth == 4
-    assert flybrain.FlybrainConfig().num_actions == 10
+    config = flybrain.FlybrainConfig()
+    assert config.stack_depth == 4
+    assert config.num_actions == 10
+    assert config.replay_start == 500
+    assert config.target_update_every == 1_000
+    assert config.per_beta_steps == 10_000
+    assert config.epsilon_steps == 10_000
     with pytest.raises(ValueError, match="exactly four frames"):
         flybrain.FlybrainConfig(stack_depth=3)
     with pytest.raises(ValueError, match="exactly 10 intents"):
@@ -330,3 +335,88 @@ def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
     assert reward == -23.0
     assert loss is not None
     assert len(replay) == 2
+
+
+def test_hot_reload_can_continue_random_exploration_sequence(tmp_path):
+    flybrain = _load_flybrain()
+    config = flybrain.FlybrainConfig(
+        feature_dim=6,
+        batch_size=1,
+        replay_capacity=3,
+        replay_start=1,
+    )
+    state = np.zeros((4, 6), dtype=np.float32)
+    live = flybrain.FlybrainAgent(config, seed=17)
+    live.act(state, epsilon=1.0)
+    continuation_state = live.exploration_state()
+    expected = [live.act(state, epsilon=1.0) for _ in range(20)]
+
+    checkpoint = tmp_path / "flybrain.pt"
+    live.save(checkpoint)
+    reloaded = flybrain.FlybrainAgent.load(checkpoint)
+    reloaded.restore_exploration_state(continuation_state)
+    actual = [reloaded.act(state, epsilon=1.0) for _ in range(20)]
+    assert actual == expected
+
+
+def test_agent_construction_does_not_reset_process_torch_rng():
+    flybrain = _load_flybrain()
+    config = flybrain.FlybrainConfig(feature_dim=6)
+    torch.manual_seed(91)
+    expected = torch.rand(5)
+    torch.manual_seed(91)
+    flybrain.FlybrainAgent(config, seed=0)
+    actual = torch.rand(5)
+    assert torch.equal(actual, expected)
+
+
+def test_continuous_exploration_is_not_directionally_skewed():
+    flybrain = _load_flybrain()
+    config = flybrain.FlybrainConfig(feature_dim=6)
+    agent = flybrain.FlybrainAgent(config, seed=0)
+    state = np.zeros((4, 6), dtype=np.float32)
+    counts = np.bincount(
+        [agent.act(state, epsilon=1.0) for _ in range(10_000)],
+        minlength=config.num_actions,
+    )
+    # A continuously advancing seeded stream stays close to 10% per action;
+    # the old episode-by-episode RNG reset failed this operational property.
+    assert counts.max() - counts.min() < 150
+
+
+def test_rebuild_replay_restores_processed_data_without_advancing_schedule(tmp_path):
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    trainer = _load_rollout_trainer(flybrain, rollouts)
+    recorder = rollouts.RolloutRecorder(tmp_path, 4, 6, run_id="resume")
+    state = np.zeros((4, 6), dtype=np.float32)
+    next_state = np.ones((4, 6), dtype=np.float32)
+    recorder.add(
+        state=state,
+        action=1,
+        reward=5.0,
+        next_state=next_state,
+        terminated=True,
+        truncated=False,
+        reward_components={"progress": 5.0},
+        action_sequence=0,
+        emulator_steps=4,
+    )
+    path = next(tmp_path.glob("rollout-*.npz"))
+    config = flybrain.FlybrainConfig(
+        feature_dim=6,
+        batch_size=1,
+        replay_capacity=3,
+        replay_start=1,
+        train_every=1,
+    )
+    agent = flybrain.FlybrainAgent(config, seed=2)
+    agent.steps = 123
+    replay = flybrain.PrioritizedReplay(3, (4, 6), seed=2)
+
+    restored = trainer.rebuild_replay(
+        tmp_path, {path.name}, replay, agent
+    )
+    assert restored == 1
+    assert len(replay) == 1
+    assert agent.steps == 123

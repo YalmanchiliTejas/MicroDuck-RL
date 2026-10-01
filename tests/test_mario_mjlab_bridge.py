@@ -36,3 +36,4 @@ def test_combined_launcher_uses_exact_mjlab_bridge():
     source = (ROOT / "scripts/run_mario_flybrain.py").read_text()
     assert '"scripts/run_mario_mjlab_bridge.py"' in source
     assert '"scripts/infer_policy.py"' not in source
+    assert '"watching rollouts in "' in source
