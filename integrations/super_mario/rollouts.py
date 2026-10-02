@@ -11,6 +11,8 @@ import uuid
 
 import numpy as np
 
+from reward_contract import REWARD_CONTRACT
+
 
 REWARD_PROTOCOL_VERSION = 2
 DEFAULT_REWARD_PORT = 55357
@@ -28,20 +30,18 @@ REWARD_COMPONENTS = (
 def training_reward(
     components: dict[str, float], *, raw_reward: float | None = None
 ) -> float:
-    """Scale informative Mario components without discarding their magnitude."""
+    """Return the unmodified Gymnasium reward accumulated for one action.
 
-    value = (
-        float(components.get("progress", 0.0)) / 10.0
-        + float(components.get("time", 0.0)) / 20.0
-        + float(components.get("score", 0.0)) / 5.0
-        + float(components.get("coins", 0.0)) / 5.0
-        + float(components.get("powerup", 0.0)) / 5.0
-        + float(components.get("completion", 0.0)) / 10.0
-        + float(components.get("death", 0.0)) / 10.0
-    )
-    if not components and raw_reward is not None:
-        value = float(raw_reward) / 10.0
-    return float(np.clip(value, -5.0, 5.0))
+    ``components`` are retained for diagnostics only.  Learning algorithms all
+    receive exactly the sum of rewards returned by ``env.step`` while their
+    high-level action is held; no scaling, clipping, terminal override, or
+    hand-authored component weighting is applied.
+    """
+
+    del components
+    if raw_reward is None or not np.isfinite(raw_reward):
+        raise ValueError("raw Gymnasium reward must be finite and present")
+    return float(raw_reward)
 
 
 def encode_reward_packet(event: dict) -> bytes:
@@ -219,9 +219,10 @@ class RolloutRecorder:
         destination = self.root / name
         temporary = self.root / f".{name}.{uuid.uuid4().hex}.tmp"
         metadata = {
-            # Schema 6 stores magnitude-preserving component-shaped rewards and
-            # spans many MaleCNS steps, so consecutive stacks need not overlap.
-            "schema": 6,
+            # Schema 7 stores the exact accumulated Gymnasium reward. It spans
+            # many MaleCNS steps, so consecutive stacks need not overlap.
+            "schema": 7,
+            "reward_contract": REWARD_CONTRACT,
             "input": "malecns_descending_neuron_trace",
             "feature_dim": self.feature_dim,
             "run_id": self.run_id,
@@ -285,7 +286,10 @@ def load_rollout(path: Path) -> tuple[dict, dict[str, np.ndarray]]:
     with np.load(path, allow_pickle=False) as archive:
         metadata = json.loads(str(archive["metadata"]))
         arrays = {key: archive[key].copy() for key in archive.files if key != "metadata"}
-    if metadata.get("schema") != 6:
+    if (
+        metadata.get("schema") != 7
+        or metadata.get("reward_contract") != REWARD_CONTRACT
+    ):
         raise ValueError("unsupported rollout schema")
     lengths = {len(value) for value in arrays.values()}
     if len(lengths) != 1:

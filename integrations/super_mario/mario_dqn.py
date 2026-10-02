@@ -22,6 +22,11 @@ import torch
 from torch import nn
 from torch.nn import functional as F
 
+from reward_contract import REWARD_CONTRACT
+
+
+CHECKPOINT_SCHEMA = 6
+
 
 class FlybrainAction(IntEnum):
     IDLE = 0
@@ -117,6 +122,7 @@ class FlybrainConfig:
     # useful policy/exploration mixture during the first four-hour run.
     epsilon_steps: int = 10_000
     grad_clip_norm: float = 10.0
+    algorithm: str = "double_dqn"
 
     def __post_init__(self) -> None:
         if self.feature_dim <= 0:
@@ -131,6 +137,8 @@ class FlybrainConfig:
             raise ValueError("replay_start must be at least batch_size")
         if self.replay_capacity <= self.replay_start:
             raise ValueError("replay_capacity must be greater than replay_start")
+        if self.algorithm not in {"dqn", "double_dqn"}:
+            raise ValueError("algorithm must be 'dqn' or 'double_dqn'")
 
 
 class DuelingQNetwork(nn.Module):
@@ -320,7 +328,7 @@ class PrioritizedReplay:
 
 
 class FlybrainAgent:
-    """Double-DQN learner with dueling heads and prioritized replay."""
+    """DQN/Double-DQN learner with shared dueling heads and PER."""
 
     def __init__(
         self,
@@ -377,6 +385,14 @@ class FlybrainAgent:
 
         self._action_rng.setstate(state)
 
+    def _bootstrap_values(self, next_states: torch.Tensor) -> torch.Tensor:
+        """Compute the DQN or Double-DQN target bootstrap value."""
+
+        if self.config.algorithm == "double_dqn":
+            next_actions = self.online(next_states).argmax(dim=1, keepdim=True)
+            return self.target(next_states).gather(1, next_actions).squeeze(1)
+        return self.target(next_states).max(dim=1).values
+
     def learn(self, replay: PrioritizedReplay) -> float | None:
         self.steps += 1
         cfg = self.config
@@ -397,8 +413,7 @@ class FlybrainAgent:
 
         predicted = self.online(states_t).gather(1, actions_t).squeeze(1)
         with torch.no_grad():
-            next_actions = self.online(next_states_t).argmax(dim=1, keepdim=True)
-            next_values = self.target(next_states_t).gather(1, next_actions).squeeze(1)
+            next_values = self._bootstrap_values(next_states_t)
             expected = rewards_t + cfg.gamma * (1.0 - dones_t) * next_values
         errors = expected - predicted
         per_item_loss = F.smooth_l1_loss(predicted, expected, reduction="none")
@@ -421,14 +436,13 @@ class FlybrainAgent:
         next_state: np.ndarray,
         done: bool,
     ) -> float:
-        """Return Double-DQN reward prediction error for dopamine teaching."""
+        """Return the configured Q-learning TD error for dopamine teaching."""
 
         with torch.no_grad():
             state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
             next_t = torch.as_tensor(next_state, device=self.device).unsqueeze(0)
             predicted = self.online(state_t)[0, int(action)]
-            next_action = self.online(next_t).argmax(dim=1, keepdim=True)
-            next_value = self.target(next_t).gather(1, next_action).squeeze(1)[0]
+            next_value = self._bootstrap_values(next_t)[0]
             expected = torch.as_tensor(float(reward), device=self.device)
             if not done:
                 expected = expected + self.config.gamma * next_value
@@ -439,7 +453,8 @@ class FlybrainAgent:
         output.parent.mkdir(parents=True, exist_ok=True)
         torch.save(
             {
-                "schema": 4,
+                "schema": CHECKPOINT_SCHEMA,
+                "reward_contract": REWARD_CONTRACT,
                 "input": "malecns_descending_neuron_trace",
                 "actions": [action.name.lower() for action in FlybrainAction],
                 "config": asdict(self.config),
@@ -455,13 +470,21 @@ class FlybrainAgent:
 
     @classmethod
     def load(
-        cls, path: str | Path, device: str | torch.device = "cpu"
+        cls,
+        path: str | Path,
+        device: str | torch.device = "cpu",
+        *,
+        allow_legacy_reward_contract: bool = False,
     ) -> "FlybrainAgent":
         checkpoint = torch.load(path, map_location=device, weights_only=False)
-        if checkpoint.get("schema") != 4:
+        legacy_reward_contract = checkpoint.get("schema") in {4, 5}
+        if not (allow_legacy_reward_contract and legacy_reward_contract) and (
+            checkpoint.get("schema") != CHECKPOINT_SCHEMA
+            or checkpoint.get("reward_contract") != REWARD_CONTRACT
+        ):
             raise ValueError(
-                "unsupported pixel-only checkpoint; start a fresh MaleCNS readout "
-                "checkpoint (schema 4)"
+                "checkpoint does not use the unmodified Gymnasium reward contract; "
+                "start a fresh benchmark/readout state"
             )
         agent = cls(FlybrainConfig(**checkpoint["config"]), device=device)
         agent.online.load_state_dict(checkpoint["online"])
@@ -469,8 +492,7 @@ class FlybrainAgent:
         agent.optimizer.load_state_dict(checkpoint["optimizer"])
         agent.steps = int(checkpoint["steps"])
         agent.updates = int(checkpoint["updates"])
-        # Older schema-4 files did not include this field.  Keep them loadable,
-        # while new checkpoints continue the exploration stream exactly.
+        # Preserve the exact exploration stream across a Slurm continuation.
         if "action_rng_state" in checkpoint:
             agent._action_rng.setstate(checkpoint["action_rng_state"])
         return agent

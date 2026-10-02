@@ -96,6 +96,10 @@ def run(args: argparse.Namespace) -> None:
     stack = ActivityStack(config.stack_depth)
     state = stack.reset(connectome.reset(observation))
     episode_reward = 0.0
+    episode_training_reward = 0.0
+    episode_components = {key: 0.0 for key in REWARD_COMPONENTS}
+    episode_missing_component_decisions = 0
+    episode_started_at = agent.steps
     episode = 0
     last_loss = float("nan")
     started = time.monotonic()
@@ -113,7 +117,7 @@ def run(args: argparse.Namespace) -> None:
         for environment_step in range(first_step, args.steps + 1):
             action = agent.act(state)
             reward_sum = 0.0
-            reward_components = {key: 0.0 for key in REWARD_COMPONENTS}
+            reward_components: dict[str, float] = {}
             terminated = truncated = False
             for _ in range(args.action_repeat):
                 observation, reward, terminated, truncated, info = env.step(action)
@@ -121,24 +125,32 @@ def run(args: argparse.Namespace) -> None:
                 for key, value in info.get("reward_components", {}).items():
                     if key in reward_components:
                         reward_components[key] += float(value)
+                    elif key in REWARD_COMPONENTS:
+                        reward_components[key] = float(value)
                 stack.append(connectome.observe(observation, action_sequence=environment_step))
                 if terminated or truncated:
                     break
             next_state = stack.state
             done = terminated or truncated
-            shaped_reward = training_reward(
+            learning_reward = training_reward(
                 reward_components, raw_reward=reward_sum
             )
             prediction_error = agent.td_error(
-                state, action, shaped_reward, next_state, done
+                state, action, learning_reward, next_state, done
             )
             connectome.reinforce(prediction_error)
-            replay.add(state, action, shaped_reward, next_state, done)
+            replay.add(state, action, learning_reward, next_state, done)
             loss = agent.learn(replay)
             if loss is not None:
                 last_loss = loss
             state = next_state
             episode_reward += reward_sum
+            episode_training_reward += learning_reward
+            if reward_components:
+                for key, value in reward_components.items():
+                    episode_components[key] += value
+            else:
+                episode_missing_component_decisions += 1
 
             if done:
                 episode += 1
@@ -149,8 +161,18 @@ def run(args: argparse.Namespace) -> None:
                     else f" dopamine_rpe={dopamine['signal']:+.3f}"
                     f" kc_mbon={dopamine['mean_kc_mbon_scale']:.4f}"
                 )
+                component_text = ",".join(
+                    f"{key}:{episode_components[key]:+.1f}"
+                    for key in REWARD_COMPONENTS
+                )
+                episode_decisions = environment_step - episode_started_at
                 print(
-                    f"episode={episode} step={environment_step} reward={episode_reward:.1f} "
+                    f"episode={episode} step={environment_step} decisions={episode_decisions} "
+                    f"raw_reward={episode_reward:.1f} "
+                    f"training_reward={episode_training_reward:+.3f} "
+                    f"terminal_training_reward={learning_reward:+.3f} "
+                    f"missing_components={episode_missing_component_decisions}/{episode_decisions} "
+                    f"components={component_text} "
                     f"epsilon={agent.epsilon():.3f} loss={last_loss:.4f}"
                     f"{dopamine_text}",
                     flush=True,
@@ -158,6 +180,10 @@ def run(args: argparse.Namespace) -> None:
                 observation, _ = env.reset()
                 state = stack.reset(connectome.reset(observation))
                 episode_reward = 0.0
+                episode_training_reward = 0.0
+                episode_components = {key: 0.0 for key in REWARD_COMPONENTS}
+                episode_missing_component_decisions = 0
+                episode_started_at = environment_step
 
             if environment_step % args.save_every == 0:
                 _save(agent, connectome, args.output)

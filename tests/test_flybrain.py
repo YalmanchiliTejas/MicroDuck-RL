@@ -15,7 +15,11 @@ def _load_flybrain():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(path.parent))
     return module
 
 
@@ -25,7 +29,11 @@ def _load_rollouts():
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(path.parent))
     return module
 
 
@@ -38,6 +46,31 @@ def _load_rollout_trainer(flybrain, rollouts):
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+def _load_evaluator(flybrain, rollouts):
+    injected = {
+        "mario_dqn": flybrain,
+        "rollouts": rollouts,
+        "male_cns": types.SimpleNamespace(MaleCNS=object),
+        "mario_sidecar": types.SimpleNamespace(nes_actions=lambda: []),
+    }
+    previous = {name: sys.modules.get(name) for name in injected}
+    sys.modules.update(injected)
+    path = Path(__file__).parents[1] / "integrations/super_mario/evaluate_flybrain.py"
+    spec = importlib.util.spec_from_file_location("microduck_test_evaluator", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        for name, old_module in previous.items():
+            if old_module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = old_module
     return module
 
 
@@ -72,6 +105,26 @@ def _load_dopamine():
     assert spec.loader is not None
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
+    return module
+
+
+def _load_ppo(flybrain):
+    previous = sys.modules.get("mario_dqn")
+    sys.modules["mario_dqn"] = flybrain
+    path = Path(__file__).parents[1] / "integrations/super_mario/mario_ppo.py"
+    spec = importlib.util.spec_from_file_location("microduck_test_mario_ppo", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    sys.path.insert(0, str(path.parent))
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        sys.path.remove(str(path.parent))
+        if previous is None:
+            sys.modules.pop("mario_dqn", None)
+        else:
+            sys.modules["mario_dqn"] = previous
     return module
 
 
@@ -117,6 +170,86 @@ def test_flybrain_config_locks_four_frames_and_ten_intents():
         flybrain.FlybrainConfig(stack_depth=3)
     with pytest.raises(ValueError, match="exactly 10 intents"):
         flybrain.FlybrainConfig(num_actions=6)
+    with pytest.raises(ValueError, match="algorithm"):
+        flybrain.FlybrainConfig(algorithm="not-an-algorithm")
+
+
+def test_dqn_and_double_dqn_differ_only_in_target_action_selection():
+    flybrain = _load_flybrain()
+
+    class Fixed(torch.nn.Module):
+        def __init__(self, values):
+            super().__init__()
+            self.register_buffer("values", torch.tensor(values, dtype=torch.float32))
+
+        def forward(self, states):
+            return self.values.expand(len(states), -1)
+
+    state = torch.zeros((1, 4, 6))
+    dqn = flybrain.FlybrainAgent(
+        flybrain.FlybrainConfig(feature_dim=6, algorithm="dqn")
+    )
+    double = flybrain.FlybrainAgent(
+        flybrain.FlybrainConfig(feature_dim=6, algorithm="double_dqn")
+    )
+    for agent in (dqn, double):
+        agent.online = Fixed([0.0, 10.0] + [0.0] * 8)
+        agent.target = Fixed([5.0, 1.0] + [0.0] * 8)
+
+    assert dqn._bootstrap_values(state).item() == 5.0
+    assert double._bootstrap_values(state).item() == 1.0
+
+
+def test_ppo_gae_uses_raw_rewards_and_terminal_boundaries():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    advantages, returns = ppo.generalized_advantage_estimates(
+        np.asarray([1.0, 1.0]),
+        np.asarray([0.0, 0.0]),
+        np.asarray([0.0, 1.0]),
+        next_value=100.0,
+        gamma=1.0,
+        gae_lambda=1.0,
+    )
+    assert np.allclose(advantages, [2.0, 1.0])
+    assert np.allclose(returns, [2.0, 1.0])
+
+
+def test_ppo_checkpoint_restores_policy_and_sampling_rng(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    config = ppo.PPOConfig(feature_dim=6, rollout_steps=4, minibatch_size=2)
+    agent = ppo.PPOAgent(config, seed=8)
+    state = np.zeros((4, 6), dtype=np.float32)
+    agent.act(state)
+    checkpoint = tmp_path / "ppo.pt"
+    agent.save(checkpoint)
+    expected = [agent.act(state)[0] for _ in range(10)]
+    restored = ppo.PPOAgent.load(checkpoint)
+    assert [restored.act(state)[0] for _ in range(10)] == expected
+
+
+def test_ppo_update_accepts_unmodified_reward_returns():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    config = ppo.PPOConfig(
+        feature_dim=6,
+        rollout_steps=4,
+        update_epochs=1,
+        minibatch_size=2,
+    )
+    agent = ppo.PPOAgent(config, seed=9)
+    states = np.zeros((4, 4, 6), dtype=np.float32)
+    samples = [agent.act(state) for state in states]
+    metrics = agent.update(
+        states=states,
+        actions=np.asarray([sample[0] for sample in samples]),
+        old_log_probabilities=np.asarray([sample[1] for sample in samples]),
+        returns=np.asarray([100.0, -25.0, 50.0, 10.0], dtype=np.float32),
+        advantages=np.asarray([100.0, -25.0, 50.0, 10.0], dtype=np.float32),
+    )
+    assert agent.updates == 1
+    assert all(np.isfinite(value) for value in metrics.values())
 
 
 def test_replay_samples_self_contained_pre_and_post_action_states():
@@ -254,12 +387,23 @@ def test_reward_packet_preserves_action_sequence_components_and_terminal():
     assert rollouts.decode_reward_packet(rollouts.encode_reward_packet(event)) == event
 
 
-def test_training_reward_preserves_progress_and_terminal_magnitude():
+def test_training_reward_is_exact_unmodified_gymnasium_reward():
     rollouts = _load_rollouts()
-    assert rollouts.training_reward({"progress": 3.0}) == pytest.approx(0.3)
-    assert rollouts.training_reward({"death": -25.0}) == pytest.approx(-2.5)
-    assert rollouts.training_reward({"completion": 50.0}) == pytest.approx(5.0)
-    assert rollouts.training_reward({}, raw_reward=12.0) == pytest.approx(1.2)
+    components = {"progress": 150.0, "death": -25.0}
+    assert rollouts.training_reward(components, raw_reward=123.5) == 123.5
+    assert rollouts.training_reward({}, raw_reward=-17.0) == -17.0
+    with pytest.raises(ValueError, match="raw Gymnasium reward"):
+        rollouts.training_reward(components)
+
+
+def test_frozen_evaluator_exposes_old_fatal_progress_reward_bug():
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    evaluator = _load_evaluator(flybrain, rollouts)
+    fatal_progress = {"progress": 150.0, "death": -25.0}
+
+    assert evaluator._legacy_training_reward(fatal_progress, 0.0) == 5.0
+    assert rollouts.training_reward(fatal_progress, raw_reward=-7.0) == -7.0
 
 
 def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):
@@ -336,8 +480,9 @@ def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
     assert len(paths) == 1
     metadata, arrays = rollouts.load_rollout(paths[0])
     assert metadata["complete"] is True
+    assert metadata["reward_contract"] == "gymnasium-raw-action-interval-v1"
     assert arrays["actions"].tolist() == [2, 4]
-    assert np.allclose(arrays["training_rewards"], [0.3, -2.5])
+    assert np.allclose(arrays["training_rewards"], [3.0, -25.0])
     assert arrays["action_sequences"].tolist() == [10, 11]
     assert arrays["next_states"][1, :, 0].tolist() == [3, 4, 5, 6]
     assert not list(tmp_path.glob("*.tmp"))
@@ -443,6 +588,23 @@ def test_checkpoint_continues_random_exploration_sequence(tmp_path):
     reloaded = flybrain.FlybrainAgent.load(checkpoint)
     actual = [reloaded.act(state, epsilon=1.0) for _ in range(20)]
     assert actual == expected
+
+
+def test_checkpoint_rejects_legacy_reward_contract(tmp_path):
+    flybrain = _load_flybrain()
+    checkpoint = tmp_path / "legacy.pt"
+    flybrain.FlybrainAgent(flybrain.FlybrainConfig(feature_dim=6)).save(checkpoint)
+    payload = torch.load(checkpoint, weights_only=False)
+    payload["schema"] = 4
+    payload.pop("reward_contract")
+    torch.save(payload, checkpoint)
+
+    with pytest.raises(ValueError, match="unmodified Gymnasium reward contract"):
+        flybrain.FlybrainAgent.load(checkpoint)
+    restored = flybrain.FlybrainAgent.load(
+        checkpoint, allow_legacy_reward_contract=True
+    )
+    assert restored.config.feature_dim == 6
 
 
 def test_agent_construction_does_not_reset_process_torch_rng():

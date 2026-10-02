@@ -1,0 +1,1394 @@
+Job ID:             471336
+Host:               scholar-h000.rcac.purdue.edu
+Run:                /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run
+Pretrain decisions: 20000
+Action repeat:       30 frames
+Dopamine rate:       0.001
+Checkpoint:          /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt
+Dopamine state:      /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/dopamine-plasticity.npz
+Replay state:        /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-replay.npz
+Mode:                fresh
+flybrain: no brain files in /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/male-cns; downloading the prebuilt brain (~260 MB, once)
+downloading brain.npz
+  1 / 53 MB  2 / 53 MB  3 / 53 MB  4 / 53 MB  5 / 53 MB  6 / 53 MB  7 / 53 MB  8 / 53 MB  9 / 53 MB  10 / 53 MB  12 / 53 MB  13 / 53 MB  14 / 53 MB  15 / 53 MB  16 / 53 MB  17 / 53 MB  18 / 53 MB  19 / 53 MB  20 / 53 MB  21 / 53 MB  22 / 53 MB  23 / 53 MB  24 / 53 MB  25 / 53 MB  26 / 53 MB  27 / 53 MB  28 / 53 MB  29 / 53 MB  30 / 53 MB  31 / 53 MB  33 / 53 MB  34 / 53 MB  35 / 53 MB  36 / 53 MB  37 / 53 MB  38 / 53 MB  39 / 53 MB  40 / 53 MB  41 / 53 MB  42 / 53 MB  43 / 53 MB  44 / 53 MB  45 / 53 MB  46 / 53 MB  47 / 53 MB  48 / 53 MB  49 / 53 MB  50 / 53 MB  51 / 53 MB  52 / 53 MB  53 / 53 MB
+downloading weights.npz
+  1 / 205 MB  2 / 205 MB  3 / 205 MB  4 / 205 MB  5 / 205 MB  6 / 205 MB  7 / 205 MB  8 / 205 MB  9 / 205 MB  10 / 205 MB  12 / 205 MB  13 / 205 MB  14 / 205 MB  15 / 205 MB  16 / 205 MB  17 / 205 MB  18 / 205 MB  19 / 205 MB  20 / 205 MB  21 / 205 MB  22 / 205 MB  23 / 205 MB  24 / 205 MB  25 / 205 MB  26 / 205 MB  27 / 205 MB  28 / 205 MB  29 / 205 MB  30 / 205 MB  31 / 205 MB  33 / 205 MB  34 / 205 MB  35 / 205 MB  36 / 205 MB  37 / 205 MB  38 / 205 MB  39 / 205 MB  40 / 205 MB  41 / 205 MB  42 / 205 MB  43 / 205 MB  44 / 205 MB  45 / 205 MB  46 / 205 MB  47 / 205 MB  48 / 205 MB  49 / 205 MB  50 / 205 MB  51 / 205 MB  52 / 205 MB  53 / 205 MB  55 / 205 MB  56 / 205 MB  57 / 205 MB  58 / 205 MB  59 / 205 MB  60 / 205 MB  61 / 205 MB  62 / 205 MB  63 / 205 MB  64 / 205 MB  65 / 205 MB  66 / 205 MB  67 / 205 MB  68 / 205 MB  69 / 205 MB  70 / 205 MB  71 / 205 MB  72 / 205 MB  73 / 205 MB  74 / 205 MB  75 / 205 MB  77 / 205 MB  78 / 205 MB  79 / 205 MB  80 / 205 MB  81 / 205 MB  82 / 205 MB  83 / 205 MB  84 / 205 MB  85 / 205 MB  86 / 205 MB  87 / 205 MB  88 / 205 MB  89 / 205 MB  90 / 205 MB  91 / 205 MB  92 / 205 MB  93 / 205 MB  94 / 205 MB  95 / 205 MB  96 / 205 MB  98 / 205 MB  99 / 205 MB  100 / 205 MB  101 / 205 MB  102 / 205 MB  103 / 205 MB  104 / 205 MB  105 / 205 MB  106 / 205 MB  107 / 205 MB  108 / 205 MB  109 / 205 MB  110 / 205 MB  111 / 205 MB  112 / 205 MB  113 / 205 MB  114 / 205 MB  115 / 205 MB  116 / 205 MB  117 / 205 MB  118 / 205 MB  120 / 205 MB  121 / 205 MB  122 / 205 MB  123 / 205 MB  124 / 205 MB  125 / 205 MB  126 / 205 MB  127 / 205 MB  128 / 205 MB  129 / 205 MB  130 / 205 MB  131 / 205 MB  132 / 205 MB  133 / 205 MB  134 / 205 MB  135 / 205 MB  136 / 205 MB  137 / 205 MB  138 / 205 MB  139 / 205 MB  141 / 205 MB  142 / 205 MB  143 / 205 MB  144 / 205 MB  145 / 205 MB  146 / 205 MB  147 / 205 MB  148 / 205 MB  149 / 205 MB  150 / 205 MB  151 / 205 MB  152 / 205 MB  153 / 205 MB  154 / 205 MB  155 / 205 MB  156 / 205 MB  157 / 205 MB  158 / 205 MB  159 / 205 MB  160 / 205 MB  161 / 205 MB  163 / 205 MB  164 / 205 MB  165 / 205 MB  166 / 205 MB  167 / 205 MB  168 / 205 MB  169 / 205 MB  170 / 205 MB  171 / 205 MB  172 / 205 MB  173 / 205 MB  174 / 205 MB  175 / 205 MB  176 / 205 MB  177 / 205 MB  178 / 205 MB  179 / 205 MB  180 / 205 MB  181 / 205 MB  182 / 205 MB  184 / 205 MB  185 / 205 MB  186 / 205 MB  187 / 205 MB  188 / 205 MB  189 / 205 MB  190 / 205 MB  191 / 205 MB  192 / 205 MB  193 / 205 MB  194 / 205 MB  195 / 205 MB  196 / 205 MB  197 / 205 MB  198 / 205 MB  199 / 205 MB  200 / 205 MB  201 / 205 MB  202 / 205 MB  203 / 205 MB  204 / 205 MB  205 / 205 MB
+episode=1 step=132 reward=1183.0 epsilon=0.987 loss=nan dopamine_rpe=+1.000 kc_mbon=0.9874
+episode=2 step=186 reward=694.0 epsilon=0.982 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9803
+episode=3 step=204 reward=149.0 epsilon=0.981 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9785
+episode=4 step=312 reward=646.0 epsilon=0.970 loss=nan dopamine_rpe=+1.000 kc_mbon=0.9703
+episode=5 step=323 reward=171.0 epsilon=0.969 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9679
+episode=6 step=338 reward=217.0 epsilon=0.968 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9651
+episode=7 step=365 reward=588.0 epsilon=0.965 loss=nan dopamine_rpe=-0.406 kc_mbon=0.9598
+episode=8 step=383 reward=203.0 epsilon=0.964 loss=nan dopamine_rpe=-0.901 kc_mbon=0.9576
+episode=9 step=392 reward=175.0 epsilon=0.963 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9556
+episode=10 step=420 reward=600.0 epsilon=0.960 loss=nan dopamine_rpe=+0.074 kc_mbon=0.9512
+episode=11 step=442 reward=108.0 epsilon=0.958 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9484
+episode=12 step=455 reward=198.0 epsilon=0.957 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9460
+episode=13 step=466 reward=170.0 epsilon=0.956 loss=nan dopamine_rpe=+1.000 kc_mbon=0.9444
+episode=14 step=477 reward=175.0 epsilon=0.955 loss=nan dopamine_rpe=-0.126 kc_mbon=0.9430
+episode=15 step=489 reward=161.0 epsilon=0.954 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9411
+episode=16 step=546 reward=992.0 epsilon=0.948 loss=0.7493 dopamine_rpe=-0.854 kc_mbon=0.9297
+episode=17 step=601 reward=675.0 epsilon=0.943 loss=0.9620 dopamine_rpe=-1.000 kc_mbon=0.9165
+episode=18 step=644 reward=588.0 epsilon=0.939 loss=0.6355 dopamine_rpe=-1.000 kc_mbon=0.9059
+episode=19 step=747 reward=938.0 epsilon=0.929 loss=0.6867 dopamine_rpe=-1.000 kc_mbon=0.8859
+episode=20 step=843 reward=934.0 epsilon=0.920 loss=0.3909 dopamine_rpe=-1.000 kc_mbon=0.8714
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=1000 env_steps_per_s=6.1
+episode=21 step=1058 reward=775.0 epsilon=0.899 loss=0.4531 dopamine_rpe=-1.000 kc_mbon=0.8466
+episode=22 step=1068 reward=138.0 epsilon=0.899 loss=0.4146 dopamine_rpe=-1.000 kc_mbon=0.8445
+episode=23 step=1080 reward=170.0 epsilon=0.897 loss=0.7232 dopamine_rpe=-1.000 kc_mbon=0.8420
+episode=24 step=1093 reward=133.0 epsilon=0.896 loss=0.7065 dopamine_rpe=-1.000 kc_mbon=0.8392
+episode=25 step=1229 reward=549.0 epsilon=0.883 loss=0.7052 dopamine_rpe=-1.000 kc_mbon=0.8201
+episode=26 step=1253 reward=143.0 epsilon=0.881 loss=0.4440 dopamine_rpe=-1.000 kc_mbon=0.8155
+episode=27 step=1355 reward=923.0 epsilon=0.871 loss=0.6679 dopamine_rpe=-1.000 kc_mbon=0.7974
+episode=28 step=1370 reward=204.0 epsilon=0.870 loss=0.8190 dopamine_rpe=-1.000 kc_mbon=0.7957
+episode=29 step=1469 reward=981.0 epsilon=0.860 loss=0.5527 dopamine_rpe=-1.000 kc_mbon=0.7803
+episode=30 step=1481 reward=238.0 epsilon=0.859 loss=0.3403 dopamine_rpe=-1.000 kc_mbon=0.7786
+episode=31 step=1500 reward=152.0 epsilon=0.858 loss=0.5932 dopamine_rpe=-1.000 kc_mbon=0.7757
+episode=32 step=1509 reward=227.0 epsilon=0.857 loss=0.4714 dopamine_rpe=-1.000 kc_mbon=0.7742
+episode=33 step=1515 reward=219.0 epsilon=0.856 loss=0.8443 dopamine_rpe=-1.000 kc_mbon=0.7728
+episode=34 step=1590 reward=985.0 epsilon=0.849 loss=0.3062 dopamine_rpe=-1.000 kc_mbon=0.7616
+episode=35 step=1704 reward=601.0 epsilon=0.838 loss=0.2578 dopamine_rpe=-1.000 kc_mbon=0.7487
+episode=36 step=1739 reward=792.0 epsilon=0.835 loss=0.4924 dopamine_rpe=-1.000 kc_mbon=0.7428
+episode=37 step=1764 reward=211.0 epsilon=0.832 loss=0.6195 dopamine_rpe=-1.000 kc_mbon=0.7408
+episode=38 step=1876 reward=691.0 epsilon=0.822 loss=0.3322 dopamine_rpe=-1.000 kc_mbon=0.7315
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=2000 env_steps_per_s=6.2
+episode=39 step=2027 reward=1148.0 epsilon=0.807 loss=0.6315 dopamine_rpe=-1.000 kc_mbon=0.7162
+episode=40 step=2086 reward=676.0 epsilon=0.802 loss=0.6350 dopamine_rpe=-1.000 kc_mbon=0.7076
+episode=41 step=2106 reward=211.0 epsilon=0.800 loss=0.6969 dopamine_rpe=-1.000 kc_mbon=0.7046
+episode=42 step=2117 reward=195.0 epsilon=0.799 loss=0.7097 dopamine_rpe=-1.000 kc_mbon=0.7028
+episode=43 step=2142 reward=616.0 epsilon=0.797 loss=0.4227 dopamine_rpe=-1.000 kc_mbon=0.6992
+episode=44 step=2148 reward=245.0 epsilon=0.796 loss=0.7318 dopamine_rpe=-1.000 kc_mbon=0.6983
+episode=45 step=2153 reward=242.0 epsilon=0.795 loss=0.6801 dopamine_rpe=-1.000 kc_mbon=0.6975
+episode=46 step=2159 reward=249.0 epsilon=0.795 loss=0.9648 dopamine_rpe=-1.000 kc_mbon=0.6964
+episode=47 step=2165 reward=246.0 epsilon=0.794 loss=0.8245 dopamine_rpe=-1.000 kc_mbon=0.6955
+episode=48 step=2174 reward=237.0 epsilon=0.793 loss=1.1207 dopamine_rpe=-1.000 kc_mbon=0.6940
+episode=49 step=2215 reward=827.0 epsilon=0.790 loss=0.9329 dopamine_rpe=-1.000 kc_mbon=0.6892
+episode=50 step=2224 reward=230.0 epsilon=0.789 loss=0.8770 dopamine_rpe=-1.000 kc_mbon=0.6877
+episode=51 step=2247 reward=556.0 epsilon=0.787 loss=0.6350 dopamine_rpe=-1.000 kc_mbon=0.6848
+episode=52 step=2300 reward=536.0 epsilon=0.781 loss=0.8010 dopamine_rpe=-0.154 kc_mbon=0.6773
+episode=53 step=2412 reward=559.0 epsilon=0.771 loss=1.0097 dopamine_rpe=-0.577 kc_mbon=0.6663
+episode=54 step=2429 reward=125.0 epsilon=0.769 loss=0.5642 dopamine_rpe=-1.000 kc_mbon=0.6640
+episode=55 step=2445 reward=168.0 epsilon=0.768 loss=0.8304 dopamine_rpe=-1.000 kc_mbon=0.6619
+episode=56 step=2497 reward=1302.0 epsilon=0.763 loss=0.5182 dopamine_rpe=-1.000 kc_mbon=0.6550
+episode=57 step=2503 reward=211.0 epsilon=0.762 loss=0.5020 dopamine_rpe=-1.000 kc_mbon=0.6540
+episode=58 step=2511 reward=221.0 epsilon=0.761 loss=0.4550 dopamine_rpe=-1.000 kc_mbon=0.6528
+episode=59 step=2544 reward=605.0 epsilon=0.758 loss=0.3662 dopamine_rpe=-0.344 kc_mbon=0.6490
+episode=60 step=2602 reward=581.0 epsilon=0.753 loss=0.3227 dopamine_rpe=-1.000 kc_mbon=0.6424
+episode=61 step=2641 reward=774.0 epsilon=0.749 loss=1.0304 dopamine_rpe=-1.000 kc_mbon=0.6384
+episode=62 step=2661 reward=121.0 epsilon=0.747 loss=0.5874 dopamine_rpe=-1.000 kc_mbon=0.6360
+episode=63 step=2669 reward=178.0 epsilon=0.746 loss=0.3936 dopamine_rpe=-1.000 kc_mbon=0.6352
+episode=64 step=2677 reward=211.0 epsilon=0.746 loss=0.6486 dopamine_rpe=-1.000 kc_mbon=0.6340
+episode=65 step=2681 reward=249.0 epsilon=0.745 loss=0.4346 dopamine_rpe=-1.000 kc_mbon=0.6333
+episode=66 step=2768 reward=955.0 epsilon=0.737 loss=0.7187 dopamine_rpe=-1.000 kc_mbon=0.6259
+episode=67 step=2774 reward=227.0 epsilon=0.736 loss=0.4300 dopamine_rpe=-1.000 kc_mbon=0.6250
+episode=68 step=2803 reward=734.0 epsilon=0.734 loss=0.4876 dopamine_rpe=-1.000 kc_mbon=0.6213
+episode=69 step=2810 reward=244.0 epsilon=0.733 loss=0.6927 dopamine_rpe=-1.000 kc_mbon=0.6204
+episode=70 step=2817 reward=225.0 epsilon=0.732 loss=0.6603 dopamine_rpe=-1.000 kc_mbon=0.6199
+episode=71 step=2822 reward=249.0 epsilon=0.732 loss=0.7210 dopamine_rpe=-1.000 kc_mbon=0.6192
+episode=72 step=2918 reward=701.0 epsilon=0.723 loss=0.9935 dopamine_rpe=-1.000 kc_mbon=0.6108
+episode=73 step=2925 reward=217.0 epsilon=0.722 loss=1.0204 dopamine_rpe=-1.000 kc_mbon=0.6098
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=3000 env_steps_per_s=6.2
+episode=74 step=3002 reward=744.0 epsilon=0.715 loss=0.6029 dopamine_rpe=-1.000 kc_mbon=0.6027
+episode=75 step=3035 reward=730.0 epsilon=0.712 loss=0.8255 dopamine_rpe=-1.000 kc_mbon=0.5991
+episode=76 step=3047 reward=199.0 epsilon=0.711 loss=0.8152 dopamine_rpe=-1.000 kc_mbon=0.5979
+episode=77 step=3061 reward=199.0 epsilon=0.709 loss=0.6302 dopamine_rpe=-1.000 kc_mbon=0.5962
+episode=78 step=3079 reward=74.0 epsilon=0.707 loss=1.1743 dopamine_rpe=-1.000 kc_mbon=0.5953
+episode=79 step=3092 reward=221.0 epsilon=0.706 loss=1.2141 dopamine_rpe=-1.000 kc_mbon=0.5939
+episode=80 step=3096 reward=249.0 epsilon=0.706 loss=0.5504 dopamine_rpe=-1.000 kc_mbon=0.5933
+episode=81 step=3100 reward=252.0 epsilon=0.706 loss=0.9592 dopamine_rpe=-1.000 kc_mbon=0.5928
+episode=82 step=3156 reward=729.0 epsilon=0.700 loss=1.4623 dopamine_rpe=-1.000 kc_mbon=0.5878
+episode=83 step=3162 reward=229.0 epsilon=0.700 loss=0.7073 dopamine_rpe=-1.000 kc_mbon=0.5870
+episode=84 step=3170 reward=240.0 epsilon=0.699 loss=0.7938 dopamine_rpe=-1.000 kc_mbon=0.5861
+episode=85 step=3181 reward=230.0 epsilon=0.698 loss=1.2424 dopamine_rpe=-1.000 kc_mbon=0.5847
+episode=86 step=3190 reward=216.0 epsilon=0.697 loss=1.1997 dopamine_rpe=-1.000 kc_mbon=0.5838
+episode=87 step=3198 reward=239.0 epsilon=0.696 loss=1.2159 dopamine_rpe=-1.000 kc_mbon=0.5828
+episode=88 step=3275 reward=679.0 epsilon=0.689 loss=1.2146 dopamine_rpe=-1.000 kc_mbon=0.5758
+episode=89 step=3285 reward=157.0 epsilon=0.688 loss=1.2490 dopamine_rpe=-1.000 kc_mbon=0.5750
+episode=90 step=3362 reward=521.0 epsilon=0.681 loss=0.9761 dopamine_rpe=-1.000 kc_mbon=0.5676
+episode=91 step=3371 reward=150.0 epsilon=0.680 loss=0.8165 dopamine_rpe=-1.000 kc_mbon=0.5668
+episode=92 step=3382 reward=241.0 epsilon=0.679 loss=0.7844 dopamine_rpe=-1.000 kc_mbon=0.5660
+episode=93 step=3386 reward=252.0 epsilon=0.678 loss=0.5457 dopamine_rpe=-1.000 kc_mbon=0.5655
+episode=94 step=3390 reward=252.0 epsilon=0.678 loss=0.8276 dopamine_rpe=-1.000 kc_mbon=0.5652
+episode=95 step=3433 reward=688.0 epsilon=0.674 loss=0.8334 dopamine_rpe=-1.000 kc_mbon=0.5613
+episode=96 step=3513 reward=966.0 epsilon=0.666 loss=0.4604 dopamine_rpe=-1.000 kc_mbon=0.5544
+episode=97 step=3518 reward=231.0 epsilon=0.666 loss=0.9126 dopamine_rpe=-1.000 kc_mbon=0.5539
+episode=98 step=3529 reward=204.0 epsilon=0.665 loss=0.9220 dopamine_rpe=-1.000 kc_mbon=0.5527
+episode=99 step=3536 reward=190.0 epsilon=0.664 loss=0.7967 dopamine_rpe=-1.000 kc_mbon=0.5520
+episode=100 step=3551 reward=189.0 epsilon=0.663 loss=0.7280 dopamine_rpe=-1.000 kc_mbon=0.5507
+episode=101 step=3557 reward=244.0 epsilon=0.662 loss=0.9831 dopamine_rpe=-1.000 kc_mbon=0.5502
+episode=102 step=3561 reward=252.0 epsilon=0.662 loss=0.9799 dopamine_rpe=-1.000 kc_mbon=0.5498
+episode=103 step=3595 reward=794.0 epsilon=0.658 loss=0.7602 dopamine_rpe=-1.000 kc_mbon=0.5470
+episode=104 step=3606 reward=200.0 epsilon=0.657 loss=0.7378 dopamine_rpe=-1.000 kc_mbon=0.5459
+episode=105 step=3674 reward=688.0 epsilon=0.651 loss=0.6658 dopamine_rpe=-1.000 kc_mbon=0.5405
+episode=106 step=3679 reward=239.0 epsilon=0.650 loss=0.5431 dopamine_rpe=-1.000 kc_mbon=0.5402
+episode=107 step=3683 reward=249.0 epsilon=0.650 loss=0.6251 dopamine_rpe=-1.000 kc_mbon=0.5401
+episode=108 step=3726 reward=1010.0 epsilon=0.646 loss=0.8831 dopamine_rpe=-1.000 kc_mbon=0.5363
+episode=109 step=3745 reward=190.0 epsilon=0.644 loss=1.2037 dopamine_rpe=-1.000 kc_mbon=0.5353
+episode=110 step=3752 reward=205.0 epsilon=0.644 loss=1.4268 dopamine_rpe=-1.000 kc_mbon=0.5346
+episode=111 step=3761 reward=187.0 epsilon=0.643 loss=1.2294 dopamine_rpe=-1.000 kc_mbon=0.5337
+episode=112 step=3773 reward=141.0 epsilon=0.642 loss=0.9538 dopamine_rpe=-1.000 kc_mbon=0.5331
+episode=113 step=3784 reward=183.0 epsilon=0.641 loss=0.7728 dopamine_rpe=-1.000 kc_mbon=0.5322
+episode=114 step=3885 reward=956.0 epsilon=0.631 loss=0.5781 dopamine_rpe=-1.000 kc_mbon=0.5261
+episode=115 step=3896 reward=197.0 epsilon=0.630 loss=0.5514 dopamine_rpe=-1.000 kc_mbon=0.5258
+episode=116 step=3903 reward=225.0 epsilon=0.629 loss=0.7246 dopamine_rpe=-1.000 kc_mbon=0.5252
+episode=117 step=3972 reward=976.0 epsilon=0.623 loss=0.5896 dopamine_rpe=-1.000 kc_mbon=0.5203
+episode=118 step=3980 reward=194.0 epsilon=0.622 loss=0.9669 dopamine_rpe=-1.000 kc_mbon=0.5196
+episode=119 step=3985 reward=227.0 epsilon=0.621 loss=1.1320 dopamine_rpe=-1.000 kc_mbon=0.5193
+episode=120 step=3997 reward=233.0 epsilon=0.620 loss=0.9561 dopamine_rpe=-1.000 kc_mbon=0.5186
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=4000 env_steps_per_s=6.2
+episode=121 step=4008 reward=175.0 epsilon=0.619 loss=0.9916 dopamine_rpe=-1.000 kc_mbon=0.5180
+episode=122 step=4126 reward=908.0 epsilon=0.608 loss=0.8522 dopamine_rpe=-1.000 kc_mbon=0.5151
+episode=123 step=4133 reward=232.0 epsilon=0.607 loss=0.8258 dopamine_rpe=-1.000 kc_mbon=0.5145
+episode=124 step=4137 reward=241.0 epsilon=0.607 loss=0.6748 dopamine_rpe=-1.000 kc_mbon=0.5141
+episode=125 step=4141 reward=241.0 epsilon=0.607 loss=1.4312 dopamine_rpe=-1.000 kc_mbon=0.5138
+episode=126 step=4145 reward=241.0 epsilon=0.606 loss=1.7095 dopamine_rpe=-1.000 kc_mbon=0.5135
+episode=127 step=4154 reward=172.0 epsilon=0.605 loss=0.7109 dopamine_rpe=-1.000 kc_mbon=0.5128
+episode=128 step=4159 reward=222.0 epsilon=0.605 loss=0.4466 dopamine_rpe=-1.000 kc_mbon=0.5124
+episode=129 step=4170 reward=183.0 epsilon=0.604 loss=0.9035 dopamine_rpe=-1.000 kc_mbon=0.5117
+episode=130 step=4176 reward=223.0 epsilon=0.603 loss=0.9442 dopamine_rpe=-1.000 kc_mbon=0.5112
+episode=131 step=4183 reward=228.0 epsilon=0.603 loss=0.9776 dopamine_rpe=-1.000 kc_mbon=0.5107
+episode=132 step=4191 reward=223.0 epsilon=0.602 loss=1.6222 dopamine_rpe=-1.000 kc_mbon=0.5100
+episode=133 step=4195 reward=241.0 epsilon=0.601 loss=0.5741 dopamine_rpe=-1.000 kc_mbon=0.5097
+episode=134 step=4199 reward=241.0 epsilon=0.601 loss=0.7980 dopamine_rpe=-1.000 kc_mbon=0.5094
+episode=135 step=4205 reward=200.0 epsilon=0.601 loss=1.9801 dopamine_rpe=-1.000 kc_mbon=0.5091
+episode=136 step=4220 reward=167.0 epsilon=0.599 loss=0.4830 dopamine_rpe=-1.000 kc_mbon=0.5082
+episode=137 step=4228 reward=187.0 epsilon=0.598 loss=1.3858 dopamine_rpe=-1.000 kc_mbon=0.5077
+episode=138 step=4234 reward=227.0 epsilon=0.598 loss=1.5661 dopamine_rpe=-1.000 kc_mbon=0.5073
+episode=139 step=4303 reward=711.0 epsilon=0.591 loss=0.7410 dopamine_rpe=-1.000 kc_mbon=0.5023
+episode=140 step=4313 reward=203.0 epsilon=0.590 loss=1.0924 dopamine_rpe=-1.000 kc_mbon=0.5016
+episode=141 step=4322 reward=223.0 epsilon=0.589 loss=1.3710 dopamine_rpe=-1.000 kc_mbon=0.5009
+episode=142 step=4329 reward=198.0 epsilon=0.589 loss=1.3591 dopamine_rpe=-1.000 kc_mbon=0.5004
+episode=143 step=4334 reward=231.0 epsilon=0.588 loss=0.8502 dopamine_rpe=-1.000 kc_mbon=0.5000
+episode=144 step=4381 reward=724.0 epsilon=0.584 loss=1.4875 dopamine_rpe=-1.000 kc_mbon=0.4974
+episode=145 step=4386 reward=231.0 epsilon=0.583 loss=0.7821 dopamine_rpe=-1.000 kc_mbon=0.4970
+episode=146 step=4394 reward=206.0 epsilon=0.583 loss=1.3359 dopamine_rpe=-1.000 kc_mbon=0.4966
+episode=147 step=4404 reward=165.0 epsilon=0.582 loss=1.3910 dopamine_rpe=-1.000 kc_mbon=0.4959
+episode=148 step=4412 reward=207.0 epsilon=0.581 loss=0.4071 dopamine_rpe=-1.000 kc_mbon=0.4953
+episode=149 step=4425 reward=220.0 epsilon=0.580 loss=1.4857 dopamine_rpe=-1.000 kc_mbon=0.4945
+episode=150 step=4430 reward=231.0 epsilon=0.579 loss=0.7840 dopamine_rpe=-1.000 kc_mbon=0.4942
+episode=151 step=4437 reward=245.0 epsilon=0.578 loss=1.8993 dopamine_rpe=-1.000 kc_mbon=0.4937
+episode=152 step=4473 reward=806.0 epsilon=0.575 loss=1.5178 dopamine_rpe=-1.000 kc_mbon=0.4911
+episode=153 step=4508 reward=744.0 epsilon=0.572 loss=1.5089 dopamine_rpe=-1.000 kc_mbon=0.4892
+episode=154 step=4522 reward=187.0 epsilon=0.570 loss=1.4737 dopamine_rpe=-1.000 kc_mbon=0.4886
+episode=155 step=4532 reward=133.0 epsilon=0.569 loss=0.9168 dopamine_rpe=-1.000 kc_mbon=0.4880
+episode=156 step=4540 reward=207.0 epsilon=0.569 loss=1.8411 dopamine_rpe=-1.000 kc_mbon=0.4874
+episode=157 step=4548 reward=216.0 epsilon=0.568 loss=0.7747 dopamine_rpe=-1.000 kc_mbon=0.4870
+episode=158 step=4555 reward=224.0 epsilon=0.567 loss=1.6922 dopamine_rpe=-1.000 kc_mbon=0.4865
+episode=159 step=4559 reward=250.0 epsilon=0.567 loss=2.1886 dopamine_rpe=-1.000 kc_mbon=0.4862
+episode=160 step=4619 reward=755.0 epsilon=0.561 loss=1.4515 dopamine_rpe=-1.000 kc_mbon=0.4834
+episode=161 step=4625 reward=245.0 epsilon=0.561 loss=0.6837 dopamine_rpe=-1.000 kc_mbon=0.4831
+episode=162 step=4632 reward=238.0 epsilon=0.560 loss=0.5828 dopamine_rpe=-1.000 kc_mbon=0.4826
+episode=163 step=4688 reward=1338.0 epsilon=0.555 loss=1.2468 dopamine_rpe=-1.000 kc_mbon=0.4797
+episode=164 step=4698 reward=183.0 epsilon=0.554 loss=1.0126 dopamine_rpe=-1.000 kc_mbon=0.4792
+episode=165 step=4768 reward=963.0 epsilon=0.547 loss=0.7110 dopamine_rpe=-1.000 kc_mbon=0.4763
+episode=166 step=4849 reward=1253.0 epsilon=0.539 loss=1.0726 dopamine_rpe=-1.000 kc_mbon=0.4722
+episode=167 step=4854 reward=249.0 epsilon=0.539 loss=0.8892 dopamine_rpe=-1.000 kc_mbon=0.4721
+episode=168 step=4897 reward=684.0 epsilon=0.535 loss=0.8478 dopamine_rpe=-1.000 kc_mbon=0.4706
+episode=169 step=4904 reward=184.0 epsilon=0.534 loss=0.8683 dopamine_rpe=-1.000 kc_mbon=0.4702
+episode=170 step=4911 reward=201.0 epsilon=0.533 loss=0.9171 dopamine_rpe=-1.000 kc_mbon=0.4699
+episode=171 step=4916 reward=239.0 epsilon=0.533 loss=0.6116 dopamine_rpe=-1.000 kc_mbon=0.4696
+episode=172 step=4929 reward=173.0 epsilon=0.532 loss=1.2222 dopamine_rpe=-1.000 kc_mbon=0.4691
+episode=173 step=4934 reward=246.0 epsilon=0.531 loss=1.1047 dopamine_rpe=-1.000 kc_mbon=0.4689
+episode=174 step=4939 reward=249.0 epsilon=0.531 loss=1.4332 dopamine_rpe=-1.000 kc_mbon=0.4686
+episode=175 step=4946 reward=212.0 epsilon=0.530 loss=1.1447 dopamine_rpe=-1.000 kc_mbon=0.4682
+episode=176 step=4994 reward=773.0 epsilon=0.526 loss=1.2520 dopamine_rpe=-1.000 kc_mbon=0.4655
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=5000 env_steps_per_s=6.3
+saved_replay=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-replay.npz step=5000 transitions=5000
+episode=177 step=5013 reward=215.0 epsilon=0.524 loss=0.5420 dopamine_rpe=-1.000 kc_mbon=0.4654
+episode=178 step=5017 reward=241.0 epsilon=0.523 loss=1.1012 dopamine_rpe=-1.000 kc_mbon=0.4651
+episode=179 step=5080 reward=763.0 epsilon=0.517 loss=0.6133 dopamine_rpe=-1.000 kc_mbon=0.4628
+episode=180 step=5104 reward=165.0 epsilon=0.515 loss=0.7431 dopamine_rpe=-1.000 kc_mbon=0.4618
+episode=181 step=5156 reward=734.0 epsilon=0.510 loss=0.7158 dopamine_rpe=-1.000 kc_mbon=0.4601
+episode=182 step=5186 reward=596.0 epsilon=0.507 loss=0.7936 dopamine_rpe=-1.000 kc_mbon=0.4591
+episode=183 step=5194 reward=230.0 epsilon=0.507 loss=0.8185 dopamine_rpe=-1.000 kc_mbon=0.4589
+episode=184 step=5234 reward=691.0 epsilon=0.503 loss=1.7338 dopamine_rpe=-1.000 kc_mbon=0.4573
+episode=185 step=5246 reward=176.0 epsilon=0.502 loss=0.8701 dopamine_rpe=-1.000 kc_mbon=0.4568
+episode=186 step=5253 reward=205.0 epsilon=0.501 loss=0.6307 dopamine_rpe=-1.000 kc_mbon=0.4565
+episode=187 step=5330 reward=745.5 epsilon=0.494 loss=1.2685 dopamine_rpe=-1.000 kc_mbon=0.4535
+episode=188 step=5336 reward=220.0 epsilon=0.493 loss=1.0446 dopamine_rpe=-1.000 kc_mbon=0.4532
+episode=189 step=5344 reward=235.0 epsilon=0.492 loss=1.1517 dopamine_rpe=-1.000 kc_mbon=0.4529
+episode=190 step=5351 reward=207.0 epsilon=0.492 loss=1.2416 dopamine_rpe=-1.000 kc_mbon=0.4526
+episode=191 step=5375 reward=583.0 epsilon=0.489 loss=1.0210 dopamine_rpe=-1.000 kc_mbon=0.4518
+episode=192 step=5383 reward=178.0 epsilon=0.489 loss=1.1029 dopamine_rpe=-1.000 kc_mbon=0.4516
+episode=193 step=5387 reward=241.0 epsilon=0.488 loss=1.0970 dopamine_rpe=-1.000 kc_mbon=0.4514
+episode=194 step=5401 reward=232.0 epsilon=0.487 loss=0.6004 dopamine_rpe=-1.000 kc_mbon=0.4509
+episode=195 step=5408 reward=252.0 epsilon=0.486 loss=0.2544 dopamine_rpe=-1.000 kc_mbon=0.4506
+episode=196 step=5417 reward=197.0 epsilon=0.485 loss=1.0731 dopamine_rpe=-1.000 kc_mbon=0.4502
+episode=197 step=5479 reward=558.0 epsilon=0.479 loss=1.1588 dopamine_rpe=-1.000 kc_mbon=0.4484
+episode=198 step=5489 reward=196.0 epsilon=0.479 loss=0.6788 dopamine_rpe=-1.000 kc_mbon=0.4479
+episode=199 step=5504 reward=222.0 epsilon=0.477 loss=0.7768 dopamine_rpe=-1.000 kc_mbon=0.4476
+episode=200 step=5515 reward=205.0 epsilon=0.476 loss=0.8920 dopamine_rpe=-1.000 kc_mbon=0.4472
+episode=201 step=5525 reward=194.0 epsilon=0.475 loss=0.1753 dopamine_rpe=-1.000 kc_mbon=0.4469
+episode=202 step=5534 reward=209.0 epsilon=0.474 loss=2.0408 dopamine_rpe=-1.000 kc_mbon=0.4466
+episode=203 step=5539 reward=240.0 epsilon=0.474 loss=0.7544 dopamine_rpe=-1.000 kc_mbon=0.4464
+episode=204 step=5545 reward=231.0 epsilon=0.473 loss=0.9291 dopamine_rpe=-1.000 kc_mbon=0.4461
+episode=205 step=5552 reward=205.0 epsilon=0.473 loss=0.3212 dopamine_rpe=-1.000 kc_mbon=0.4460
+episode=206 step=5559 reward=242.0 epsilon=0.472 loss=0.7274 dopamine_rpe=-1.000 kc_mbon=0.4458
+episode=207 step=5582 reward=622.0 epsilon=0.470 loss=0.6688 dopamine_rpe=-1.000 kc_mbon=0.4451
+episode=208 step=5602 reward=144.0 epsilon=0.468 loss=0.3063 dopamine_rpe=-1.000 kc_mbon=0.4448
+episode=209 step=5612 reward=207.0 epsilon=0.467 loss=1.3945 dopamine_rpe=-1.000 kc_mbon=0.4444
+episode=210 step=5619 reward=233.0 epsilon=0.466 loss=1.0439 dopamine_rpe=-1.000 kc_mbon=0.4443
+episode=211 step=5624 reward=254.0 epsilon=0.466 loss=0.4745 dopamine_rpe=-1.000 kc_mbon=0.4441
+episode=212 step=5629 reward=233.0 epsilon=0.465 loss=1.0253 dopamine_rpe=-1.000 kc_mbon=0.4440
+episode=213 step=5635 reward=234.0 epsilon=0.465 loss=1.1371 dopamine_rpe=-1.000 kc_mbon=0.4438
+episode=214 step=5672 reward=730.0 epsilon=0.461 loss=1.0928 dopamine_rpe=-1.000 kc_mbon=0.4427
+episode=215 step=5684 reward=181.0 epsilon=0.460 loss=0.6344 dopamine_rpe=-1.000 kc_mbon=0.4424
+episode=216 step=5689 reward=229.0 epsilon=0.460 loss=1.1863 dopamine_rpe=-1.000 kc_mbon=0.4422
+episode=217 step=5696 reward=204.0 epsilon=0.459 loss=1.2339 dopamine_rpe=-1.000 kc_mbon=0.4419
+episode=218 step=5766 reward=987.0 epsilon=0.452 loss=0.6376 dopamine_rpe=-1.000 kc_mbon=0.4410
+episode=219 step=5771 reward=244.0 epsilon=0.452 loss=0.7826 dopamine_rpe=-1.000 kc_mbon=0.4408
+episode=220 step=5779 reward=207.0 epsilon=0.451 loss=1.2368 dopamine_rpe=-1.000 kc_mbon=0.4407
+episode=221 step=5786 reward=241.0 epsilon=0.450 loss=0.6512 dopamine_rpe=-1.000 kc_mbon=0.4404
+episode=222 step=5795 reward=226.0 epsilon=0.449 loss=0.5432 dopamine_rpe=-1.000 kc_mbon=0.4401
+episode=223 step=5804 reward=234.0 epsilon=0.449 loss=0.8690 dopamine_rpe=-1.000 kc_mbon=0.4399
+episode=224 step=5816 reward=197.0 epsilon=0.447 loss=1.5259 dopamine_rpe=-1.000 kc_mbon=0.4397
+episode=225 step=5875 reward=756.0 epsilon=0.442 loss=1.2218 dopamine_rpe=-1.000 kc_mbon=0.4390
+episode=226 step=5879 reward=249.0 epsilon=0.441 loss=1.3794 dopamine_rpe=-1.000 kc_mbon=0.4389
+episode=227 step=5883 reward=241.0 epsilon=0.441 loss=1.1603 dopamine_rpe=-1.000 kc_mbon=0.4387
+episode=228 step=5961 reward=659.0 epsilon=0.434 loss=1.1777 dopamine_rpe=-1.000 kc_mbon=0.4396
+episode=229 step=5971 reward=220.0 epsilon=0.433 loss=0.7261 dopamine_rpe=-1.000 kc_mbon=0.4393
+episode=230 step=5976 reward=227.0 epsilon=0.432 loss=1.0458 dopamine_rpe=-1.000 kc_mbon=0.4392
+episode=231 step=5980 reward=241.0 epsilon=0.432 loss=0.9015 dopamine_rpe=-1.000 kc_mbon=0.4390
+episode=232 step=5986 reward=228.0 epsilon=0.431 loss=0.4607 dopamine_rpe=-1.000 kc_mbon=0.4388
+episode=233 step=5990 reward=241.0 epsilon=0.431 loss=1.2924 dopamine_rpe=-1.000 kc_mbon=0.4388
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=6000 env_steps_per_s=6.3
+episode=234 step=6001 reward=188.0 epsilon=0.430 loss=0.6516 dopamine_rpe=-1.000 kc_mbon=0.4384
+episode=235 step=6006 reward=247.0 epsilon=0.429 loss=1.2522 dopamine_rpe=-1.000 kc_mbon=0.4383
+episode=236 step=6011 reward=237.0 epsilon=0.429 loss=1.5668 dopamine_rpe=-1.000 kc_mbon=0.4382
+episode=237 step=6016 reward=223.0 epsilon=0.428 loss=0.4355 dopamine_rpe=-1.000 kc_mbon=0.4380
+episode=238 step=6020 reward=249.0 epsilon=0.428 loss=1.6857 dopamine_rpe=-1.000 kc_mbon=0.4378
+episode=239 step=6040 reward=631.0 epsilon=0.426 loss=1.5253 dopamine_rpe=-1.000 kc_mbon=0.4371
+episode=240 step=6087 reward=709.0 epsilon=0.422 loss=1.0333 dopamine_rpe=-1.000 kc_mbon=0.4356
+episode=241 step=6111 reward=580.0 epsilon=0.419 loss=0.6691 dopamine_rpe=-1.000 kc_mbon=0.4350
+episode=242 step=6116 reward=238.0 epsilon=0.419 loss=1.4371 dopamine_rpe=-1.000 kc_mbon=0.4348
+episode=243 step=6121 reward=244.0 epsilon=0.419 loss=1.1702 dopamine_rpe=-1.000 kc_mbon=0.4346
+episode=244 step=6130 reward=214.0 epsilon=0.418 loss=0.9684 dopamine_rpe=-1.000 kc_mbon=0.4343
+episode=245 step=6134 reward=248.0 epsilon=0.417 loss=0.7432 dopamine_rpe=-1.000 kc_mbon=0.4341
+episode=246 step=6147 reward=229.0 epsilon=0.416 loss=2.1713 dopamine_rpe=-1.000 kc_mbon=0.4339
+episode=247 step=6161 reward=608.0 epsilon=0.415 loss=1.0373 dopamine_rpe=-1.000 kc_mbon=0.4334
+episode=248 step=6165 reward=249.0 epsilon=0.414 loss=2.2754 dopamine_rpe=-1.000 kc_mbon=0.4332
+episode=249 step=6171 reward=217.0 epsilon=0.414 loss=0.8543 dopamine_rpe=-1.000 kc_mbon=0.4330
+episode=250 step=6179 reward=177.0 epsilon=0.413 loss=0.7456 dopamine_rpe=-1.000 kc_mbon=0.4327
+episode=251 step=6185 reward=242.0 epsilon=0.412 loss=1.7762 dopamine_rpe=-1.000 kc_mbon=0.4326
+episode=252 step=6191 reward=234.0 epsilon=0.412 loss=0.6846 dopamine_rpe=-1.000 kc_mbon=0.4323
+episode=253 step=6195 reward=249.0 epsilon=0.411 loss=0.6539 dopamine_rpe=-1.000 kc_mbon=0.4322
+episode=254 step=6201 reward=199.0 epsilon=0.411 loss=0.8739 dopamine_rpe=-1.000 kc_mbon=0.4320
+episode=255 step=6212 reward=635.0 epsilon=0.410 loss=1.4969 dopamine_rpe=-1.000 kc_mbon=0.4316
+episode=256 step=6261 reward=556.0 epsilon=0.405 loss=1.2793 dopamine_rpe=-1.000 kc_mbon=0.4310
+episode=257 step=6266 reward=245.0 epsilon=0.405 loss=1.9369 dopamine_rpe=-1.000 kc_mbon=0.4308
+episode=258 step=6271 reward=254.0 epsilon=0.404 loss=3.1363 dopamine_rpe=-1.000 kc_mbon=0.4306
+episode=259 step=6281 reward=161.0 epsilon=0.403 loss=1.4293 dopamine_rpe=-1.000 kc_mbon=0.4304
+episode=260 step=6310 reward=735.0 epsilon=0.401 loss=1.5881 dopamine_rpe=-1.000 kc_mbon=0.4297
+episode=261 step=6316 reward=216.0 epsilon=0.400 loss=1.8108 dopamine_rpe=-1.000 kc_mbon=0.4295
+episode=262 step=6320 reward=246.0 epsilon=0.400 loss=1.0351 dopamine_rpe=-1.000 kc_mbon=0.4293
+episode=263 step=6327 reward=216.0 epsilon=0.399 loss=0.7983 dopamine_rpe=-1.000 kc_mbon=0.4291
+episode=264 step=6333 reward=214.0 epsilon=0.398 loss=0.8366 dopamine_rpe=-1.000 kc_mbon=0.4289
+episode=265 step=6342 reward=238.0 epsilon=0.398 loss=1.6433 dopamine_rpe=-1.000 kc_mbon=0.4286
+episode=266 step=6389 reward=1031.0 epsilon=0.393 loss=1.1516 dopamine_rpe=-1.000 kc_mbon=0.4277
+episode=267 step=6394 reward=245.0 epsilon=0.393 loss=1.5500 dopamine_rpe=-1.000 kc_mbon=0.4275
+episode=268 step=6400 reward=238.0 epsilon=0.392 loss=1.4340 dopamine_rpe=-1.000 kc_mbon=0.4273
+episode=269 step=6468 reward=1073.0 epsilon=0.386 loss=0.3425 dopamine_rpe=-1.000 kc_mbon=0.4253
+episode=270 step=6477 reward=159.0 epsilon=0.385 loss=1.8473 dopamine_rpe=-1.000 kc_mbon=0.4250
+episode=271 step=6482 reward=234.0 epsilon=0.384 loss=0.8406 dopamine_rpe=-1.000 kc_mbon=0.4249
+episode=272 step=6555 reward=975.0 epsilon=0.377 loss=1.0626 dopamine_rpe=-1.000 kc_mbon=0.4230
+episode=273 step=6560 reward=249.0 epsilon=0.377 loss=0.9245 dopamine_rpe=-1.000 kc_mbon=0.4229
+episode=274 step=6565 reward=233.0 epsilon=0.376 loss=0.9129 dopamine_rpe=-1.000 kc_mbon=0.4227
+episode=275 step=6570 reward=227.0 epsilon=0.376 loss=0.3714 dopamine_rpe=-1.000 kc_mbon=0.4225
+episode=276 step=6584 reward=592.0 epsilon=0.375 loss=1.4645 dopamine_rpe=-1.000 kc_mbon=0.4223
+episode=277 step=6588 reward=248.0 epsilon=0.374 loss=0.7440 dopamine_rpe=-1.000 kc_mbon=0.4223
+episode=278 step=6600 reward=191.0 epsilon=0.373 loss=0.7054 dopamine_rpe=-1.000 kc_mbon=0.4220
+episode=279 step=6609 reward=226.0 epsilon=0.372 loss=1.0225 dopamine_rpe=-1.000 kc_mbon=0.4217
+episode=280 step=6615 reward=246.0 epsilon=0.372 loss=2.1632 dopamine_rpe=-1.000 kc_mbon=0.4215
+episode=281 step=6744 reward=587.0 epsilon=0.359 loss=0.4631 dopamine_rpe=-1.000 kc_mbon=0.4208
+episode=282 step=6748 reward=241.0 epsilon=0.359 loss=1.0411 dopamine_rpe=-1.000 kc_mbon=0.4207
+episode=283 step=6752 reward=241.0 epsilon=0.359 loss=1.2417 dopamine_rpe=-1.000 kc_mbon=0.4206
+episode=284 step=6757 reward=244.0 epsilon=0.358 loss=1.0745 dopamine_rpe=-1.000 kc_mbon=0.4205
+episode=285 step=6761 reward=241.0 epsilon=0.358 loss=0.9552 dopamine_rpe=-1.000 kc_mbon=0.4204
+episode=286 step=6766 reward=238.0 epsilon=0.357 loss=1.3073 dopamine_rpe=-1.000 kc_mbon=0.4202
+episode=287 step=6770 reward=241.0 epsilon=0.357 loss=1.0261 dopamine_rpe=-1.000 kc_mbon=0.4201
+episode=288 step=6776 reward=212.0 epsilon=0.356 loss=1.5054 dopamine_rpe=-1.000 kc_mbon=0.4201
+episode=289 step=6780 reward=241.0 epsilon=0.356 loss=0.4505 dopamine_rpe=-1.000 kc_mbon=0.4200
+episode=290 step=6852 reward=659.0 epsilon=0.349 loss=0.8934 dopamine_rpe=-1.000 kc_mbon=0.4188
+episode=291 step=6856 reward=241.0 epsilon=0.349 loss=0.7934 dopamine_rpe=-1.000 kc_mbon=0.4186
+episode=292 step=6888 reward=797.0 epsilon=0.346 loss=1.1433 dopamine_rpe=-1.000 kc_mbon=0.4179
+episode=293 step=6895 reward=228.0 epsilon=0.345 loss=0.6884 dopamine_rpe=-1.000 kc_mbon=0.4177
+episode=294 step=6899 reward=241.0 epsilon=0.345 loss=2.0481 dopamine_rpe=-1.000 kc_mbon=0.4176
+episode=295 step=6907 reward=213.0 epsilon=0.344 loss=1.2807 dopamine_rpe=-1.000 kc_mbon=0.4175
+episode=296 step=6913 reward=231.0 epsilon=0.343 loss=3.6605 dopamine_rpe=-1.000 kc_mbon=0.4174
+episode=297 step=6917 reward=241.0 epsilon=0.343 loss=0.9534 dopamine_rpe=-1.000 kc_mbon=0.4172
+episode=298 step=6921 reward=249.0 epsilon=0.343 loss=1.4073 dopamine_rpe=-1.000 kc_mbon=0.4171
+episode=299 step=6953 reward=622.0 epsilon=0.339 loss=0.4407 dopamine_rpe=-1.000 kc_mbon=0.4166
+episode=300 step=6957 reward=241.0 epsilon=0.339 loss=2.5288 dopamine_rpe=-1.000 kc_mbon=0.4166
+episode=301 step=6965 reward=236.0 epsilon=0.338 loss=0.4823 dopamine_rpe=-1.000 kc_mbon=0.4164
+episode=302 step=6969 reward=241.0 epsilon=0.338 loss=1.5850 dopamine_rpe=-1.000 kc_mbon=0.4163
+episode=303 step=6973 reward=242.0 epsilon=0.338 loss=1.6545 dopamine_rpe=-1.000 kc_mbon=0.4161
+episode=304 step=6982 reward=200.0 epsilon=0.337 loss=1.6151 dopamine_rpe=-1.000 kc_mbon=0.4159
+episode=305 step=6986 reward=241.0 epsilon=0.336 loss=1.3557 dopamine_rpe=-1.000 kc_mbon=0.4158
+episode=306 step=6994 reward=161.0 epsilon=0.336 loss=1.0969 dopamine_rpe=-1.000 kc_mbon=0.4156
+episode=307 step=6999 reward=229.0 epsilon=0.335 loss=0.4985 dopamine_rpe=-1.000 kc_mbon=0.4155
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=7000 env_steps_per_s=6.3
+episode=308 step=7081 reward=652.0 epsilon=0.327 loss=1.5246 dopamine_rpe=-1.000 kc_mbon=0.4142
+episode=309 step=7090 reward=205.0 epsilon=0.326 loss=0.8578 dopamine_rpe=-1.000 kc_mbon=0.4140
+episode=310 step=7094 reward=241.0 epsilon=0.326 loss=1.0394 dopamine_rpe=-1.000 kc_mbon=0.4138
+episode=311 step=7123 reward=626.0 epsilon=0.323 loss=1.1510 dopamine_rpe=-1.000 kc_mbon=0.4134
+episode=312 step=7131 reward=203.0 epsilon=0.323 loss=0.6411 dopamine_rpe=-1.000 kc_mbon=0.4131
+episode=313 step=7135 reward=246.0 epsilon=0.322 loss=1.1998 dopamine_rpe=-1.000 kc_mbon=0.4130
+episode=314 step=7140 reward=229.0 epsilon=0.322 loss=0.9109 dopamine_rpe=-1.000 kc_mbon=0.4129
+episode=315 step=7159 reward=639.0 epsilon=0.320 loss=0.5891 dopamine_rpe=-1.000 kc_mbon=0.4125
+episode=316 step=7231 reward=696.0 epsilon=0.313 loss=0.9067 dopamine_rpe=-1.000 kc_mbon=0.4110
+episode=317 step=7236 reward=229.0 epsilon=0.313 loss=1.1079 dopamine_rpe=-1.000 kc_mbon=0.4110
+episode=318 step=7240 reward=241.0 epsilon=0.312 loss=0.9892 dopamine_rpe=-1.000 kc_mbon=0.4110
+episode=319 step=7296 reward=696.0 epsilon=0.307 loss=0.6219 dopamine_rpe=-1.000 kc_mbon=0.4101
+episode=320 step=7300 reward=252.0 epsilon=0.306 loss=1.6373 dopamine_rpe=-1.000 kc_mbon=0.4100
+episode=321 step=7317 reward=588.0 epsilon=0.305 loss=0.6517 dopamine_rpe=-1.000 kc_mbon=0.4097
+episode=322 step=7322 reward=238.0 epsilon=0.304 loss=1.0718 dopamine_rpe=-1.000 kc_mbon=0.4096
+episode=323 step=7366 reward=1020.0 epsilon=0.300 loss=0.7366 dopamine_rpe=-1.000 kc_mbon=0.4089
+episode=324 step=7373 reward=190.0 epsilon=0.300 loss=0.9313 dopamine_rpe=-1.000 kc_mbon=0.4088
+episode=325 step=7381 reward=192.0 epsilon=0.299 loss=0.4110 dopamine_rpe=-1.000 kc_mbon=0.4087
+episode=326 step=7403 reward=593.0 epsilon=0.297 loss=0.8594 dopamine_rpe=-1.000 kc_mbon=0.4085
+episode=327 step=7407 reward=241.0 epsilon=0.296 loss=0.8086 dopamine_rpe=-1.000 kc_mbon=0.4084
+episode=328 step=7411 reward=242.0 epsilon=0.296 loss=0.8254 dopamine_rpe=-1.000 kc_mbon=0.4083
+episode=329 step=7428 reward=610.0 epsilon=0.294 loss=1.5645 dopamine_rpe=-1.000 kc_mbon=0.4079
+episode=330 step=7444 reward=92.0 epsilon=0.293 loss=1.0477 dopamine_rpe=-1.000 kc_mbon=0.4078
+episode=331 step=7450 reward=238.0 epsilon=0.292 loss=1.0830 dopamine_rpe=-1.000 kc_mbon=0.4076
+episode=332 step=7459 reward=236.0 epsilon=0.291 loss=0.6858 dopamine_rpe=-1.000 kc_mbon=0.4074
+episode=333 step=7463 reward=241.0 epsilon=0.291 loss=1.6377 dopamine_rpe=-1.000 kc_mbon=0.4073
+episode=334 step=7474 reward=137.0 epsilon=0.290 loss=0.4124 dopamine_rpe=-1.000 kc_mbon=0.4073
+episode=335 step=7497 reward=606.0 epsilon=0.288 loss=0.5368 dopamine_rpe=-1.000 kc_mbon=0.4069
+episode=336 step=7548 reward=769.0 epsilon=0.283 loss=0.5191 dopamine_rpe=-1.000 kc_mbon=0.4060
+episode=337 step=7607 reward=800.0 epsilon=0.277 loss=1.3808 dopamine_rpe=-1.000 kc_mbon=0.4054
+episode=338 step=7672 reward=1013.0 epsilon=0.271 loss=0.6416 dopamine_rpe=-1.000 kc_mbon=0.4053
+episode=339 step=7695 reward=590.0 epsilon=0.269 loss=1.0456 dopamine_rpe=-1.000 kc_mbon=0.4049
+episode=340 step=7718 reward=615.0 epsilon=0.267 loss=0.5866 dopamine_rpe=-1.000 kc_mbon=0.4045
+episode=341 step=7724 reward=215.0 epsilon=0.266 loss=0.6100 dopamine_rpe=-1.000 kc_mbon=0.4043
+episode=342 step=7728 reward=241.0 epsilon=0.266 loss=0.8430 dopamine_rpe=-1.000 kc_mbon=0.4043
+episode=343 step=7772 reward=738.0 epsilon=0.262 loss=0.2482 dopamine_rpe=-1.000 kc_mbon=0.4043
+episode=344 step=7777 reward=229.0 epsilon=0.261 loss=1.5832 dopamine_rpe=-1.000 kc_mbon=0.4043
+episode=345 step=7784 reward=230.0 epsilon=0.261 loss=1.3284 dopamine_rpe=-1.000 kc_mbon=0.4042
+episode=346 step=7790 reward=229.0 epsilon=0.260 loss=1.0278 dopamine_rpe=-1.000 kc_mbon=0.4040
+episode=347 step=7823 reward=720.0 epsilon=0.257 loss=0.7054 dopamine_rpe=-1.000 kc_mbon=0.4038
+episode=348 step=7832 reward=143.0 epsilon=0.256 loss=0.8046 dopamine_rpe=-1.000 kc_mbon=0.4037
+episode=349 step=7841 reward=200.0 epsilon=0.255 loss=0.4837 dopamine_rpe=-1.000 kc_mbon=0.4038
+episode=350 step=7881 reward=736.0 epsilon=0.251 loss=0.7703 dopamine_rpe=-1.000 kc_mbon=0.4034
+episode=351 step=7885 reward=241.0 epsilon=0.251 loss=0.8172 dopamine_rpe=-1.000 kc_mbon=0.4033
+episode=352 step=7889 reward=241.0 epsilon=0.251 loss=1.7143 dopamine_rpe=-1.000 kc_mbon=0.4032
+episode=353 step=7907 reward=593.0 epsilon=0.249 loss=0.9385 dopamine_rpe=-1.000 kc_mbon=0.4029
+episode=354 step=7911 reward=241.0 epsilon=0.248 loss=1.0020 dopamine_rpe=-1.000 kc_mbon=0.4028
+episode=355 step=7917 reward=231.0 epsilon=0.248 loss=0.5152 dopamine_rpe=-1.000 kc_mbon=0.4028
+episode=356 step=7921 reward=241.0 epsilon=0.248 loss=1.1176 dopamine_rpe=-1.000 kc_mbon=0.4027
+episode=357 step=7935 reward=181.0 epsilon=0.246 loss=0.3941 dopamine_rpe=-1.000 kc_mbon=0.4024
+episode=358 step=7941 reward=231.0 epsilon=0.246 loss=0.5830 dopamine_rpe=-1.000 kc_mbon=0.4024
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=8000 env_steps_per_s=6.3
+episode=359 step=8049 reward=640.0 epsilon=0.235 loss=0.5946 dopamine_rpe=-1.000 kc_mbon=0.4016
+episode=360 step=8057 reward=219.0 epsilon=0.235 loss=0.7406 dopamine_rpe=-1.000 kc_mbon=0.4015
+episode=361 step=8063 reward=231.0 epsilon=0.234 loss=0.7847 dopamine_rpe=-1.000 kc_mbon=0.4013
+episode=362 step=8071 reward=190.0 epsilon=0.233 loss=0.5192 dopamine_rpe=-1.000 kc_mbon=0.4014
+episode=363 step=8077 reward=231.0 epsilon=0.233 loss=0.4883 dopamine_rpe=-1.000 kc_mbon=0.4013
+episode=364 step=8082 reward=233.0 epsilon=0.232 loss=0.6935 dopamine_rpe=-1.000 kc_mbon=0.4014
+episode=365 step=8086 reward=241.0 epsilon=0.232 loss=1.3206 dopamine_rpe=-1.000 kc_mbon=0.4013
+episode=366 step=8105 reward=593.0 epsilon=0.230 loss=0.4330 dopamine_rpe=-1.000 kc_mbon=0.4010
+episode=367 step=8124 reward=597.0 epsilon=0.228 loss=0.3878 dopamine_rpe=-1.000 kc_mbon=0.4008
+episode=368 step=8134 reward=213.0 epsilon=0.227 loss=1.0493 dopamine_rpe=-1.000 kc_mbon=0.4009
+episode=369 step=8155 reward=583.0 epsilon=0.225 loss=0.6367 dopamine_rpe=-1.000 kc_mbon=0.4006
+episode=370 step=8235 reward=690.0 epsilon=0.218 loss=0.8667 dopamine_rpe=-1.000 kc_mbon=0.4004
+episode=371 step=8242 reward=177.0 epsilon=0.217 loss=0.6888 dopamine_rpe=-1.000 kc_mbon=0.4004
+episode=372 step=8263 reward=639.0 epsilon=0.215 loss=1.0106 dopamine_rpe=-1.000 kc_mbon=0.4001
+episode=373 step=8268 reward=223.0 epsilon=0.215 loss=1.1075 dopamine_rpe=-1.000 kc_mbon=0.4000
+episode=374 step=8273 reward=231.0 epsilon=0.214 loss=0.3986 dopamine_rpe=-1.000 kc_mbon=0.3999
+episode=375 step=8277 reward=241.0 epsilon=0.214 loss=0.3057 dopamine_rpe=-1.000 kc_mbon=0.3998
+episode=376 step=8334 reward=759.0 epsilon=0.208 loss=0.1867 dopamine_rpe=-1.000 kc_mbon=0.3998
+episode=377 step=8340 reward=220.0 epsilon=0.208 loss=0.6056 dopamine_rpe=-1.000 kc_mbon=0.3997
+episode=378 step=8344 reward=246.0 epsilon=0.207 loss=0.9624 dopamine_rpe=-1.000 kc_mbon=0.3996
+episode=379 step=8348 reward=241.0 epsilon=0.207 loss=0.4830 dopamine_rpe=-1.000 kc_mbon=0.3996
+episode=380 step=8354 reward=231.0 epsilon=0.206 loss=1.1809 dopamine_rpe=-1.000 kc_mbon=0.3994
+episode=381 step=8358 reward=249.0 epsilon=0.206 loss=1.3876 dopamine_rpe=-1.000 kc_mbon=0.3995
+episode=382 step=8365 reward=232.0 epsilon=0.205 loss=0.4909 dopamine_rpe=-1.000 kc_mbon=0.3994
+episode=383 step=8399 reward=598.0 epsilon=0.202 loss=0.5425 dopamine_rpe=-1.000 kc_mbon=0.3994
+episode=384 step=8408 reward=223.0 epsilon=0.201 loss=1.1580 dopamine_rpe=-1.000 kc_mbon=0.3994
+episode=385 step=8495 reward=962.0 epsilon=0.193 loss=0.9159 dopamine_rpe=-1.000 kc_mbon=0.3984
+episode=386 step=8501 reward=215.0 epsilon=0.192 loss=0.8937 dopamine_rpe=-1.000 kc_mbon=0.3983
+episode=387 step=8508 reward=227.0 epsilon=0.192 loss=0.5912 dopamine_rpe=-1.000 kc_mbon=0.3982
+episode=388 step=8512 reward=241.0 epsilon=0.191 loss=0.6502 dopamine_rpe=-1.000 kc_mbon=0.3982
+episode=389 step=8516 reward=246.0 epsilon=0.191 loss=1.3938 dopamine_rpe=-1.000 kc_mbon=0.3981
+episode=390 step=8634 reward=1204.0 epsilon=0.180 loss=0.6608 dopamine_rpe=-1.000 kc_mbon=0.3973
+episode=391 step=8638 reward=249.0 epsilon=0.179 loss=0.3915 dopamine_rpe=-1.000 kc_mbon=0.3972
+episode=392 step=8651 reward=617.0 epsilon=0.178 loss=0.9173 dopamine_rpe=-1.000 kc_mbon=0.3970
+episode=393 step=8656 reward=238.0 epsilon=0.178 loss=0.9028 dopamine_rpe=-1.000 kc_mbon=0.3969
+episode=394 step=8671 reward=621.0 epsilon=0.176 loss=1.1481 dopamine_rpe=-1.000 kc_mbon=0.3966
+episode=395 step=8675 reward=252.0 epsilon=0.176 loss=0.4956 dopamine_rpe=-1.000 kc_mbon=0.3966
+episode=396 step=8679 reward=252.0 epsilon=0.175 loss=1.7143 dopamine_rpe=-1.000 kc_mbon=0.3965
+episode=397 step=8683 reward=252.0 epsilon=0.175 loss=1.3622 dopamine_rpe=-1.000 kc_mbon=0.3964
+episode=398 step=8687 reward=252.0 epsilon=0.175 loss=1.1564 dopamine_rpe=-1.000 kc_mbon=0.3964
+episode=399 step=8691 reward=252.0 epsilon=0.174 loss=0.9532 dopamine_rpe=-1.000 kc_mbon=0.3963
+episode=400 step=8718 reward=1037.0 epsilon=0.172 loss=0.4916 dopamine_rpe=-1.000 kc_mbon=0.3960
+episode=401 step=8722 reward=249.0 epsilon=0.171 loss=0.8770 dopamine_rpe=-1.000 kc_mbon=0.3960
+episode=402 step=8746 reward=634.0 epsilon=0.169 loss=0.3857 dopamine_rpe=-1.000 kc_mbon=0.3958
+episode=403 step=8755 reward=611.0 epsilon=0.168 loss=0.5168 dopamine_rpe=-1.000 kc_mbon=0.3957
+episode=404 step=8761 reward=229.0 epsilon=0.168 loss=0.3754 dopamine_rpe=-1.000 kc_mbon=0.3956
+episode=405 step=8765 reward=249.0 epsilon=0.167 loss=2.1130 dopamine_rpe=-1.000 kc_mbon=0.3957
+episode=406 step=8769 reward=241.0 epsilon=0.167 loss=1.1576 dopamine_rpe=-1.000 kc_mbon=0.3956
+episode=407 step=8804 reward=1033.0 epsilon=0.164 loss=0.5725 dopamine_rpe=-1.000 kc_mbon=0.3953
+episode=408 step=8808 reward=241.0 epsilon=0.163 loss=1.1300 dopamine_rpe=-1.000 kc_mbon=0.3952
+episode=409 step=8837 reward=1039.0 epsilon=0.160 loss=0.7325 dopamine_rpe=-1.000 kc_mbon=0.3951
+episode=410 step=8872 reward=681.0 epsilon=0.157 loss=0.9654 dopamine_rpe=-1.000 kc_mbon=0.3948
+episode=411 step=8878 reward=215.0 epsilon=0.157 loss=0.9862 dopamine_rpe=-1.000 kc_mbon=0.3947
+episode=412 step=8882 reward=249.0 epsilon=0.156 loss=0.8030 dopamine_rpe=-1.000 kc_mbon=0.3946
+episode=413 step=8886 reward=249.0 epsilon=0.156 loss=0.5184 dopamine_rpe=-1.000 kc_mbon=0.3946
+episode=414 step=8890 reward=252.0 epsilon=0.155 loss=1.1123 dopamine_rpe=-1.000 kc_mbon=0.3945
+episode=415 step=8921 reward=1030.0 epsilon=0.153 loss=0.4257 dopamine_rpe=-1.000 kc_mbon=0.3946
+episode=416 step=8927 reward=217.0 epsilon=0.152 loss=0.7922 dopamine_rpe=-1.000 kc_mbon=0.3945
+episode=417 step=8931 reward=249.0 epsilon=0.152 loss=0.6616 dopamine_rpe=-1.000 kc_mbon=0.3945
+episode=418 step=8935 reward=249.0 epsilon=0.151 loss=1.2160 dopamine_rpe=-1.000 kc_mbon=0.3944
+episode=419 step=8968 reward=798.0 epsilon=0.148 loss=0.8624 dopamine_rpe=-1.000 kc_mbon=0.3943
+episode=420 step=8974 reward=244.0 epsilon=0.147 loss=0.4371 dopamine_rpe=-1.000 kc_mbon=0.3942
+episode=421 step=8979 reward=233.0 epsilon=0.147 loss=0.7163 dopamine_rpe=-1.000 kc_mbon=0.3941
+episode=422 step=8983 reward=250.0 epsilon=0.147 loss=0.2852 dopamine_rpe=-1.000 kc_mbon=0.3941
+episode=423 step=8990 reward=241.0 epsilon=0.146 loss=0.8274 dopamine_rpe=-1.000 kc_mbon=0.3941
+episode=424 step=8995 reward=244.0 epsilon=0.145 loss=0.2403 dopamine_rpe=-1.000 kc_mbon=0.3940
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=9000 env_steps_per_s=6.3
+episode=425 step=9001 reward=223.0 epsilon=0.145 loss=1.0287 dopamine_rpe=-1.000 kc_mbon=0.3939
+episode=426 step=9042 reward=1107.0 epsilon=0.141 loss=0.7399 dopamine_rpe=-1.000 kc_mbon=0.3934
+episode=427 step=9047 reward=245.0 epsilon=0.141 loss=0.8015 dopamine_rpe=-1.000 kc_mbon=0.3935
+episode=428 step=9059 reward=623.0 epsilon=0.139 loss=1.4269 dopamine_rpe=-1.000 kc_mbon=0.3933
+episode=429 step=9063 reward=252.0 epsilon=0.139 loss=0.4490 dopamine_rpe=-1.000 kc_mbon=0.3932
+episode=430 step=9091 reward=1034.0 epsilon=0.136 loss=0.8085 dopamine_rpe=-1.000 kc_mbon=0.3929
+episode=431 step=9126 reward=1021.0 epsilon=0.133 loss=0.6660 dopamine_rpe=-1.000 kc_mbon=0.3926
+episode=432 step=9130 reward=241.0 epsilon=0.133 loss=0.7684 dopamine_rpe=-1.000 kc_mbon=0.3926
+episode=433 step=9136 reward=237.0 epsilon=0.132 loss=0.6205 dopamine_rpe=-1.000 kc_mbon=0.3926
+episode=434 step=9156 reward=639.0 epsilon=0.130 loss=1.4959 dopamine_rpe=-1.000 kc_mbon=0.3924
+episode=435 step=9169 reward=606.0 epsilon=0.129 loss=0.8102 dopamine_rpe=-1.000 kc_mbon=0.3927
+episode=436 step=9173 reward=252.0 epsilon=0.129 loss=0.5513 dopamine_rpe=-1.000 kc_mbon=0.3928
+episode=437 step=9177 reward=252.0 epsilon=0.128 loss=0.3094 dopamine_rpe=-1.000 kc_mbon=0.3927
+episode=438 step=9181 reward=241.0 epsilon=0.128 loss=0.2067 dopamine_rpe=-1.000 kc_mbon=0.3926
+episode=439 step=9221 reward=739.0 epsilon=0.124 loss=0.7316 dopamine_rpe=-1.000 kc_mbon=0.3924
+episode=440 step=9241 reward=591.0 epsilon=0.122 loss=0.8413 dopamine_rpe=-1.000 kc_mbon=0.3922
+episode=441 step=9245 reward=252.0 epsilon=0.122 loss=0.5885 dopamine_rpe=-1.000 kc_mbon=0.3922
+episode=442 step=9249 reward=249.0 epsilon=0.121 loss=0.4340 dopamine_rpe=-1.000 kc_mbon=0.3922
+episode=443 step=9264 reward=619.0 epsilon=0.120 loss=1.8475 dopamine_rpe=-1.000 kc_mbon=0.3920
+episode=444 step=9270 reward=243.0 epsilon=0.119 loss=1.2158 dopamine_rpe=-1.000 kc_mbon=0.3919
+episode=445 step=9282 reward=615.0 epsilon=0.118 loss=0.1020 dopamine_rpe=-1.000 kc_mbon=0.3917
+episode=446 step=9309 reward=631.0 epsilon=0.116 loss=1.1505 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=447 step=9325 reward=603.0 epsilon=0.114 loss=0.5252 dopamine_rpe=-1.000 kc_mbon=0.3917
+episode=448 step=9331 reward=202.0 epsilon=0.114 loss=0.7423 dopamine_rpe=-1.000 kc_mbon=0.3917
+episode=449 step=9335 reward=249.0 epsilon=0.113 loss=0.7804 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=450 step=9339 reward=241.0 epsilon=0.113 loss=0.9832 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=451 step=9343 reward=249.0 epsilon=0.112 loss=0.5691 dopamine_rpe=-1.000 kc_mbon=0.3917
+episode=452 step=9350 reward=232.0 epsilon=0.112 loss=0.3278 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=453 step=9354 reward=241.0 epsilon=0.111 loss=1.0038 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=454 step=9451 reward=938.0 epsilon=0.102 loss=0.3927 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=455 step=9455 reward=252.0 epsilon=0.102 loss=0.4196 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=456 step=9465 reward=610.0 epsilon=0.101 loss=0.2953 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=457 step=9497 reward=744.0 epsilon=0.098 loss=1.1701 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=458 step=9523 reward=733.0 epsilon=0.095 loss=1.0999 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=459 step=9529 reward=231.0 epsilon=0.095 loss=0.2303 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=460 step=9542 reward=606.0 epsilon=0.094 loss=1.0351 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=461 step=9546 reward=241.0 epsilon=0.093 loss=0.6488 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=462 step=9590 reward=1025.0 epsilon=0.089 loss=0.4087 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=463 step=9615 reward=605.0 epsilon=0.087 loss=1.0314 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=464 step=9619 reward=241.0 epsilon=0.086 loss=0.4670 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=465 step=9632 reward=607.0 epsilon=0.085 loss=0.9693 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=466 step=9636 reward=249.0 epsilon=0.085 loss=0.7002 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=467 step=9669 reward=1306.0 epsilon=0.081 loss=0.4243 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=468 step=9695 reward=584.0 epsilon=0.079 loss=0.2778 dopamine_rpe=-1.000 kc_mbon=0.3905
+episode=469 step=9700 reward=230.0 epsilon=0.079 loss=0.3400 dopamine_rpe=-1.000 kc_mbon=0.3905
+episode=470 step=9704 reward=241.0 epsilon=0.078 loss=0.7073 dopamine_rpe=-1.000 kc_mbon=0.3904
+episode=471 step=9708 reward=241.0 epsilon=0.078 loss=0.7604 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=472 step=9847 reward=606.0 epsilon=0.065 loss=0.3685 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=473 step=9851 reward=241.0 epsilon=0.064 loss=0.1222 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=474 step=9855 reward=241.0 epsilon=0.064 loss=0.4952 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=475 step=9859 reward=241.0 epsilon=0.063 loss=0.8100 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=476 step=9863 reward=241.0 epsilon=0.063 loss=1.1615 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=477 step=9867 reward=241.0 epsilon=0.063 loss=0.5865 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=478 step=9872 reward=227.0 epsilon=0.062 loss=0.9272 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=479 step=9964 reward=725.5 epsilon=0.053 loss=0.4202 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=480 step=9968 reward=241.0 epsilon=0.053 loss=0.3304 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=481 step=9995 reward=567.0 epsilon=0.050 loss=1.0008 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=482 step=9999 reward=241.0 epsilon=0.050 loss=0.7327 dopamine_rpe=-1.000 kc_mbon=0.3912
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=10000 env_steps_per_s=6.3
+saved_replay=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-replay.npz step=10000 transitions=10000
+episode=483 step=10003 reward=241.0 epsilon=0.050 loss=0.6866 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=484 step=10007 reward=241.0 epsilon=0.050 loss=0.1241 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=485 step=10011 reward=241.0 epsilon=0.050 loss=0.4440 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=486 step=10015 reward=241.0 epsilon=0.050 loss=0.5676 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=487 step=10019 reward=248.0 epsilon=0.050 loss=0.2336 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=488 step=10034 reward=619.0 epsilon=0.050 loss=0.7428 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=489 step=10057 reward=620.0 epsilon=0.050 loss=0.4259 dopamine_rpe=-1.000 kc_mbon=0.3904
+episode=490 step=10062 reward=245.0 epsilon=0.050 loss=0.6558 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=491 step=10093 reward=1039.0 epsilon=0.050 loss=0.4544 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=492 step=10106 reward=623.0 epsilon=0.050 loss=0.7079 dopamine_rpe=-1.000 kc_mbon=0.3901
+episode=493 step=10121 reward=627.0 epsilon=0.050 loss=1.1865 dopamine_rpe=-1.000 kc_mbon=0.3899
+episode=494 step=10129 reward=212.0 epsilon=0.050 loss=0.7681 dopamine_rpe=-1.000 kc_mbon=0.3898
+episode=495 step=10133 reward=241.0 epsilon=0.050 loss=0.9864 dopamine_rpe=-1.000 kc_mbon=0.3899
+episode=496 step=10137 reward=241.0 epsilon=0.050 loss=0.4754 dopamine_rpe=-1.000 kc_mbon=0.3898
+episode=497 step=10142 reward=238.0 epsilon=0.050 loss=0.9698 dopamine_rpe=-1.000 kc_mbon=0.3897
+episode=498 step=10146 reward=241.0 epsilon=0.050 loss=1.6250 dopamine_rpe=-1.000 kc_mbon=0.3897
+episode=499 step=10150 reward=241.0 epsilon=0.050 loss=0.7244 dopamine_rpe=-1.000 kc_mbon=0.3896
+episode=500 step=10166 reward=590.0 epsilon=0.050 loss=0.3749 dopamine_rpe=-1.000 kc_mbon=0.3896
+episode=501 step=10206 reward=787.0 epsilon=0.050 loss=1.8570 dopamine_rpe=-1.000 kc_mbon=0.3897
+episode=502 step=10292 reward=540.0 epsilon=0.050 loss=0.6247 dopamine_rpe=-1.000 kc_mbon=0.3900
+episode=503 step=10297 reward=231.0 epsilon=0.050 loss=0.6926 dopamine_rpe=-1.000 kc_mbon=0.3899
+episode=504 step=10301 reward=241.0 epsilon=0.050 loss=0.9767 dopamine_rpe=-1.000 kc_mbon=0.3900
+episode=505 step=10305 reward=241.0 epsilon=0.050 loss=0.1604 dopamine_rpe=-1.000 kc_mbon=0.3900
+episode=506 step=10309 reward=241.0 epsilon=0.050 loss=1.3179 dopamine_rpe=-1.000 kc_mbon=0.3899
+episode=507 step=10322 reward=623.0 epsilon=0.050 loss=0.9904 dopamine_rpe=-1.000 kc_mbon=0.3900
+episode=508 step=10326 reward=241.0 epsilon=0.050 loss=0.8057 dopamine_rpe=-1.000 kc_mbon=0.3900
+episode=509 step=10342 reward=611.0 epsilon=0.050 loss=0.7346 dopamine_rpe=-1.000 kc_mbon=0.3898
+episode=510 step=10346 reward=241.0 epsilon=0.050 loss=0.1382 dopamine_rpe=-1.000 kc_mbon=0.3897
+episode=511 step=10350 reward=241.0 epsilon=0.050 loss=1.0325 dopamine_rpe=-1.000 kc_mbon=0.3897
+episode=512 step=10354 reward=241.0 epsilon=0.050 loss=0.6850 dopamine_rpe=-1.000 kc_mbon=0.3896
+episode=513 step=10371 reward=614.0 epsilon=0.050 loss=1.6310 dopamine_rpe=-1.000 kc_mbon=0.3894
+episode=514 step=10375 reward=241.0 epsilon=0.050 loss=1.4115 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=515 step=10379 reward=241.0 epsilon=0.050 loss=0.4982 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=516 step=10383 reward=241.0 epsilon=0.050 loss=1.1408 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=517 step=10387 reward=241.0 epsilon=0.050 loss=0.1160 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=518 step=10391 reward=249.0 epsilon=0.050 loss=1.5232 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=519 step=10395 reward=241.0 epsilon=0.050 loss=0.3518 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=520 step=10399 reward=241.0 epsilon=0.050 loss=0.3432 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=521 step=10403 reward=241.0 epsilon=0.050 loss=1.3502 dopamine_rpe=-1.000 kc_mbon=0.3893
+episode=522 step=10408 reward=233.0 epsilon=0.050 loss=0.9287 dopamine_rpe=-1.000 kc_mbon=0.3892
+episode=523 step=10413 reward=222.0 epsilon=0.050 loss=1.1996 dopamine_rpe=-1.000 kc_mbon=0.3891
+episode=524 step=10417 reward=241.0 epsilon=0.050 loss=0.3754 dopamine_rpe=-1.000 kc_mbon=0.3891
+episode=525 step=10421 reward=241.0 epsilon=0.050 loss=0.9285 dopamine_rpe=-1.000 kc_mbon=0.3890
+episode=526 step=10426 reward=238.0 epsilon=0.050 loss=0.2084 dopamine_rpe=-1.000 kc_mbon=0.3890
+episode=527 step=10430 reward=252.0 epsilon=0.050 loss=0.8778 dopamine_rpe=-1.000 kc_mbon=0.3890
+episode=528 step=10436 reward=229.0 epsilon=0.050 loss=0.1328 dopamine_rpe=-1.000 kc_mbon=0.3891
+episode=529 step=10466 reward=605.0 epsilon=0.050 loss=1.2437 dopamine_rpe=-1.000 kc_mbon=0.3889
+episode=530 step=10470 reward=241.0 epsilon=0.050 loss=0.9293 dopamine_rpe=-1.000 kc_mbon=0.3889
+episode=531 step=10474 reward=241.0 epsilon=0.050 loss=0.7437 dopamine_rpe=-1.000 kc_mbon=0.3888
+episode=532 step=10478 reward=241.0 epsilon=0.050 loss=0.4107 dopamine_rpe=-1.000 kc_mbon=0.3888
+episode=533 step=10482 reward=241.0 epsilon=0.050 loss=0.5092 dopamine_rpe=-1.000 kc_mbon=0.3887
+episode=534 step=10486 reward=241.0 epsilon=0.050 loss=1.2786 dopamine_rpe=-1.000 kc_mbon=0.3887
+episode=535 step=10492 reward=231.0 epsilon=0.050 loss=0.4409 dopamine_rpe=-1.000 kc_mbon=0.3886
+episode=536 step=10505 reward=611.0 epsilon=0.050 loss=1.0368 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=537 step=10510 reward=231.0 epsilon=0.050 loss=0.9202 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=538 step=10514 reward=241.0 epsilon=0.050 loss=0.7713 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=539 step=10529 reward=597.0 epsilon=0.050 loss=0.5189 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=540 step=10553 reward=714.0 epsilon=0.050 loss=0.7366 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=541 step=10559 reward=234.0 epsilon=0.050 loss=0.1941 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=542 step=10563 reward=241.0 epsilon=0.050 loss=0.6312 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=543 step=10567 reward=241.0 epsilon=0.050 loss=1.1827 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=544 step=10571 reward=241.0 epsilon=0.050 loss=0.8000 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=545 step=10576 reward=231.0 epsilon=0.050 loss=1.5345 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=546 step=10580 reward=241.0 epsilon=0.050 loss=0.3816 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=547 step=10595 reward=617.0 epsilon=0.050 loss=0.3432 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=548 step=10600 reward=238.0 epsilon=0.050 loss=0.3565 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=549 step=10605 reward=231.0 epsilon=0.050 loss=1.1050 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=550 step=10609 reward=241.0 epsilon=0.050 loss=1.4690 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=551 step=10614 reward=238.0 epsilon=0.050 loss=0.4325 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=552 step=10619 reward=239.0 epsilon=0.050 loss=0.8425 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=553 step=10624 reward=231.0 epsilon=0.050 loss=1.0001 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=554 step=10628 reward=241.0 epsilon=0.050 loss=0.6160 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=555 step=10632 reward=241.0 epsilon=0.050 loss=0.6114 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=556 step=10639 reward=225.0 epsilon=0.050 loss=0.4180 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=557 step=10643 reward=241.0 epsilon=0.050 loss=0.5639 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=558 step=10657 reward=612.0 epsilon=0.050 loss=0.5720 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=559 step=10661 reward=241.0 epsilon=0.050 loss=1.2792 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=560 step=10665 reward=241.0 epsilon=0.050 loss=0.5994 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=561 step=10669 reward=241.0 epsilon=0.050 loss=1.1480 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=562 step=10673 reward=241.0 epsilon=0.050 loss=1.0692 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=563 step=10678 reward=227.0 epsilon=0.050 loss=0.6925 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=564 step=10683 reward=231.0 epsilon=0.050 loss=0.8734 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=565 step=10687 reward=241.0 epsilon=0.050 loss=1.4715 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=566 step=10691 reward=249.0 epsilon=0.050 loss=0.1476 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=567 step=10695 reward=241.0 epsilon=0.050 loss=0.9367 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=568 step=10699 reward=241.0 epsilon=0.050 loss=0.7615 dopamine_rpe=-1.000 kc_mbon=0.3875
+episode=569 step=10703 reward=241.0 epsilon=0.050 loss=1.6348 dopamine_rpe=-1.000 kc_mbon=0.3875
+episode=570 step=10707 reward=241.0 epsilon=0.050 loss=0.6884 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=571 step=10711 reward=241.0 epsilon=0.050 loss=0.6575 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=572 step=10715 reward=241.0 epsilon=0.050 loss=0.5689 dopamine_rpe=-1.000 kc_mbon=0.3875
+episode=573 step=10873 reward=582.0 epsilon=0.050 loss=0.9385 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=574 step=10941 reward=569.0 epsilon=0.050 loss=0.7663 dopamine_rpe=-1.000 kc_mbon=0.3884
+episode=575 step=10978 reward=567.0 epsilon=0.050 loss=1.2037 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=576 step=10982 reward=249.0 epsilon=0.050 loss=1.3495 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=577 step=10986 reward=249.0 epsilon=0.050 loss=1.0242 dopamine_rpe=-1.000 kc_mbon=0.3881
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=11000 env_steps_per_s=6.3
+episode=578 step=11009 reward=608.0 epsilon=0.050 loss=1.2709 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=579 step=11013 reward=241.0 epsilon=0.050 loss=0.7317 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=580 step=11068 reward=1006.0 epsilon=0.050 loss=0.6459 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=581 step=11074 reward=231.0 epsilon=0.050 loss=0.3846 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=582 step=11080 reward=231.0 epsilon=0.050 loss=0.7045 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=583 step=11086 reward=231.0 epsilon=0.050 loss=1.2074 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=584 step=11092 reward=231.0 epsilon=0.050 loss=0.5240 dopamine_rpe=-1.000 kc_mbon=0.3883
+episode=585 step=11098 reward=231.0 epsilon=0.050 loss=0.9706 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=586 step=11104 reward=231.0 epsilon=0.050 loss=0.9829 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=587 step=11110 reward=231.0 epsilon=0.050 loss=1.1685 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=588 step=11116 reward=227.0 epsilon=0.050 loss=1.3831 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=589 step=11121 reward=233.0 epsilon=0.050 loss=1.0160 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=590 step=11127 reward=231.0 epsilon=0.050 loss=0.2633 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=591 step=11132 reward=233.0 epsilon=0.050 loss=0.9088 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=592 step=11137 reward=233.0 epsilon=0.050 loss=1.2705 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=593 step=11142 reward=233.0 epsilon=0.050 loss=0.9462 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=594 step=11147 reward=233.0 epsilon=0.050 loss=1.1701 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=595 step=11152 reward=233.0 epsilon=0.050 loss=0.4793 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=596 step=11157 reward=233.0 epsilon=0.050 loss=0.8814 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=597 step=11163 reward=231.0 epsilon=0.050 loss=0.3969 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=598 step=11169 reward=227.0 epsilon=0.050 loss=0.5968 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=599 step=11174 reward=233.0 epsilon=0.050 loss=0.5737 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=600 step=11179 reward=241.0 epsilon=0.050 loss=0.7625 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=601 step=11184 reward=244.0 epsilon=0.050 loss=1.8361 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=602 step=11189 reward=244.0 epsilon=0.050 loss=1.5880 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=603 step=11194 reward=233.0 epsilon=0.050 loss=0.7043 dopamine_rpe=-1.000 kc_mbon=0.3875
+episode=604 step=11201 reward=199.0 epsilon=0.050 loss=0.3397 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=605 step=11206 reward=233.0 epsilon=0.050 loss=1.7366 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=606 step=11211 reward=233.0 epsilon=0.050 loss=0.7976 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=607 step=11216 reward=233.0 epsilon=0.050 loss=0.8613 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=608 step=11221 reward=233.0 epsilon=0.050 loss=1.1784 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=609 step=11226 reward=244.0 epsilon=0.050 loss=0.7036 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=610 step=11231 reward=233.0 epsilon=0.050 loss=1.4299 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=611 step=11237 reward=231.0 epsilon=0.050 loss=0.5430 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=612 step=11242 reward=233.0 epsilon=0.050 loss=0.7696 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=613 step=11247 reward=233.0 epsilon=0.050 loss=0.9754 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=614 step=11255 reward=229.0 epsilon=0.050 loss=0.6080 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=615 step=11261 reward=231.0 epsilon=0.050 loss=0.3590 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=616 step=11266 reward=233.0 epsilon=0.050 loss=0.8366 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=617 step=11272 reward=231.0 epsilon=0.050 loss=0.4542 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=618 step=11278 reward=231.0 epsilon=0.050 loss=0.5973 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=619 step=11284 reward=231.0 epsilon=0.050 loss=1.0480 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=620 step=11290 reward=231.0 epsilon=0.050 loss=0.4011 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=621 step=11297 reward=230.0 epsilon=0.050 loss=0.6896 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=622 step=11303 reward=231.0 epsilon=0.050 loss=0.5111 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=623 step=11309 reward=231.0 epsilon=0.050 loss=0.6002 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=624 step=11314 reward=233.0 epsilon=0.050 loss=1.0708 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=625 step=11322 reward=197.0 epsilon=0.050 loss=0.9447 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=626 step=11328 reward=231.0 epsilon=0.050 loss=0.9508 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=627 step=11334 reward=231.0 epsilon=0.050 loss=0.3320 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=628 step=11340 reward=231.0 epsilon=0.050 loss=0.7726 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=629 step=11346 reward=231.0 epsilon=0.050 loss=0.8699 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=630 step=11351 reward=239.0 epsilon=0.050 loss=0.2173 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=631 step=11357 reward=231.0 epsilon=0.050 loss=0.6015 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=632 step=11362 reward=233.0 epsilon=0.050 loss=0.6166 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=633 step=11368 reward=231.0 epsilon=0.050 loss=1.5057 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=634 step=11373 reward=233.0 epsilon=0.050 loss=0.3039 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=635 step=11378 reward=233.0 epsilon=0.050 loss=0.3977 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=636 step=11383 reward=233.0 epsilon=0.050 loss=0.6434 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=637 step=11390 reward=204.0 epsilon=0.050 loss=0.5388 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=638 step=11397 reward=206.0 epsilon=0.050 loss=0.6478 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=639 step=11402 reward=233.0 epsilon=0.050 loss=0.6667 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=640 step=11407 reward=241.0 epsilon=0.050 loss=0.1805 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=641 step=11412 reward=233.0 epsilon=0.050 loss=0.1730 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=642 step=11418 reward=212.0 epsilon=0.050 loss=0.2417 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=643 step=11424 reward=231.0 epsilon=0.050 loss=0.4314 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=644 step=11429 reward=244.0 epsilon=0.050 loss=2.3213 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=645 step=11434 reward=244.0 epsilon=0.050 loss=1.0254 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=646 step=11439 reward=233.0 epsilon=0.050 loss=0.8102 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=647 step=11444 reward=241.0 epsilon=0.050 loss=0.1685 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=648 step=11450 reward=232.0 epsilon=0.050 loss=1.5132 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=649 step=11455 reward=239.0 epsilon=0.050 loss=0.7273 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=650 step=11460 reward=233.0 epsilon=0.050 loss=0.5167 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=651 step=11465 reward=233.0 epsilon=0.050 loss=0.6712 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=652 step=11470 reward=233.0 epsilon=0.050 loss=0.3499 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=653 step=11476 reward=231.0 epsilon=0.050 loss=0.6141 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=654 step=11481 reward=233.0 epsilon=0.050 loss=1.3936 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=655 step=11487 reward=231.0 epsilon=0.050 loss=0.4774 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=656 step=11493 reward=231.0 epsilon=0.050 loss=1.3561 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=657 step=11499 reward=231.0 epsilon=0.050 loss=0.9281 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=658 step=11504 reward=233.0 epsilon=0.050 loss=1.0900 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=659 step=11510 reward=231.0 epsilon=0.050 loss=0.4780 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=660 step=11516 reward=231.0 epsilon=0.050 loss=0.6625 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=661 step=11521 reward=241.0 epsilon=0.050 loss=1.0980 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=662 step=11526 reward=233.0 epsilon=0.050 loss=1.7665 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=663 step=11533 reward=199.0 epsilon=0.050 loss=1.1769 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=664 step=11539 reward=231.0 epsilon=0.050 loss=0.3706 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=665 step=11545 reward=231.0 epsilon=0.050 loss=0.6039 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=666 step=11551 reward=237.0 epsilon=0.050 loss=1.1494 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=667 step=11557 reward=231.0 epsilon=0.050 loss=0.3120 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=668 step=11563 reward=231.0 epsilon=0.050 loss=0.3790 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=669 step=11572 reward=184.0 epsilon=0.050 loss=1.5798 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=670 step=11577 reward=244.0 epsilon=0.050 loss=0.9520 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=671 step=11583 reward=231.0 epsilon=0.050 loss=0.6599 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=672 step=11588 reward=233.0 epsilon=0.050 loss=1.6693 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=673 step=11593 reward=233.0 epsilon=0.050 loss=0.7082 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=674 step=11599 reward=231.0 epsilon=0.050 loss=1.0574 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=675 step=11604 reward=233.0 epsilon=0.050 loss=1.3872 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=676 step=11609 reward=233.0 epsilon=0.050 loss=2.2717 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=677 step=11614 reward=237.0 epsilon=0.050 loss=1.0674 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=678 step=11619 reward=233.0 epsilon=0.050 loss=1.1416 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=679 step=11624 reward=233.0 epsilon=0.050 loss=0.7371 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=680 step=11629 reward=245.0 epsilon=0.050 loss=1.7310 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=681 step=11633 reward=250.0 epsilon=0.050 loss=0.2482 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=682 step=11641 reward=235.0 epsilon=0.050 loss=0.8548 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=683 step=11646 reward=241.0 epsilon=0.050 loss=0.6632 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=684 step=11651 reward=241.0 epsilon=0.050 loss=0.3484 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=685 step=11655 reward=250.0 epsilon=0.050 loss=1.2566 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=686 step=11659 reward=250.0 epsilon=0.050 loss=0.6727 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=687 step=11664 reward=241.0 epsilon=0.050 loss=0.9108 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=688 step=11669 reward=240.0 epsilon=0.050 loss=0.5493 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=689 step=11762 reward=612.0 epsilon=0.050 loss=1.1850 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=690 step=11766 reward=249.0 epsilon=0.050 loss=2.4379 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=691 step=11770 reward=249.0 epsilon=0.050 loss=1.1313 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=692 step=11774 reward=241.0 epsilon=0.050 loss=0.3615 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=693 step=11778 reward=252.0 epsilon=0.050 loss=1.3979 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=694 step=11782 reward=252.0 epsilon=0.050 loss=0.7011 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=695 step=11786 reward=252.0 epsilon=0.050 loss=1.2201 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=696 step=11793 reward=231.0 epsilon=0.050 loss=0.5153 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=697 step=11841 reward=1015.0 epsilon=0.050 loss=0.8923 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=698 step=11845 reward=241.0 epsilon=0.050 loss=1.2653 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=699 step=11925 reward=664.0 epsilon=0.050 loss=1.1451 dopamine_rpe=-1.000 kc_mbon=0.3875
+episode=700 step=11931 reward=237.0 epsilon=0.050 loss=0.6674 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=701 step=11935 reward=252.0 epsilon=0.050 loss=1.0272 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=702 step=11939 reward=252.0 epsilon=0.050 loss=0.7514 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=703 step=11943 reward=252.0 epsilon=0.050 loss=1.2991 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=704 step=11947 reward=252.0 epsilon=0.050 loss=0.4958 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=705 step=11970 reward=622.0 epsilon=0.050 loss=0.6373 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=706 step=11975 reward=249.0 epsilon=0.050 loss=0.6498 dopamine_rpe=-1.000 kc_mbon=0.3875
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=12000 env_steps_per_s=6.3
+episode=707 step=12003 reward=767.0 epsilon=0.050 loss=0.8907 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=708 step=12009 reward=231.0 epsilon=0.050 loss=1.0428 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=709 step=12041 reward=1037.0 epsilon=0.050 loss=0.6095 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=710 step=12077 reward=699.0 epsilon=0.050 loss=0.5207 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=711 step=12093 reward=632.0 epsilon=0.050 loss=1.1965 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=712 step=12100 reward=228.0 epsilon=0.050 loss=1.1100 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=713 step=12132 reward=799.0 epsilon=0.050 loss=0.7874 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=714 step=12155 reward=592.0 epsilon=0.050 loss=0.5503 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=715 step=12159 reward=241.0 epsilon=0.050 loss=0.7459 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=716 step=12172 reward=611.0 epsilon=0.050 loss=0.8897 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=717 step=12191 reward=725.0 epsilon=0.050 loss=0.9574 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=718 step=12203 reward=636.0 epsilon=0.050 loss=0.4524 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=719 step=12235 reward=1030.0 epsilon=0.050 loss=0.5734 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=720 step=12265 reward=1033.0 epsilon=0.050 loss=0.6864 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=721 step=12269 reward=249.0 epsilon=0.050 loss=1.0191 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=722 step=12273 reward=249.0 epsilon=0.050 loss=0.5506 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=723 step=12305 reward=1043.0 epsilon=0.050 loss=0.8601 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=724 step=12309 reward=241.0 epsilon=0.050 loss=0.7596 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=725 step=12313 reward=241.0 epsilon=0.050 loss=0.4992 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=726 step=12321 reward=217.0 epsilon=0.050 loss=1.0607 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=727 step=12328 reward=196.0 epsilon=0.050 loss=1.1909 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=728 step=12361 reward=729.0 epsilon=0.050 loss=1.4978 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=729 step=12365 reward=241.0 epsilon=0.050 loss=0.7515 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=730 step=12370 reward=231.0 epsilon=0.050 loss=0.8665 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=731 step=12376 reward=218.0 epsilon=0.050 loss=1.3874 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=732 step=12381 reward=231.0 epsilon=0.050 loss=0.9411 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=733 step=12386 reward=231.0 epsilon=0.050 loss=0.6943 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=734 step=12391 reward=231.0 epsilon=0.050 loss=0.7638 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=735 step=12396 reward=231.0 epsilon=0.050 loss=0.9208 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=736 step=12414 reward=609.0 epsilon=0.050 loss=0.8503 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=737 step=12418 reward=241.0 epsilon=0.050 loss=0.9664 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=738 step=12423 reward=231.0 epsilon=0.050 loss=0.3440 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=739 step=12427 reward=241.0 epsilon=0.050 loss=1.7780 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=740 step=12432 reward=238.0 epsilon=0.050 loss=0.8699 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=741 step=12447 reward=593.0 epsilon=0.050 loss=0.6994 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=742 step=12469 reward=599.0 epsilon=0.050 loss=0.7177 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=743 step=12474 reward=231.0 epsilon=0.050 loss=0.6459 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=744 step=12492 reward=582.0 epsilon=0.050 loss=0.7398 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=745 step=12496 reward=241.0 epsilon=0.050 loss=0.5494 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=746 step=12513 reward=595.0 epsilon=0.050 loss=1.1877 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=747 step=12517 reward=241.0 epsilon=0.050 loss=1.5140 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=748 step=12560 reward=1010.0 epsilon=0.050 loss=0.8720 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=749 step=12565 reward=245.0 epsilon=0.050 loss=0.4023 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=750 step=12680 reward=450.0 epsilon=0.050 loss=1.4020 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=751 step=12712 reward=597.0 epsilon=0.050 loss=0.9177 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=752 step=12747 reward=617.0 epsilon=0.050 loss=0.5646 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=753 step=12764 reward=583.0 epsilon=0.050 loss=1.2705 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=754 step=12807 reward=1020.0 epsilon=0.050 loss=0.2624 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=755 step=12811 reward=241.0 epsilon=0.050 loss=0.9596 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=756 step=12815 reward=241.0 epsilon=0.050 loss=2.1187 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=757 step=12819 reward=241.0 epsilon=0.050 loss=0.9802 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=758 step=12840 reward=623.0 epsilon=0.050 loss=1.0268 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=759 step=12853 reward=630.0 epsilon=0.050 loss=0.9063 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=760 step=12876 reward=737.0 epsilon=0.050 loss=0.3379 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=761 step=12880 reward=252.0 epsilon=0.050 loss=1.3612 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=762 step=12884 reward=243.0 epsilon=0.050 loss=1.0385 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=763 step=12889 reward=239.0 epsilon=0.050 loss=0.7700 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=764 step=12893 reward=249.0 epsilon=0.050 loss=0.7766 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=765 step=12897 reward=253.0 epsilon=0.050 loss=0.9201 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=766 step=12901 reward=249.0 epsilon=0.050 loss=1.5561 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=767 step=12906 reward=228.0 epsilon=0.050 loss=0.5537 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=768 step=12973 reward=533.0 epsilon=0.050 loss=0.4614 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=769 step=12977 reward=249.0 epsilon=0.050 loss=0.9725 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=770 step=12982 reward=231.0 epsilon=0.050 loss=0.1931 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=771 step=12987 reward=238.0 epsilon=0.050 loss=0.2521 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=772 step=12991 reward=249.0 epsilon=0.050 loss=2.1173 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=773 step=12996 reward=231.0 epsilon=0.050 loss=0.7649 dopamine_rpe=-1.000 kc_mbon=0.3851
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=13000 env_steps_per_s=6.4
+episode=774 step=13001 reward=238.0 epsilon=0.050 loss=0.3531 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=775 step=13006 reward=231.0 epsilon=0.050 loss=1.1119 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=776 step=13018 reward=613.0 epsilon=0.050 loss=1.0160 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=777 step=13024 reward=228.0 epsilon=0.050 loss=0.5994 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=778 step=13029 reward=231.0 epsilon=0.050 loss=1.2463 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=779 step=13034 reward=231.0 epsilon=0.050 loss=0.5347 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=780 step=13051 reward=606.0 epsilon=0.050 loss=0.3800 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=781 step=13055 reward=241.0 epsilon=0.050 loss=0.4425 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=782 step=13060 reward=231.0 epsilon=0.050 loss=1.2763 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=783 step=13065 reward=231.0 epsilon=0.050 loss=1.0437 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=784 step=13070 reward=231.0 epsilon=0.050 loss=0.9567 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=785 step=13075 reward=231.0 epsilon=0.050 loss=0.6701 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=786 step=13080 reward=231.0 epsilon=0.050 loss=0.9673 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=787 step=13085 reward=231.0 epsilon=0.050 loss=0.5783 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=788 step=13093 reward=215.0 epsilon=0.050 loss=1.9224 dopamine_rpe=-1.000 kc_mbon=0.3847
+episode=789 step=13098 reward=231.0 epsilon=0.050 loss=0.3571 dopamine_rpe=-1.000 kc_mbon=0.3847
+episode=790 step=13103 reward=231.0 epsilon=0.050 loss=0.3272 dopamine_rpe=-1.000 kc_mbon=0.3846
+episode=791 step=13108 reward=231.0 epsilon=0.050 loss=0.4548 dopamine_rpe=-1.000 kc_mbon=0.3845
+episode=792 step=13123 reward=628.0 epsilon=0.050 loss=1.0207 dopamine_rpe=-1.000 kc_mbon=0.3845
+episode=793 step=13166 reward=783.0 epsilon=0.050 loss=0.8603 dopamine_rpe=-1.000 kc_mbon=0.3843
+episode=794 step=13170 reward=241.0 epsilon=0.050 loss=1.0649 dopamine_rpe=-1.000 kc_mbon=0.3842
+episode=795 step=13174 reward=241.0 epsilon=0.050 loss=0.5723 dopamine_rpe=-1.000 kc_mbon=0.3843
+episode=796 step=13178 reward=241.0 epsilon=0.050 loss=0.7478 dopamine_rpe=-1.000 kc_mbon=0.3842
+episode=797 step=13268 reward=619.0 epsilon=0.050 loss=0.5392 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=798 step=13272 reward=241.0 epsilon=0.050 loss=0.7345 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=799 step=13276 reward=241.0 epsilon=0.050 loss=0.6522 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=800 step=13280 reward=241.0 epsilon=0.050 loss=0.3282 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=801 step=13284 reward=241.0 epsilon=0.050 loss=0.7956 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=802 step=13401 reward=670.0 epsilon=0.050 loss=0.9543 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=803 step=13405 reward=241.0 epsilon=0.050 loss=0.6631 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=804 step=13444 reward=568.0 epsilon=0.050 loss=0.6454 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=805 step=13449 reward=233.0 epsilon=0.050 loss=1.0211 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=806 step=13453 reward=241.0 epsilon=0.050 loss=0.1763 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=807 step=13460 reward=204.0 epsilon=0.050 loss=1.4548 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=808 step=13464 reward=241.0 epsilon=0.050 loss=0.3586 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=809 step=13469 reward=227.0 epsilon=0.050 loss=0.9454 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=810 step=13473 reward=241.0 epsilon=0.050 loss=0.3558 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=811 step=13513 reward=554.0 epsilon=0.050 loss=0.7045 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=812 step=13517 reward=241.0 epsilon=0.050 loss=0.5995 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=813 step=13521 reward=242.0 epsilon=0.050 loss=1.2047 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=814 step=13525 reward=247.0 epsilon=0.050 loss=0.8908 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=815 step=13529 reward=241.0 epsilon=0.050 loss=0.3559 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=816 step=13534 reward=231.0 epsilon=0.050 loss=0.5511 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=817 step=13539 reward=231.0 epsilon=0.050 loss=1.1035 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=818 step=13545 reward=245.0 epsilon=0.050 loss=0.3836 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=819 step=13551 reward=213.0 epsilon=0.050 loss=0.6763 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=820 step=13558 reward=234.0 epsilon=0.050 loss=0.9026 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=821 step=13563 reward=230.0 epsilon=0.050 loss=0.3346 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=822 step=13567 reward=252.0 epsilon=0.050 loss=1.1489 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=823 step=13572 reward=222.0 epsilon=0.050 loss=1.6499 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=824 step=13577 reward=234.0 epsilon=0.050 loss=1.2255 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=825 step=13582 reward=232.0 epsilon=0.050 loss=0.3802 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=826 step=13587 reward=222.0 epsilon=0.050 loss=0.8351 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=827 step=13592 reward=221.0 epsilon=0.050 loss=0.3399 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=828 step=13597 reward=221.0 epsilon=0.050 loss=0.1242 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=829 step=13632 reward=746.0 epsilon=0.050 loss=1.2035 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=830 step=13636 reward=252.0 epsilon=0.050 loss=0.3158 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=831 step=13642 reward=223.0 epsilon=0.050 loss=1.0151 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=832 step=13646 reward=247.0 epsilon=0.050 loss=0.8304 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=833 step=13650 reward=247.0 epsilon=0.050 loss=0.9294 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=834 step=13655 reward=221.0 epsilon=0.050 loss=1.5493 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=835 step=13659 reward=247.0 epsilon=0.050 loss=0.9064 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=836 step=13663 reward=247.0 epsilon=0.050 loss=1.4425 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=837 step=13668 reward=231.0 epsilon=0.050 loss=0.5474 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=838 step=13672 reward=247.0 epsilon=0.050 loss=1.4021 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=839 step=13676 reward=248.0 epsilon=0.050 loss=1.0735 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=840 step=13680 reward=252.0 epsilon=0.050 loss=1.6351 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=841 step=13684 reward=252.0 epsilon=0.050 loss=1.0672 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=842 step=13688 reward=252.0 epsilon=0.050 loss=0.6920 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=843 step=13692 reward=249.0 epsilon=0.050 loss=0.2983 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=844 step=13758 reward=693.0 epsilon=0.050 loss=0.5206 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=845 step=13785 reward=726.0 epsilon=0.050 loss=0.3243 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=846 step=13824 reward=611.0 epsilon=0.050 loss=0.7960 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=847 step=13855 reward=562.0 epsilon=0.050 loss=0.6355 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=848 step=13872 reward=581.0 epsilon=0.050 loss=1.4005 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=849 step=13877 reward=245.0 epsilon=0.050 loss=1.2507 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=850 step=13899 reward=617.0 epsilon=0.050 loss=0.6082 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=851 step=13916 reward=595.0 epsilon=0.050 loss=0.3105 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=852 step=13934 reward=618.0 epsilon=0.050 loss=0.5577 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=853 step=13939 reward=231.0 epsilon=0.050 loss=0.3231 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=854 step=13960 reward=598.0 epsilon=0.050 loss=0.6878 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=855 step=13965 reward=242.0 epsilon=0.050 loss=0.7795 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=856 step=13969 reward=241.0 epsilon=0.050 loss=0.7427 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=857 step=13994 reward=1048.0 epsilon=0.050 loss=0.4489 dopamine_rpe=-1.000 kc_mbon=0.3866
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=14000 env_steps_per_s=6.4
+episode=858 step=14017 reward=635.0 epsilon=0.050 loss=0.8557 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=859 step=14022 reward=231.0 epsilon=0.050 loss=1.4836 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=860 step=14027 reward=231.0 epsilon=0.050 loss=0.2685 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=861 step=14032 reward=239.0 epsilon=0.050 loss=0.9332 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=862 step=14036 reward=241.0 epsilon=0.050 loss=0.3968 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=863 step=14051 reward=595.0 epsilon=0.050 loss=0.8177 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=864 step=14056 reward=231.0 epsilon=0.050 loss=0.7933 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=865 step=14061 reward=231.0 epsilon=0.050 loss=0.9896 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=866 step=14146 reward=506.0 epsilon=0.050 loss=1.3235 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=867 step=14151 reward=231.0 epsilon=0.050 loss=0.6274 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=868 step=14155 reward=241.0 epsilon=0.050 loss=1.9061 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=869 step=14159 reward=241.0 epsilon=0.050 loss=1.1631 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=870 step=14163 reward=241.0 epsilon=0.050 loss=0.4378 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=871 step=14170 reward=230.0 epsilon=0.050 loss=1.0737 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=872 step=14174 reward=241.0 epsilon=0.050 loss=0.9342 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=873 step=14178 reward=241.0 epsilon=0.050 loss=0.4142 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=874 step=14182 reward=241.0 epsilon=0.050 loss=1.2984 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=875 step=14186 reward=241.0 epsilon=0.050 loss=0.8195 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=876 step=14190 reward=242.0 epsilon=0.050 loss=0.7724 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=877 step=14197 reward=230.0 epsilon=0.050 loss=1.0074 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=878 step=14201 reward=241.0 epsilon=0.050 loss=0.2215 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=879 step=14205 reward=241.0 epsilon=0.050 loss=0.4263 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=880 step=14209 reward=241.0 epsilon=0.050 loss=0.5415 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=881 step=14213 reward=241.0 epsilon=0.050 loss=0.2026 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=882 step=14217 reward=241.0 epsilon=0.050 loss=1.0911 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=883 step=14221 reward=241.0 epsilon=0.050 loss=1.4301 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=884 step=14225 reward=241.0 epsilon=0.050 loss=0.2523 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=885 step=14229 reward=241.0 epsilon=0.050 loss=1.0315 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=886 step=14233 reward=241.0 epsilon=0.050 loss=1.8598 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=887 step=14237 reward=241.0 epsilon=0.050 loss=1.1376 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=888 step=14241 reward=241.0 epsilon=0.050 loss=0.8162 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=889 step=14248 reward=208.0 epsilon=0.050 loss=0.8035 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=890 step=14252 reward=252.0 epsilon=0.050 loss=2.3302 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=891 step=14256 reward=241.0 epsilon=0.050 loss=0.9920 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=892 step=14260 reward=249.0 epsilon=0.050 loss=1.6145 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=893 step=14264 reward=241.0 epsilon=0.050 loss=1.2200 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=894 step=14268 reward=241.0 epsilon=0.050 loss=0.1820 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=895 step=14272 reward=249.0 epsilon=0.050 loss=0.4246 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=896 step=14276 reward=249.0 epsilon=0.050 loss=0.7537 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=897 step=14280 reward=241.0 epsilon=0.050 loss=0.8361 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=898 step=14284 reward=249.0 epsilon=0.050 loss=1.2173 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=899 step=14288 reward=241.0 epsilon=0.050 loss=0.8246 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=900 step=14292 reward=252.0 epsilon=0.050 loss=0.8850 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=901 step=14362 reward=696.0 epsilon=0.050 loss=0.6075 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=902 step=14366 reward=252.0 epsilon=0.050 loss=0.2987 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=903 step=14370 reward=252.0 epsilon=0.050 loss=0.4973 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=904 step=14374 reward=249.0 epsilon=0.050 loss=0.3454 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=905 step=14380 reward=246.0 epsilon=0.050 loss=0.9997 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=906 step=14384 reward=252.0 epsilon=0.050 loss=0.4855 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=907 step=14388 reward=252.0 epsilon=0.050 loss=1.1947 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=908 step=14392 reward=252.0 epsilon=0.050 loss=0.9699 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=909 step=14396 reward=252.0 epsilon=0.050 loss=0.7381 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=910 step=14400 reward=252.0 epsilon=0.050 loss=0.4942 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=911 step=14404 reward=252.0 epsilon=0.050 loss=0.8492 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=912 step=14408 reward=252.0 epsilon=0.050 loss=1.3867 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=913 step=14412 reward=252.0 epsilon=0.050 loss=0.4669 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=914 step=14417 reward=250.0 epsilon=0.050 loss=0.4983 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=915 step=14421 reward=252.0 epsilon=0.050 loss=1.1582 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=916 step=14425 reward=252.0 epsilon=0.050 loss=0.8473 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=917 step=14429 reward=252.0 epsilon=0.050 loss=1.3823 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=918 step=14433 reward=252.0 epsilon=0.050 loss=0.9207 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=919 step=14437 reward=252.0 epsilon=0.050 loss=0.4278 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=920 step=14441 reward=252.0 epsilon=0.050 loss=0.9176 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=921 step=14445 reward=249.0 epsilon=0.050 loss=0.7162 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=922 step=14449 reward=252.0 epsilon=0.050 loss=0.3794 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=923 step=14453 reward=252.0 epsilon=0.050 loss=1.1470 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=924 step=14457 reward=252.0 epsilon=0.050 loss=1.2358 dopamine_rpe=-1.000 kc_mbon=0.3864
+episode=925 step=14461 reward=252.0 epsilon=0.050 loss=0.7936 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=926 step=14465 reward=249.0 epsilon=0.050 loss=0.4652 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=927 step=14469 reward=252.0 epsilon=0.050 loss=1.3633 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=928 step=14473 reward=241.0 epsilon=0.050 loss=0.4023 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=929 step=14477 reward=249.0 epsilon=0.050 loss=0.4817 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=930 step=14481 reward=249.0 epsilon=0.050 loss=0.3961 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=931 step=14485 reward=249.0 epsilon=0.050 loss=0.4673 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=932 step=14489 reward=241.0 epsilon=0.050 loss=1.2470 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=933 step=14493 reward=248.0 epsilon=0.050 loss=0.6928 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=934 step=14497 reward=241.0 epsilon=0.050 loss=1.3868 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=935 step=14501 reward=241.0 epsilon=0.050 loss=1.0371 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=936 step=14505 reward=241.0 epsilon=0.050 loss=0.2814 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=937 step=14509 reward=241.0 epsilon=0.050 loss=0.7719 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=938 step=14515 reward=225.0 epsilon=0.050 loss=1.2658 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=939 step=14519 reward=241.0 epsilon=0.050 loss=1.7557 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=940 step=14525 reward=240.0 epsilon=0.050 loss=0.7559 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=941 step=14530 reward=233.0 epsilon=0.050 loss=0.7938 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=942 step=14536 reward=229.0 epsilon=0.050 loss=1.0688 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=943 step=14540 reward=241.0 epsilon=0.050 loss=0.8539 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=944 step=14544 reward=241.0 epsilon=0.050 loss=0.9960 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=945 step=14548 reward=241.0 epsilon=0.050 loss=0.8728 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=946 step=14552 reward=241.0 epsilon=0.050 loss=0.8219 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=947 step=14556 reward=241.0 epsilon=0.050 loss=0.7073 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=948 step=14560 reward=241.0 epsilon=0.050 loss=0.9924 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=949 step=14564 reward=241.0 epsilon=0.050 loss=0.5747 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=950 step=14568 reward=241.0 epsilon=0.050 loss=1.4122 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=951 step=14572 reward=241.0 epsilon=0.050 loss=0.8456 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=952 step=14576 reward=241.0 epsilon=0.050 loss=0.2348 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=953 step=14580 reward=241.0 epsilon=0.050 loss=0.6109 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=954 step=14584 reward=241.0 epsilon=0.050 loss=0.8571 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=955 step=14588 reward=241.0 epsilon=0.050 loss=1.5779 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=956 step=14592 reward=241.0 epsilon=0.050 loss=0.7527 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=957 step=14596 reward=241.0 epsilon=0.050 loss=0.9024 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=958 step=14600 reward=241.0 epsilon=0.050 loss=0.7836 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=959 step=14604 reward=241.0 epsilon=0.050 loss=0.8201 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=960 step=14608 reward=241.0 epsilon=0.050 loss=0.2603 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=961 step=14612 reward=241.0 epsilon=0.050 loss=0.8175 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=962 step=14616 reward=241.0 epsilon=0.050 loss=0.3667 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=963 step=14620 reward=241.0 epsilon=0.050 loss=0.2215 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=964 step=14624 reward=241.0 epsilon=0.050 loss=0.4256 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=965 step=14628 reward=241.0 epsilon=0.050 loss=0.6965 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=966 step=14632 reward=241.0 epsilon=0.050 loss=0.9111 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=967 step=14636 reward=241.0 epsilon=0.050 loss=0.9521 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=968 step=14640 reward=241.0 epsilon=0.050 loss=0.4247 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=969 step=14644 reward=241.0 epsilon=0.050 loss=1.0805 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=970 step=14648 reward=241.0 epsilon=0.050 loss=0.4398 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=971 step=14652 reward=241.0 epsilon=0.050 loss=0.5649 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=972 step=14656 reward=241.0 epsilon=0.050 loss=1.2160 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=973 step=14660 reward=241.0 epsilon=0.050 loss=0.6079 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=974 step=14664 reward=241.0 epsilon=0.050 loss=0.4998 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=975 step=14694 reward=804.0 epsilon=0.050 loss=1.9688 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=976 step=14698 reward=241.0 epsilon=0.050 loss=0.7076 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=977 step=14756 reward=760.0 epsilon=0.050 loss=0.4332 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=978 step=14779 reward=636.0 epsilon=0.050 loss=1.0710 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=979 step=14803 reward=634.0 epsilon=0.050 loss=0.7294 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=980 step=14854 reward=771.0 epsilon=0.050 loss=0.4894 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=981 step=14868 reward=627.0 epsilon=0.050 loss=1.4564 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=982 step=14921 reward=718.0 epsilon=0.050 loss=0.2041 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=983 step=14936 reward=599.0 epsilon=0.050 loss=0.3379 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=984 step=14969 reward=620.0 epsilon=0.050 loss=0.9327 dopamine_rpe=-1.000 kc_mbon=0.3866
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=15000 env_steps_per_s=6.4
+saved_replay=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-replay.npz step=15000 transitions=15000
+episode=985 step=15014 reward=586.0 epsilon=0.050 loss=0.3486 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=986 step=15018 reward=246.0 epsilon=0.050 loss=1.0874 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=987 step=15049 reward=583.0 epsilon=0.050 loss=1.1966 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=988 step=15053 reward=241.0 epsilon=0.050 loss=2.3664 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=989 step=15076 reward=606.0 epsilon=0.050 loss=1.0486 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=990 step=15097 reward=615.0 epsilon=0.050 loss=0.7427 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=991 step=15134 reward=791.0 epsilon=0.050 loss=0.3384 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=992 step=15140 reward=215.0 epsilon=0.050 loss=0.2513 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=993 step=15144 reward=241.0 epsilon=0.050 loss=0.6539 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=994 step=15179 reward=753.0 epsilon=0.050 loss=1.4168 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=995 step=15183 reward=241.0 epsilon=0.050 loss=0.8630 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=996 step=15187 reward=241.0 epsilon=0.050 loss=0.2642 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=997 step=15191 reward=241.0 epsilon=0.050 loss=0.1843 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=998 step=15208 reward=593.0 epsilon=0.050 loss=0.7498 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=999 step=15212 reward=241.0 epsilon=0.050 loss=0.1673 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1000 step=15216 reward=241.0 epsilon=0.050 loss=0.5847 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1001 step=15220 reward=241.0 epsilon=0.050 loss=1.1280 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1002 step=15224 reward=241.0 epsilon=0.050 loss=0.5028 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1003 step=15228 reward=241.0 epsilon=0.050 loss=1.5673 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1004 step=15232 reward=241.0 epsilon=0.050 loss=1.6180 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1005 step=15236 reward=241.0 epsilon=0.050 loss=0.6809 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1006 step=15240 reward=241.0 epsilon=0.050 loss=1.2023 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1007 step=15244 reward=241.0 epsilon=0.050 loss=0.5574 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1008 step=15248 reward=241.0 epsilon=0.050 loss=0.7426 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1009 step=15252 reward=241.0 epsilon=0.050 loss=0.3166 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1010 step=15256 reward=249.0 epsilon=0.050 loss=1.2479 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1011 step=15260 reward=249.0 epsilon=0.050 loss=0.6610 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=1012 step=15282 reward=624.0 epsilon=0.050 loss=2.0578 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=1013 step=15286 reward=241.0 epsilon=0.050 loss=1.2338 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=1014 step=15308 reward=637.0 epsilon=0.050 loss=0.5251 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=1015 step=15321 reward=605.0 epsilon=0.050 loss=1.3647 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1016 step=15348 reward=774.0 epsilon=0.050 loss=0.4935 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=1017 step=15352 reward=241.0 epsilon=0.050 loss=1.4860 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=1018 step=15356 reward=241.0 epsilon=0.050 loss=0.4857 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1019 step=15381 reward=578.0 epsilon=0.050 loss=0.5934 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=1020 step=15385 reward=241.0 epsilon=0.050 loss=0.6291 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1021 step=15389 reward=241.0 epsilon=0.050 loss=1.0185 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1022 step=15393 reward=241.0 epsilon=0.050 loss=0.9317 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1023 step=15398 reward=231.0 epsilon=0.050 loss=0.5655 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1024 step=15402 reward=241.0 epsilon=0.050 loss=0.7730 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1025 step=15427 reward=640.0 epsilon=0.050 loss=0.4894 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1026 step=15431 reward=241.0 epsilon=0.050 loss=1.3408 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1027 step=15435 reward=241.0 epsilon=0.050 loss=1.1023 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1028 step=15439 reward=241.0 epsilon=0.050 loss=0.4608 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1029 step=15444 reward=227.0 epsilon=0.050 loss=1.0823 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1030 step=15471 reward=572.0 epsilon=0.050 loss=1.1173 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1031 step=15476 reward=231.0 epsilon=0.050 loss=0.7399 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1032 step=15480 reward=241.0 epsilon=0.050 loss=0.2183 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1033 step=15485 reward=231.0 epsilon=0.050 loss=0.7240 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1034 step=15489 reward=241.0 epsilon=0.050 loss=0.4458 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1035 step=15535 reward=717.0 epsilon=0.050 loss=0.9136 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1036 step=15542 reward=196.0 epsilon=0.050 loss=0.3710 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1037 step=15546 reward=241.0 epsilon=0.050 loss=0.6640 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1038 step=15550 reward=241.0 epsilon=0.050 loss=0.7808 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=1039 step=15555 reward=231.0 epsilon=0.050 loss=0.8004 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=1040 step=15581 reward=716.0 epsilon=0.050 loss=0.5465 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=1041 step=15587 reward=241.0 epsilon=0.050 loss=0.7002 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=1042 step=15602 reward=623.0 epsilon=0.050 loss=0.9092 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=1043 step=15606 reward=252.0 epsilon=0.050 loss=0.7245 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=1044 step=15611 reward=238.0 epsilon=0.050 loss=0.6840 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=1045 step=15617 reward=243.0 epsilon=0.050 loss=0.2051 dopamine_rpe=-1.000 kc_mbon=0.3853
+episode=1046 step=15621 reward=252.0 epsilon=0.050 loss=1.2931 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=1047 step=15625 reward=252.0 epsilon=0.050 loss=1.7396 dopamine_rpe=-1.000 kc_mbon=0.3852
+episode=1048 step=15630 reward=243.0 epsilon=0.050 loss=0.7041 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=1049 step=15634 reward=252.0 epsilon=0.050 loss=1.3183 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=1050 step=15639 reward=238.0 epsilon=0.050 loss=0.3637 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=1051 step=15643 reward=252.0 epsilon=0.050 loss=0.6377 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=1052 step=15648 reward=238.0 epsilon=0.050 loss=0.3140 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=1053 step=15652 reward=252.0 epsilon=0.050 loss=0.9464 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=1054 step=15656 reward=252.0 epsilon=0.050 loss=1.3629 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=1055 step=15684 reward=1034.0 epsilon=0.050 loss=1.6756 dopamine_rpe=-1.000 kc_mbon=0.3851
+episode=1056 step=15711 reward=1313.0 epsilon=0.050 loss=1.3583 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=1057 step=15715 reward=249.0 epsilon=0.050 loss=0.1551 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=1058 step=15719 reward=252.0 epsilon=0.050 loss=0.7270 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=1059 step=15723 reward=243.0 epsilon=0.050 loss=0.8571 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=1060 step=15777 reward=994.0 epsilon=0.050 loss=0.9240 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=1061 step=15797 reward=623.0 epsilon=0.050 loss=0.3784 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=1062 step=15821 reward=634.0 epsilon=0.050 loss=1.1936 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=1063 step=15825 reward=252.0 epsilon=0.050 loss=0.4290 dopamine_rpe=-1.000 kc_mbon=0.3850
+episode=1064 step=15837 reward=629.0 epsilon=0.050 loss=0.6165 dopamine_rpe=-1.000 kc_mbon=0.3849
+episode=1065 step=15850 reward=614.0 epsilon=0.050 loss=0.5410 dopamine_rpe=-1.000 kc_mbon=0.3847
+episode=1066 step=15869 reward=642.0 epsilon=0.050 loss=0.8630 dopamine_rpe=-1.000 kc_mbon=0.3848
+episode=1067 step=15921 reward=770.0 epsilon=0.050 loss=0.5033 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1068 step=15926 reward=227.0 epsilon=0.050 loss=0.6242 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1069 step=15931 reward=231.0 epsilon=0.050 loss=0.5961 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1070 step=15935 reward=241.0 epsilon=0.050 loss=1.0268 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1071 step=15940 reward=231.0 epsilon=0.050 loss=0.5738 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1072 step=15944 reward=241.0 epsilon=0.050 loss=0.5987 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1073 step=15951 reward=225.0 epsilon=0.050 loss=0.6558 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1074 step=15955 reward=241.0 epsilon=0.050 loss=0.2171 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1075 step=15959 reward=241.0 epsilon=0.050 loss=0.9137 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1076 step=15963 reward=241.0 epsilon=0.050 loss=0.7955 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1077 step=15967 reward=241.0 epsilon=0.050 loss=1.2980 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1078 step=15971 reward=241.0 epsilon=0.050 loss=1.5319 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1079 step=15977 reward=208.0 epsilon=0.050 loss=0.7891 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1080 step=15981 reward=241.0 epsilon=0.050 loss=1.4947 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1081 step=15985 reward=241.0 epsilon=0.050 loss=0.4621 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1082 step=15989 reward=241.0 epsilon=0.050 loss=1.1486 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=1083 step=15993 reward=241.0 epsilon=0.050 loss=0.2314 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1084 step=15997 reward=241.0 epsilon=0.050 loss=0.9029 dopamine_rpe=-1.000 kc_mbon=0.3856
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=16000 env_steps_per_s=6.4
+episode=1085 step=16005 reward=224.0 epsilon=0.050 loss=1.0962 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1086 step=16009 reward=241.0 epsilon=0.050 loss=0.9807 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1087 step=16013 reward=241.0 epsilon=0.050 loss=1.9989 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1088 step=16017 reward=241.0 epsilon=0.050 loss=1.3095 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1089 step=16021 reward=241.0 epsilon=0.050 loss=0.5724 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1090 step=16071 reward=678.0 epsilon=0.050 loss=0.2253 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1091 step=16075 reward=241.0 epsilon=0.050 loss=1.1376 dopamine_rpe=-1.000 kc_mbon=0.3857
+episode=1092 step=16079 reward=241.0 epsilon=0.050 loss=1.3554 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1093 step=16083 reward=241.0 epsilon=0.050 loss=1.5388 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1094 step=16087 reward=241.0 epsilon=0.050 loss=0.4699 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1095 step=16101 reward=629.0 epsilon=0.050 loss=1.6310 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1096 step=16107 reward=221.0 epsilon=0.050 loss=0.6804 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1097 step=16137 reward=625.0 epsilon=0.050 loss=0.6886 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1098 step=16142 reward=231.0 epsilon=0.050 loss=1.7285 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1099 step=16147 reward=231.0 epsilon=0.050 loss=0.4914 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1100 step=16152 reward=231.0 epsilon=0.050 loss=0.6653 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1101 step=16157 reward=231.0 epsilon=0.050 loss=1.3810 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1102 step=16162 reward=231.0 epsilon=0.050 loss=0.4627 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1103 step=16250 reward=954.0 epsilon=0.050 loss=0.3813 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1104 step=16264 reward=613.0 epsilon=0.050 loss=1.0279 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1105 step=16321 reward=1000.0 epsilon=0.050 loss=1.1861 dopamine_rpe=-1.000 kc_mbon=0.3863
+episode=1106 step=16326 reward=231.0 epsilon=0.050 loss=0.6721 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=1107 step=16365 reward=593.0 epsilon=0.050 loss=0.3904 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=1108 step=16370 reward=231.0 epsilon=0.050 loss=1.5658 dopamine_rpe=-1.000 kc_mbon=0.3862
+episode=1109 step=16375 reward=231.0 epsilon=0.050 loss=1.0974 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=1110 step=16399 reward=595.0 epsilon=0.050 loss=1.3509 dopamine_rpe=-1.000 kc_mbon=0.3861
+episode=1111 step=16404 reward=231.0 epsilon=0.050 loss=0.9912 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1112 step=16409 reward=231.0 epsilon=0.050 loss=0.3730 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1113 step=16413 reward=241.0 epsilon=0.050 loss=1.0198 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1114 step=16418 reward=231.0 epsilon=0.050 loss=0.8428 dopamine_rpe=-1.000 kc_mbon=0.3860
+episode=1115 step=16424 reward=211.0 epsilon=0.050 loss=0.1876 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1116 step=16441 reward=583.0 epsilon=0.050 loss=1.2705 dopamine_rpe=-1.000 kc_mbon=0.3859
+episode=1117 step=16446 reward=231.0 epsilon=0.050 loss=0.6742 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1118 step=16451 reward=231.0 epsilon=0.050 loss=0.2633 dopamine_rpe=-1.000 kc_mbon=0.3858
+episode=1119 step=16467 reward=596.0 epsilon=0.050 loss=1.4855 dopamine_rpe=-1.000 kc_mbon=0.3856
+episode=1120 step=16486 reward=603.0 epsilon=0.050 loss=1.4768 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=1121 step=16491 reward=228.0 epsilon=0.050 loss=0.3678 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=1122 step=16496 reward=231.0 epsilon=0.050 loss=0.9567 dopamine_rpe=-1.000 kc_mbon=0.3855
+episode=1123 step=16503 reward=195.0 epsilon=0.050 loss=0.6650 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=1124 step=16507 reward=241.0 epsilon=0.050 loss=1.0255 dopamine_rpe=-1.000 kc_mbon=0.3854
+episode=1125 step=16707 reward=346.0 epsilon=0.050 loss=0.9035 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1126 step=16711 reward=241.0 epsilon=0.050 loss=1.6090 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1127 step=16715 reward=241.0 epsilon=0.050 loss=1.1177 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1128 step=16721 reward=212.0 epsilon=0.050 loss=1.0959 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1129 step=16726 reward=222.0 epsilon=0.050 loss=1.1171 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1130 step=16730 reward=241.0 epsilon=0.050 loss=1.2444 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1131 step=16734 reward=241.0 epsilon=0.050 loss=0.5958 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1132 step=16741 reward=230.0 epsilon=0.050 loss=1.1528 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1133 step=16745 reward=241.0 epsilon=0.050 loss=0.8793 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1134 step=16749 reward=242.0 epsilon=0.050 loss=1.3454 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1135 step=16754 reward=239.0 epsilon=0.050 loss=1.4545 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1136 step=16759 reward=230.0 epsilon=0.050 loss=0.8685 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1137 step=16764 reward=227.0 epsilon=0.050 loss=1.4035 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1138 step=16769 reward=228.0 epsilon=0.050 loss=1.4096 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1139 step=16773 reward=242.0 epsilon=0.050 loss=0.3517 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1140 step=16777 reward=241.0 epsilon=0.050 loss=0.9993 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1141 step=16781 reward=242.0 epsilon=0.050 loss=0.7264 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1142 step=16785 reward=242.0 epsilon=0.050 loss=0.9542 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1143 step=16789 reward=241.0 epsilon=0.050 loss=1.0081 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1144 step=16793 reward=241.0 epsilon=0.050 loss=0.8062 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1145 step=16797 reward=249.0 epsilon=0.050 loss=0.3931 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1146 step=16801 reward=241.0 epsilon=0.050 loss=0.6507 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1147 step=16806 reward=227.0 epsilon=0.050 loss=0.5682 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1148 step=16810 reward=241.0 epsilon=0.050 loss=1.1770 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1149 step=16814 reward=241.0 epsilon=0.050 loss=0.6611 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1150 step=16818 reward=241.0 epsilon=0.050 loss=0.5115 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1151 step=16822 reward=241.0 epsilon=0.050 loss=0.9606 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1152 step=16826 reward=242.0 epsilon=0.050 loss=0.8506 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1153 step=16830 reward=241.0 epsilon=0.050 loss=0.9523 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1154 step=16834 reward=241.0 epsilon=0.050 loss=0.2235 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1155 step=16838 reward=241.0 epsilon=0.050 loss=1.6021 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1156 step=16842 reward=241.0 epsilon=0.050 loss=1.2120 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1157 step=16847 reward=228.0 epsilon=0.050 loss=1.1382 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1158 step=16851 reward=241.0 epsilon=0.050 loss=0.4378 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=1159 step=16855 reward=241.0 epsilon=0.050 loss=0.6456 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=1160 step=16859 reward=241.0 epsilon=0.050 loss=0.6429 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1161 step=16863 reward=241.0 epsilon=0.050 loss=0.7941 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1162 step=16867 reward=242.0 epsilon=0.050 loss=1.3125 dopamine_rpe=-1.000 kc_mbon=0.3865
+episode=1163 step=16871 reward=241.0 epsilon=0.050 loss=1.7201 dopamine_rpe=-1.000 kc_mbon=0.3866
+episode=1164 step=16875 reward=241.0 epsilon=0.050 loss=0.7024 dopamine_rpe=-1.000 kc_mbon=0.3867
+episode=1165 step=16879 reward=241.0 epsilon=0.050 loss=0.8636 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1166 step=16906 reward=610.0 epsilon=0.050 loss=1.0341 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1167 step=16910 reward=249.0 epsilon=0.050 loss=0.3613 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1168 step=16914 reward=241.0 epsilon=0.050 loss=0.2408 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1169 step=16927 reward=600.0 epsilon=0.050 loss=0.4181 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1170 step=16941 reward=605.0 epsilon=0.050 loss=1.2368 dopamine_rpe=-1.000 kc_mbon=0.3870
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=17000 env_steps_per_s=6.4
+episode=1171 step=17006 reward=516.0 epsilon=0.050 loss=1.9544 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=1172 step=17025 reward=640.0 epsilon=0.050 loss=1.6294 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=1173 step=17052 reward=630.0 epsilon=0.050 loss=2.0229 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1174 step=17093 reward=1026.0 epsilon=0.050 loss=0.8662 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1175 step=17125 reward=623.0 epsilon=0.050 loss=0.7106 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1176 step=17132 reward=230.0 epsilon=0.050 loss=0.3553 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1177 step=17153 reward=600.0 epsilon=0.050 loss=1.1157 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1178 step=17157 reward=241.0 epsilon=0.050 loss=1.7054 dopamine_rpe=-1.000 kc_mbon=0.3870
+episode=1179 step=17161 reward=241.0 epsilon=0.050 loss=1.3668 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1180 step=17167 reward=229.0 epsilon=0.050 loss=1.5940 dopamine_rpe=-1.000 kc_mbon=0.3868
+episode=1181 step=17171 reward=241.0 epsilon=0.050 loss=0.5933 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1182 step=17177 reward=229.0 epsilon=0.050 loss=1.1922 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1183 step=17181 reward=241.0 epsilon=0.050 loss=1.0766 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1184 step=17185 reward=241.0 epsilon=0.050 loss=2.3784 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1185 step=17189 reward=249.0 epsilon=0.050 loss=0.8214 dopamine_rpe=-1.000 kc_mbon=0.3869
+episode=1186 step=17297 reward=461.0 epsilon=0.050 loss=0.6809 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1187 step=17301 reward=252.0 epsilon=0.050 loss=1.4312 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1188 step=17305 reward=252.0 epsilon=0.050 loss=0.9606 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1189 step=17309 reward=252.0 epsilon=0.050 loss=1.1866 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1190 step=17313 reward=252.0 epsilon=0.050 loss=1.2262 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1191 step=17317 reward=252.0 epsilon=0.050 loss=2.0046 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1192 step=17322 reward=230.0 epsilon=0.050 loss=1.9100 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=1193 step=17327 reward=230.0 epsilon=0.050 loss=1.9734 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1194 step=17332 reward=230.0 epsilon=0.050 loss=0.5555 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1195 step=17336 reward=248.0 epsilon=0.050 loss=1.9440 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1196 step=17340 reward=252.0 epsilon=0.050 loss=0.3177 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1197 step=17460 reward=614.0 epsilon=0.050 loss=0.1925 dopamine_rpe=-1.000 kc_mbon=0.3882
+episode=1198 step=17464 reward=241.0 epsilon=0.050 loss=0.6301 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=1199 step=17469 reward=222.0 epsilon=0.050 loss=0.7833 dopamine_rpe=-1.000 kc_mbon=0.3881
+episode=1200 step=17542 reward=560.0 epsilon=0.050 loss=0.8331 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1201 step=17546 reward=241.0 epsilon=0.050 loss=1.6466 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1202 step=17612 reward=651.0 epsilon=0.050 loss=1.0769 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1203 step=17616 reward=241.0 epsilon=0.050 loss=1.0950 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=1204 step=17665 reward=733.0 epsilon=0.050 loss=0.5952 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1205 step=17669 reward=241.0 epsilon=0.050 loss=0.9318 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1206 step=17673 reward=241.0 epsilon=0.050 loss=1.3764 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1207 step=17735 reward=994.0 epsilon=0.050 loss=1.5252 dopamine_rpe=-1.000 kc_mbon=0.3880
+episode=1208 step=17803 reward=984.0 epsilon=0.050 loss=0.9777 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=1209 step=17807 reward=241.0 epsilon=0.050 loss=0.2927 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1210 step=17812 reward=230.0 epsilon=0.050 loss=1.0458 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1211 step=17816 reward=241.0 epsilon=0.050 loss=2.9776 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1212 step=17824 reward=229.0 epsilon=0.050 loss=1.0267 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1213 step=17828 reward=242.0 epsilon=0.050 loss=1.0563 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1214 step=17832 reward=241.0 epsilon=0.050 loss=1.4994 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1215 step=17836 reward=241.0 epsilon=0.050 loss=1.2522 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1216 step=17841 reward=230.0 epsilon=0.050 loss=1.2972 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1217 step=17845 reward=241.0 epsilon=0.050 loss=1.2356 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1218 step=17849 reward=241.0 epsilon=0.050 loss=0.7513 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1219 step=17857 reward=215.0 epsilon=0.050 loss=0.3425 dopamine_rpe=-1.000 kc_mbon=0.3879
+episode=1220 step=17898 reward=595.0 epsilon=0.050 loss=1.1264 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1221 step=17974 reward=675.0 epsilon=0.050 loss=1.3792 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1222 step=17978 reward=247.0 epsilon=0.050 loss=1.1050 dopamine_rpe=-1.000 kc_mbon=0.3878
+episode=1223 step=17986 reward=238.0 epsilon=0.050 loss=0.6450 dopamine_rpe=-1.000 kc_mbon=0.3878
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=18000 env_steps_per_s=6.4
+episode=1224 step=18053 reward=497.0 epsilon=0.050 loss=1.8085 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=1225 step=18058 reward=231.0 epsilon=0.050 loss=1.7677 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=1226 step=18063 reward=231.0 epsilon=0.050 loss=1.8727 dopamine_rpe=-1.000 kc_mbon=0.3874
+episode=1227 step=18068 reward=228.0 epsilon=0.050 loss=1.1329 dopamine_rpe=-1.000 kc_mbon=0.3873
+episode=1228 step=18073 reward=231.0 epsilon=0.050 loss=1.1094 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1229 step=18077 reward=241.0 epsilon=0.050 loss=0.9225 dopamine_rpe=-1.000 kc_mbon=0.3872
+episode=1230 step=18081 reward=241.0 epsilon=0.050 loss=0.7356 dopamine_rpe=-1.000 kc_mbon=0.3871
+episode=1231 step=18169 reward=502.0 epsilon=0.050 loss=0.6786 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1232 step=18174 reward=238.0 epsilon=0.050 loss=0.5091 dopamine_rpe=-1.000 kc_mbon=0.3877
+episode=1233 step=18179 reward=231.0 epsilon=0.050 loss=2.5452 dopamine_rpe=-1.000 kc_mbon=0.3876
+episode=1234 step=18447 reward=282.0 epsilon=0.050 loss=0.9056 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1235 step=18451 reward=252.0 epsilon=0.050 loss=0.8392 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1236 step=18455 reward=252.0 epsilon=0.050 loss=1.5611 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1237 step=18459 reward=252.0 epsilon=0.050 loss=1.0138 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1238 step=18463 reward=252.0 epsilon=0.050 loss=0.7065 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1239 step=18467 reward=247.0 epsilon=0.050 loss=0.6729 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1240 step=18471 reward=248.0 epsilon=0.050 loss=0.4876 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1241 step=18475 reward=249.0 epsilon=0.050 loss=0.7535 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1242 step=18479 reward=252.0 epsilon=0.050 loss=1.1955 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1243 step=18483 reward=249.0 epsilon=0.050 loss=1.1309 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1244 step=18487 reward=241.0 epsilon=0.050 loss=0.6460 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1245 step=18491 reward=241.0 epsilon=0.050 loss=2.3355 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1246 step=18495 reward=241.0 epsilon=0.050 loss=1.4993 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1247 step=18499 reward=241.0 epsilon=0.050 loss=1.9554 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1248 step=18503 reward=241.0 epsilon=0.050 loss=0.9164 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1249 step=18507 reward=241.0 epsilon=0.050 loss=1.1220 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1250 step=18511 reward=249.0 epsilon=0.050 loss=1.1382 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1251 step=18515 reward=249.0 epsilon=0.050 loss=1.3342 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=1252 step=18519 reward=241.0 epsilon=0.050 loss=0.7815 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=1253 step=18612 reward=1065.0 epsilon=0.050 loss=1.2521 dopamine_rpe=-1.000 kc_mbon=0.3901
+episode=1254 step=18616 reward=241.0 epsilon=0.050 loss=0.7023 dopamine_rpe=-1.000 kc_mbon=0.3901
+episode=1255 step=18647 reward=1028.0 epsilon=0.050 loss=0.8637 dopamine_rpe=-1.000 kc_mbon=0.3905
+episode=1256 step=18890 reward=735.0 epsilon=0.050 loss=1.1635 dopamine_rpe=-1.000 kc_mbon=0.3919
+episode=1257 step=18894 reward=241.0 epsilon=0.050 loss=0.9685 dopamine_rpe=-1.000 kc_mbon=0.3920
+episode=1258 step=18903 reward=223.0 epsilon=0.050 loss=1.8774 dopamine_rpe=-1.000 kc_mbon=0.3920
+episode=1259 step=18907 reward=241.0 epsilon=0.050 loss=0.5829 dopamine_rpe=-1.000 kc_mbon=0.3919
+episode=1260 step=18911 reward=241.0 epsilon=0.050 loss=0.9977 dopamine_rpe=-1.000 kc_mbon=0.3921
+episode=1261 step=18915 reward=241.0 epsilon=0.050 loss=1.0539 dopamine_rpe=-1.000 kc_mbon=0.3921
+episode=1262 step=18937 reward=636.0 epsilon=0.050 loss=1.9999 dopamine_rpe=-1.000 kc_mbon=0.3918
+episode=1263 step=18941 reward=241.0 epsilon=0.050 loss=1.5667 dopamine_rpe=-1.000 kc_mbon=0.3918
+episode=1264 step=18945 reward=241.0 epsilon=0.050 loss=2.2315 dopamine_rpe=-1.000 kc_mbon=0.3917
+episode=1265 step=18949 reward=241.0 epsilon=0.050 loss=0.8541 dopamine_rpe=-1.000 kc_mbon=0.3917
+episode=1266 step=18953 reward=241.0 epsilon=0.050 loss=0.9974 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=1267 step=18957 reward=241.0 epsilon=0.050 loss=1.2449 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=1268 step=18961 reward=241.0 epsilon=0.050 loss=0.8820 dopamine_rpe=-1.000 kc_mbon=0.3916
+episode=1269 step=18965 reward=241.0 epsilon=0.050 loss=1.1492 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=1270 step=18969 reward=241.0 epsilon=0.050 loss=1.1158 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=1271 step=18973 reward=241.0 epsilon=0.050 loss=0.8586 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=1272 step=18977 reward=241.0 epsilon=0.050 loss=0.5156 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=1273 step=18981 reward=241.0 epsilon=0.050 loss=1.3929 dopamine_rpe=-1.000 kc_mbon=0.3915
+episode=1274 step=18985 reward=241.0 epsilon=0.050 loss=0.8231 dopamine_rpe=-1.000 kc_mbon=0.3914
+episode=1275 step=18989 reward=241.0 epsilon=0.050 loss=0.9886 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=1276 step=18993 reward=241.0 epsilon=0.050 loss=0.6243 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=1277 step=18997 reward=241.0 epsilon=0.050 loss=0.4066 dopamine_rpe=-1.000 kc_mbon=0.3912
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=19000 env_steps_per_s=6.4
+episode=1278 step=19001 reward=242.0 epsilon=0.050 loss=1.8814 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1279 step=19005 reward=241.0 epsilon=0.050 loss=0.9702 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1280 step=19009 reward=241.0 epsilon=0.050 loss=1.7046 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1281 step=19013 reward=241.0 epsilon=0.050 loss=1.2687 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1282 step=19017 reward=241.0 epsilon=0.050 loss=1.2896 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1283 step=19024 reward=225.0 epsilon=0.050 loss=1.8952 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1284 step=19028 reward=241.0 epsilon=0.050 loss=1.4034 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1285 step=19032 reward=241.0 epsilon=0.050 loss=0.7276 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1286 step=19036 reward=241.0 epsilon=0.050 loss=0.5224 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1287 step=19040 reward=241.0 epsilon=0.050 loss=1.7068 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1288 step=19044 reward=241.0 epsilon=0.050 loss=0.3849 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1289 step=19050 reward=231.0 epsilon=0.050 loss=0.9631 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1290 step=19054 reward=241.0 epsilon=0.050 loss=1.2118 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=1291 step=19061 reward=232.0 epsilon=0.050 loss=0.7740 dopamine_rpe=-1.000 kc_mbon=0.3905
+episode=1292 step=19065 reward=241.0 epsilon=0.050 loss=0.3052 dopamine_rpe=-1.000 kc_mbon=0.3905
+episode=1293 step=19079 reward=630.0 epsilon=0.050 loss=1.3857 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=1294 step=19083 reward=241.0 epsilon=0.050 loss=0.5582 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=1295 step=19087 reward=241.0 epsilon=0.050 loss=1.1352 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=1296 step=19093 reward=231.0 epsilon=0.050 loss=0.9386 dopamine_rpe=-1.000 kc_mbon=0.3903
+episode=1297 step=19190 reward=625.0 epsilon=0.050 loss=1.0354 dopamine_rpe=-1.000 kc_mbon=0.3898
+episode=1298 step=19367 reward=821.0 epsilon=0.050 loss=0.5019 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=1299 step=19384 reward=582.0 epsilon=0.050 loss=0.6426 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1300 step=19417 reward=1039.0 epsilon=0.050 loss=0.7723 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=1301 step=19421 reward=241.0 epsilon=0.050 loss=0.2506 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1302 step=19425 reward=241.0 epsilon=0.050 loss=0.7634 dopamine_rpe=-1.000 kc_mbon=0.3913
+episode=1303 step=19429 reward=241.0 epsilon=0.050 loss=0.5437 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1304 step=19433 reward=241.0 epsilon=0.050 loss=0.9829 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1305 step=19437 reward=241.0 epsilon=0.050 loss=1.3371 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1306 step=19441 reward=241.0 epsilon=0.050 loss=0.5108 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1307 step=19445 reward=241.0 epsilon=0.050 loss=0.4660 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1308 step=19449 reward=241.0 epsilon=0.050 loss=0.5859 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1309 step=19453 reward=241.0 epsilon=0.050 loss=1.2588 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1310 step=19457 reward=241.0 epsilon=0.050 loss=0.3248 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1311 step=19461 reward=241.0 epsilon=0.050 loss=0.5010 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1312 step=19465 reward=241.0 epsilon=0.050 loss=1.5991 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1313 step=19469 reward=241.0 epsilon=0.050 loss=1.5903 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1314 step=19473 reward=241.0 epsilon=0.050 loss=1.4503 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1315 step=19552 reward=486.0 epsilon=0.050 loss=0.8814 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1316 step=19556 reward=241.0 epsilon=0.050 loss=1.1167 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1317 step=19561 reward=227.0 epsilon=0.050 loss=1.0166 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1318 step=19565 reward=241.0 epsilon=0.050 loss=1.5029 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1319 step=19569 reward=241.0 epsilon=0.050 loss=0.3024 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1320 step=19574 reward=228.0 epsilon=0.050 loss=0.3650 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1321 step=19578 reward=241.0 epsilon=0.050 loss=1.4562 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1322 step=19585 reward=203.0 epsilon=0.050 loss=1.4662 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1323 step=19590 reward=227.0 epsilon=0.050 loss=1.7053 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1324 step=19598 reward=208.0 epsilon=0.050 loss=2.0780 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1325 step=19603 reward=227.0 epsilon=0.050 loss=0.5782 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1326 step=19607 reward=242.0 epsilon=0.050 loss=0.5206 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1327 step=19611 reward=241.0 epsilon=0.050 loss=1.3982 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1328 step=19617 reward=218.0 epsilon=0.050 loss=1.0635 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=1329 step=19622 reward=230.0 epsilon=0.050 loss=1.0182 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=1330 step=19627 reward=230.0 epsilon=0.050 loss=1.5718 dopamine_rpe=-1.000 kc_mbon=0.3906
+episode=1331 step=19632 reward=230.0 epsilon=0.050 loss=1.6411 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1332 step=19637 reward=231.0 epsilon=0.050 loss=0.9372 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1333 step=19641 reward=242.0 epsilon=0.050 loss=1.3864 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1334 step=19647 reward=230.0 epsilon=0.050 loss=1.7420 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1335 step=19728 reward=969.0 epsilon=0.050 loss=0.2517 dopamine_rpe=-1.000 kc_mbon=0.3912
+episode=1336 step=19732 reward=249.0 epsilon=0.050 loss=1.4541 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1337 step=19739 reward=228.0 epsilon=0.050 loss=0.3915 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1338 step=19744 reward=230.0 epsilon=0.050 loss=0.6072 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1339 step=19748 reward=249.0 epsilon=0.050 loss=0.6107 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1340 step=19753 reward=230.0 epsilon=0.050 loss=0.9337 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1341 step=19757 reward=241.0 epsilon=0.050 loss=1.3496 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1342 step=19763 reward=223.0 epsilon=0.050 loss=1.1801 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1343 step=19767 reward=241.0 epsilon=0.050 loss=0.9042 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1344 step=19771 reward=252.0 epsilon=0.050 loss=1.0316 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1345 step=19775 reward=249.0 epsilon=0.050 loss=1.0688 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1346 step=19779 reward=241.0 epsilon=0.050 loss=1.7371 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1347 step=19783 reward=252.0 epsilon=0.050 loss=0.5584 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1348 step=19787 reward=241.0 epsilon=0.050 loss=0.7897 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1349 step=19791 reward=241.0 epsilon=0.050 loss=0.8187 dopamine_rpe=-1.000 kc_mbon=0.3909
+episode=1350 step=19795 reward=252.0 epsilon=0.050 loss=1.3294 dopamine_rpe=-1.000 kc_mbon=0.3908
+episode=1351 step=19799 reward=241.0 epsilon=0.050 loss=0.1847 dopamine_rpe=-1.000 kc_mbon=0.3907
+episode=1352 step=19961 reward=569.0 epsilon=0.050 loss=1.2315 dopamine_rpe=-1.000 kc_mbon=0.3911
+episode=1353 step=19965 reward=241.0 epsilon=0.050 loss=1.3697 dopamine_rpe=-1.000 kc_mbon=0.3910
+episode=1354 step=19969 reward=241.0 epsilon=0.050 loss=2.1603 dopamine_rpe=-1.000 kc_mbon=0.3909
+saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=20000 env_steps_per_s=6.5
+saved_replay=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-replay.npz step=20000 transitions=20000
+Pretraining completed. Reuse MARIO_RUN_TAG=malecns-dopamine-6150-v2 for physical fine-tuning.

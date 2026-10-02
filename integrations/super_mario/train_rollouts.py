@@ -13,6 +13,7 @@ import torch
 
 from mario_dqn import FlybrainAgent, FlybrainConfig, PrioritizedReplay
 from rollouts import DEFAULT_REWARD_PORT, RewardReceiver, load_rollout
+from reward_contract import REWARD_CONTRACT
 
 
 def _device(name: str) -> str:
@@ -50,7 +51,11 @@ def _load_processed(path: Path) -> set[str]:
     if not path.exists():
         return set()
     data = json.loads(path.read_text())
-    if data.get("schema") != 6 or not isinstance(data.get("rollouts"), list):
+    if (
+        data.get("schema") != 7
+        or data.get("reward_contract") != REWARD_CONTRACT
+        or not isinstance(data.get("rollouts"), list)
+    ):
         raise ValueError(f"invalid processed-rollout manifest: {path}")
     return {str(value) for value in data["rollouts"]}
 
@@ -58,7 +63,15 @@ def _load_processed(path: Path) -> set[str]:
 def _save_processed(path: Path, processed: set[str]) -> None:
     temporary = path.with_name(f".{path.name}.tmp")
     temporary.write_text(
-        json.dumps({"schema": 6, "rollouts": sorted(processed)}, indent=2) + "\n"
+        json.dumps(
+            {
+                "schema": 7,
+                "reward_contract": REWARD_CONTRACT,
+                "rollouts": sorted(processed),
+            },
+            indent=2,
+        )
+        + "\n"
     )
     temporary.replace(path)
 

@@ -278,7 +278,7 @@ plasticity (`dopamine-plasticity.npz`), and the complete PER buffer including it
 sampling state (`flybrain-replay.npz`):
 
 ```bash
-MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
+MARIO_RUN_TAG=malecns-dopamine-6150-v4 \
 MARIO_PRETRAIN_STEPS=20000 \
 DOPAMINE_LEARNING_RATE=0.001 \
     ./slurm_mario_flybrain_pretrain.sh
@@ -289,13 +289,90 @@ by each job. If Slurm stops this job early, submit the exact same command and
 tag again; the wrapper restores all three files and continues from the saved
 step. Its header will say `Mode: resume`. If 20,000 finishes and more training
 is useful, resubmit with `MARIO_PRETRAIN_STEPS=40000` to train only decisions
-20,001 through 40,000. Choose a new tag (for example `...-v3`) only when a truly
+20,001 through 40,000. Choose a new tag (for example `...-v5`) only when a truly
 fresh DQN and dopamine state is intended; do not delete a partially saved run.
+
+The `malecns-dopamine-6150-v2` and reward-shaped v3 checkpoints must not be
+resumed. New checkpoints use the exact sum of rewards returned by
+`env.step()` during a held action: component values remain telemetry and are
+never reweighted, clipped, or overridden. The checkpoint reward-contract gate
+rejects older states. Episode logs show the environment training reward and all
+seven diagnostic Mario reward components.
+
+Before replacing that checkpoint, evaluate it without learning or modifying its
+DQN/dopamine files:
+
+```bash
+MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
+MARIO_EVAL_EPISODES=25 \
+MARIO_EVAL_EPSILONS="0.0 0.05" \
+    ./slurm_mario_flybrain_evaluate.sh
+```
+
+The `epsilon=0` report measures the learned greedy policy; `epsilon=0.05`
+measures it with the exploration used near the end of training. Reports are
+written to `run/evaluations/frozen-epsilon-*.json` and compare the shaped reward
+that v2 learned against the unmodified environment reward. They include death and
+completion rates, maximum x position, first actions, action frequencies,
+initial/fatal-terminal action counts, greedy-Q argmax frequencies, and mean Q
+values. It also reports MaleCNS-state RMS and temporal change. If the greedy
+argmax itself is dominated by a rightward action while the state changes, the
+collapse is in the learned DQN values; a near-zero state-change metric instead
+points to an uninformative MaleCNS input stream.
+
+#### Controlled DQN / Double-DQN / PPO benchmark
+
+Choose the game-learning method before enabling dopamine plasticity or the
+physical controller. This benchmark holds constant the Mario level, MaleCNS
+input, four-trace observation, ten actions, 30-frame action duration, decision
+budget, seed, and exact Gymnasium reward. Dopamine is disabled so an algorithm
+cannot change its own observation representation. DQN and Double DQN share the
+same temporal dueling network and PER buffer; their only difference is the
+target-action selection rule. PPO uses the same temporal encoder dimensions
+with categorical policy and value heads.
+
+```bash
+# Required smoke test: crosses the 500-transition replay warmup and exercises
+# all three learners, checkpointing, frozen evaluation, and TensorBoard output.
+MARIO_BENCHMARK_TAG=raw-reward-smoke \
+MARIO_BENCHMARK_STEPS=600 \
+MARIO_BENCHMARK_SAVE_EVERY=300 \
+MARIO_BENCHMARK_EVAL_EPISODES=2 \
+MARIO_BENCHMARK_EVAL_MAX_DECISIONS=100 \
+    ./slurm_mario_algorithm_benchmark.sh
+
+# Full controlled comparison after the smoke job succeeds.
+MARIO_BENCHMARK_TAG=raw-reward-v1 \
+MARIO_BENCHMARK_SEED=123 \
+MARIO_BENCHMARK_STEPS=20000 \
+    ./slurm_mario_algorithm_benchmark.sh
+```
+
+The algorithms run sequentially within the four-hour allocation and checkpoint
+independently. Resubmit the identical command if time expires; completed
+algorithms are skipped and an interrupted one resumes. For a final selection,
+repeat with seeds `456` and `789` rather than trusting one seed.
+
+Every TensorBoard run uses identical tags, including
+`reward/episode_return`, `reward/average_100_episodes`,
+`episode/length_decisions`, `episode/max_x`, and frozen deterministic
+`evaluation/*` metrics. Start TensorBoard with:
+
+```bash
+ROOT="$SCRATCH/microduck-rl/mario-algorithm-benchmark-raw-reward-v1-seed-123"
+"$ROOT/venv/bin/tensorboard" \
+    --logdir "$ROOT/run/tensorboard" --host 0.0.0.0 --port 6006
+```
+
+Open `http://127.0.0.1:6006` in an RDP session on that host, or tunnel port
+6006. Select DQN, Double DQN, and PPO together in TensorBoard to overlay their
+average-return curves. Final frozen reports are also written as
+`run/checkpoints/{dqn,double_dqn,ppo}-evaluation.json`.
 
 Progress and checkpoint state are available at:
 
 ```bash
-ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2"
+ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-dopamine-6150-v4"
 tail -f "$ROOT"/slurm/pretrain-*.log
 ls -lh "$ROOT"/run/{flybrain-online.pt,dopamine-plasticity.npz,flybrain-replay.npz}
 ```
@@ -308,7 +385,7 @@ skips rollouts already listed in the processed manifest:
 
 ```bash
 MARIO_POLICY=/scratch/scholar/tyalaman/microduck-rl/mario-controller-6150.onnx \
-MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
+MARIO_RUN_TAG=malecns-dopamine-6150-v4 \
 MARIO_RUN_SECONDS=13800 \
 MARIO_DECISION_FRAMES=90 \
 DOPAMINE_LEARNING_RATE=0.001 \
