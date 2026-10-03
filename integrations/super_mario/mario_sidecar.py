@@ -263,6 +263,8 @@ def run(args: argparse.Namespace) -> None:
     run_id = f"{int(time.time())}-{uuid.uuid4().hex[:8]}"
     active_state = None
     active_action = 0
+    active_log_probability = float("nan")
+    active_value = float("nan")
     active_action_sequence = -1
     interval_reward = 0.0
     interval_components: dict[str, float] = {}
@@ -273,10 +275,11 @@ def run(args: argparse.Namespace) -> None:
     flybrain_mtime_ns = None
     if args.flybrain:
         from male_cns import MaleCNS
-        from mario_dqn import ActivityStack, FlybrainAgent, action_levels
+        from mario_dqn import ActivityStack, action_levels
+        from mario_ppo import PPOAgent
         from rollouts import RewardSender, RolloutRecorder, training_reward
 
-        flybrain = FlybrainAgent.load(args.flybrain, device=args.flybrain_device)
+        flybrain = PPOAgent.load(args.flybrain, device=args.flybrain_device)
         flybrain_mtime_ns = args.flybrain.stat().st_mtime_ns
         spike_file = args.spike_file or (
             args.rollout_dir / "spikes.jsonl" if args.rollout_dir is not None else None
@@ -337,6 +340,8 @@ def run(args: argparse.Namespace) -> None:
                             action_sequence=active_action_sequence,
                             emulator_steps=interval_steps,
                             execution_fraction=execution_fraction,
+                            behavior_log_probability=active_log_probability,
+                            behavior_value=active_value,
                         )
                     else:
                         event = {
@@ -354,14 +359,15 @@ def run(args: argparse.Namespace) -> None:
                             "reward_components": interval_components,
                             "emulator_steps": interval_steps,
                             "execution_fraction": execution_fraction,
+                            "behavior_log_probability": active_log_probability,
+                            "behavior_value": active_value,
                         }
                     if execution_fraction >= args.minimum_execution_fraction:
-                        prediction_error = flybrain.td_error(
-                            active_state,
-                            active_action,
+                        prediction_error = flybrain.prediction_error(
                             event["training_reward"],
                             next_state,
                             False,
+                            value=active_value,
                         )
                         male_cns.reinforce(prediction_error)
                     if reward_sender is not None:
@@ -369,28 +375,35 @@ def run(args: argparse.Namespace) -> None:
                     rollout_transition += 1
                 else:
                     next_state = activity_stack.state
-                if args.flybrain_reload:
+                # PPO is on-policy: keep one behavior policy for the complete
+                # episode and only adopt a freshly trained checkpoint between
+                # episodes.
+                if args.flybrain_reload and active_state is None:
+                    if active_action_sequence >= 0 and args.flybrain_reload_wait > 0:
+                        deadline = time.monotonic() + args.flybrain_reload_wait
+                        while (
+                            args.flybrain.stat().st_mtime_ns == flybrain_mtime_ns
+                            and time.monotonic() < deadline
+                        ):
+                            time.sleep(0.05)
                     current_mtime_ns = args.flybrain.stat().st_mtime_ns
                     if current_mtime_ns != flybrain_mtime_ns:
-                        exploration_state = flybrain.exploration_state()
-                        reloaded_flybrain = FlybrainAgent.load(
+                        sampling_state = flybrain.action_sampling_state()
+                        reloaded_flybrain = PPOAgent.load(
                             args.flybrain, device=args.flybrain_device
                         )
-                        reloaded_flybrain.restore_exploration_state(
-                            exploration_state
-                        )
+                        reloaded_flybrain.restore_action_sampling_state(sampling_state)
                         flybrain = reloaded_flybrain
                         flybrain_mtime_ns = current_mtime_ns
                         print(f"reloaded flybrain checkpoint: {args.flybrain}")
-                epsilon = (
-                    None
-                    if args.flybrain_use_scheduled_epsilon
-                    else args.flybrain_epsilon
+                action, log_probability, value = flybrain.act(
+                    next_state, deterministic=not args.flybrain_sample_actions
                 )
-                action = flybrain.act(next_state, epsilon=epsilon)
                 requested = PadLevels(*action_levels(action))
                 active_state = next_state.copy()
                 active_action = action
+                active_log_probability = log_probability
+                active_value = value
                 active_action_sequence += 1
                 interval_reward = 0.0
                 interval_components = {}
@@ -462,6 +475,8 @@ def run(args: argparse.Namespace) -> None:
                             action_sequence=active_action_sequence,
                             emulator_steps=interval_steps,
                             execution_fraction=execution_fraction,
+                            behavior_log_probability=active_log_probability,
+                            behavior_value=active_value,
                         )
                     else:
                         event = {
@@ -479,14 +494,15 @@ def run(args: argparse.Namespace) -> None:
                             "reward_components": interval_components,
                             "emulator_steps": interval_steps,
                             "execution_fraction": execution_fraction,
+                            "behavior_log_probability": active_log_probability,
+                            "behavior_value": active_value,
                         }
                     if execution_fraction >= args.minimum_execution_fraction:
-                        prediction_error = flybrain.td_error(
-                            active_state,
-                            active_action,
+                        prediction_error = flybrain.prediction_error(
                             event["training_reward"],
                             terminal_state,
                             True,
+                            value=active_value,
                         )
                         male_cns.reinforce(prediction_error)
                     if reward_sender is not None:
@@ -549,7 +565,7 @@ def main() -> None:
     parser.add_argument("--fps", type=float, default=60.0)
     parser.add_argument("--unthrottled", action="store_true")
     parser.add_argument("--max-steps", type=int, default=0, help="0 runs until interrupted")
-    parser.add_argument("--flybrain", type=Path, help="DQN checkpoint; requests actions over UDP")
+    parser.add_argument("--flybrain", type=Path, help="PPO checkpoint; requests actions over UDP")
     parser.add_argument("--flybrain-device", default="cpu")
     parser.add_argument(
         "--male-cns-device", choices=("auto", "cpu", "cuda"), default="auto"
@@ -569,11 +585,10 @@ def main() -> None:
         "--spike-file", type=Path,
         help="write genuine MaleCNS descending-neuron spikes as JSONL",
     )
-    parser.add_argument("--flybrain-epsilon", type=float, default=0.0)
     parser.add_argument(
-        "--flybrain-use-scheduled-epsilon",
+        "--flybrain-sample-actions",
         action="store_true",
-        help="use the checkpoint's decaying exploration schedule during online training",
+        help="sample the PPO categorical policy during training (default: argmax)",
     )
     parser.add_argument(
         "--flybrain-decision-frames",
@@ -600,6 +615,12 @@ def main() -> None:
         action="store_true",
         help="atomically reload the checkpoint when the rollout trainer updates it",
     )
+    parser.add_argument(
+        "--flybrain-reload-wait",
+        type=float,
+        default=5.0,
+        help="at an episode boundary, wait this long for the on-policy PPO update",
+    )
     parser.add_argument("--screenshot")
     parser.add_argument(
         "--frame-shm",
@@ -618,10 +639,10 @@ def main() -> None:
         parser.error("--fps must be positive")
     if args.flybrain_decision_frames <= 0:
         parser.error("--flybrain-decision-frames must be positive")
-    if not 0.0 <= args.flybrain_epsilon <= 1.0:
-        parser.error("--flybrain-epsilon must be in [0, 1]")
     if args.dopamine_learning_rate <= 0.0:
         parser.error("--dopamine-learning-rate must be positive")
+    if args.flybrain_reload_wait < 0.0:
+        parser.error("--flybrain-reload-wait must be non-negative")
     if not 0.0 <= args.minimum_execution_fraction <= 1.0:
         parser.error("--minimum-execution-fraction must be in [0, 1]")
     if args.dopamine_state is not None and args.male_cns_device != "cpu":
@@ -633,10 +654,10 @@ def main() -> None:
     if (
         args.rollout_dir is not None
         or args.flybrain_reload
-        or args.flybrain_use_scheduled_epsilon
+        or args.flybrain_sample_actions
     ) and not args.flybrain:
         parser.error(
-            "--rollout-dir, --flybrain-reload, and scheduled epsilon require --flybrain"
+            "--rollout-dir, --flybrain-reload, and action sampling require --flybrain"
         )
     run(args)
 

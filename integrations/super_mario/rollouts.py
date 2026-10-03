@@ -166,6 +166,8 @@ class RolloutRecorder:
         action_sequence: int,
         emulator_steps: int,
         execution_fraction: float = 1.0,
+        behavior_log_probability: float = float("nan"),
+        behavior_value: float = float("nan"),
     ) -> dict:
         state = np.asarray(state, dtype=np.float16)
         next_state = np.asarray(next_state, dtype=np.float16)
@@ -189,6 +191,8 @@ class RolloutRecorder:
             "action_sequence": int(action_sequence),
             "emulator_steps": int(emulator_steps),
             "execution_fraction": float(execution_fraction),
+            "behavior_log_probability": float(behavior_log_probability),
+            "behavior_value": float(behavior_value),
         }
         self._rows.append(row)
         event = {
@@ -204,6 +208,8 @@ class RolloutRecorder:
             "reward_components": components,
             "emulator_steps": row["emulator_steps"],
             "execution_fraction": row["execution_fraction"],
+            "behavior_log_probability": row["behavior_log_probability"],
+            "behavior_value": row["behavior_value"],
         }
         with (self.root / "transitions.jsonl").open("a", encoding="utf-8") as output:
             output.write(json.dumps(event, sort_keys=True) + "\n")
@@ -219,9 +225,9 @@ class RolloutRecorder:
         destination = self.root / name
         temporary = self.root / f".{name}.{uuid.uuid4().hex}.tmp"
         metadata = {
-            # Schema 7 stores the exact accumulated Gymnasium reward. It spans
-            # many MaleCNS steps, so consecutive stacks need not overlap.
-            "schema": 7,
+            # Schema 8 adds the behavior-policy log probability and critic
+            # value required for valid on-policy PPO updates.
+            "schema": 8,
             "reward_contract": REWARD_CONTRACT,
             "input": "malecns_descending_neuron_trace",
             "feature_dim": self.feature_dim,
@@ -255,6 +261,13 @@ class RolloutRecorder:
                 execution_fractions=np.asarray(
                     [row["execution_fraction"] for row in rows], dtype=np.float32
                 ),
+                behavior_log_probabilities=np.asarray(
+                    [row["behavior_log_probability"] for row in rows],
+                    dtype=np.float32,
+                ),
+                behavior_values=np.asarray(
+                    [row["behavior_value"] for row in rows], dtype=np.float32
+                ),
                 reward_components=np.asarray(
                     [
                         [row["components"][key] for key in REWARD_COMPONENTS]
@@ -287,7 +300,7 @@ def load_rollout(path: Path) -> tuple[dict, dict[str, np.ndarray]]:
         metadata = json.loads(str(archive["metadata"]))
         arrays = {key: archive[key].copy() for key in archive.files if key != "metadata"}
     if (
-        metadata.get("schema") != 7
+        metadata.get("schema") != 8
         or metadata.get("reward_contract") != REWARD_CONTRACT
     ):
         raise ValueError("unsupported rollout schema")

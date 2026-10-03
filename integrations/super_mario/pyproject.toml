@@ -18,6 +18,8 @@ dependencies = [
 microduck-super-mario = "mario_sidecar:main"
 microduck-train-flybrain = "train_flybrain:main"
 microduck-train-flybrain-rollouts = "train_rollouts:main"
+microduck-train-ppo-flybrain = "train_ppo_flybrain:main"
+microduck-train-ppo-rollouts = "train_ppo_rollouts:main"
 microduck-evaluate-flybrain = "evaluate_flybrain:main"
 microduck-benchmark-mario = "benchmark_algorithms:main"
 microduck-visualize-flybrain = "visualize_flybrain:main"
@@ -27,4 +29,4 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-include = ["mario_sidecar.py", "male_cns.py", "dopamine.py", "reward_contract.py", "mario_dqn.py", "mario_ppo.py", "rollouts.py", "train_flybrain.py", "train_rollouts.py", "evaluate_flybrain.py", "benchmark_algorithms.py", "visualize_flybrain.py"]
+include = ["mario_sidecar.py", "male_cns.py", "dopamine.py", "reward_contract.py", "mario_dqn.py", "mario_ppo.py", "rollouts.py", "train_flybrain.py", "train_rollouts.py", "train_ppo_flybrain.py", "train_ppo_rollouts.py", "evaluate_flybrain.py", "benchmark_algorithms.py", "visualize_flybrain.py"]

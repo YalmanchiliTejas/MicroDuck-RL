@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# One Slurm allocation for the combined Mario emulator, DQN learner,
+# One Slurm allocation for the combined Mario emulator, PPO learner,
 # MicroDuck MuJoCo/PPO controller, rollout recorder, and live dashboard.
 #
 # Submit:
@@ -14,7 +14,7 @@
 #SBATCH --time=04:00:00
 #SBATCH --partition=gpu
 # Give the supervisor time to stop every child cleanly.  The trainer saves the
-# DQN/optimizer and processed-rollout manifest; the sidecar saves dopamine.
+# PPO/optimizer and processed-rollout manifest; the sidecar saves dopamine.
 #SBATCH --signal=TERM@180
 
 set -euo pipefail
@@ -53,7 +53,7 @@ SCRATCH_ROOT="${SCRATCH}/microduck-rl/mario-flybrain-${MARIO_RUN_TAG}"
 OUTPUT_DIR="${SCRATCH_ROOT}/slurm"
 RUN_DIR="${SCRATCH_ROOT}/run"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
-PRETRAINED_CHECKPOINT="${RUN_DIR}/flybrain-online.pt"
+PRETRAINED_CHECKPOINT="${RUN_DIR}/flybrain-ppo.pt"
 PRETRAINED_DOPAMINE="${RUN_DIR}/dopamine-plasticity.npz"
 if [[ "${MARIO_REQUIRE_PRETRAIN:-1}" == "1" ]] && {
     [[ ! -f "${PRETRAINED_CHECKPOINT}" ]] || [[ ! -f "${PRETRAINED_DOPAMINE}" ]]
@@ -110,7 +110,7 @@ echo "Host:         $(hostname)"
 echo "Repository:   ${REPO_DIR}"
 echo "Run:          ${RUN_DIR}"
 echo "Policy:       ${MARIO_POLICY}"
-echo "DQN preload:  ${PRETRAINED_CHECKPOINT}"
+echo "PPO preload:  ${PRETRAINED_CHECKPOINT}"
 echo "DA preload:   ${PRETRAINED_DOPAMINE}"
 echo "Dashboard:    ssh -L 8765:$(hostname):8765 <cluster-login>"
 
@@ -132,6 +132,7 @@ launcher_args=(
     --robot-python "${UV_PROJECT_ENVIRONMENT}/bin/python"
     --robot-device "${MARIO_ROBOT_DEVICE:-cuda:0}"
     --run-dir "${RUN_DIR}"
+    --checkpoint "${PRETRAINED_CHECKPOINT}"
     --duration-seconds "${RUN_SECONDS}"
     --decision-frames "${DECISION_FRAMES}"
     --dashboard-host 0.0.0.0

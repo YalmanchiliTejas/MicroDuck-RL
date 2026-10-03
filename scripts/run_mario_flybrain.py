@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import time
 
 
@@ -40,7 +41,7 @@ def _stop(processes) -> None:
                 os.killpg(process.pid, signal.SIGTERM)
             except ProcessLookupError:
                 pass
-    # Dopamine plasticity and the DQN checkpoint can be large.  Slurm warns the
+    # Dopamine plasticity and the PPO checkpoint can be large.  Slurm warns the
     # supervisor three minutes before the allocation ends, so give children a
     # full minute to finish their atomic final saves before forcing a stop.
     deadline = time.monotonic() + 60.0
@@ -127,7 +128,7 @@ def main() -> int:
     run_dir = args.run_dir.resolve()
     rollout_dir = run_dir / "rollouts"
     log_dir = run_dir / "logs"
-    checkpoint = (args.checkpoint or run_dir / "flybrain-online.pt").resolve()
+    checkpoint = (args.checkpoint or run_dir / "flybrain-ppo.pt").resolve()
     dopamine_state = (run_dir / "dopamine-plasticity.npz").resolve()
     rollout_dir.mkdir(parents=True, exist_ok=True)
     log_dir.mkdir(parents=True, exist_ok=True)
@@ -171,11 +172,13 @@ def main() -> int:
     try:
         trainer_command = _command(
             args.sidecar_python,
-            "train_rollouts.py",
+            "train_ppo_rollouts.py",
             "--rollout-dir",
             rollout_dir,
             "--output",
             checkpoint,
+            "--tensorboard-dir",
+            run_dir / "tensorboard" / "ppo-physical",
         )
         if args.male_cns_data:
             trainer_command.extend(("--male-cns-data", str(args.male_cns_data)))
@@ -188,7 +191,7 @@ def main() -> int:
             )
         )
         # A fresh run may download the ~260 MB prebuilt MaleCNS files before
-        # creating the schema-4 readout checkpoint.
+        # creating the PPO readout checkpoint.
         deadline = time.monotonic() + 900.0
         while not (
             checkpoint.exists()
@@ -206,7 +209,7 @@ def main() -> int:
                 )
             if time.monotonic() >= deadline:
                 raise TimeoutError(
-                    "trainer did not restore replay and publish its checkpoint "
+                    "trainer did not publish its PPO checkpoint "
                     "within 900 seconds"
                 )
             time.sleep(0.2)
@@ -218,7 +221,7 @@ def main() -> int:
             "--flybrain",
             checkpoint,
             "--flybrain-reload",
-            "--flybrain-use-scheduled-epsilon",
+            "--flybrain-sample-actions",
             "--flybrain-decision-frames",
             args.decision_frames,
             "--frame-shm",

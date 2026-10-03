@@ -128,6 +128,30 @@ def _load_ppo(flybrain):
     return module
 
 
+def _load_ppo_rollout_trainer(ppo, rollouts):
+    previous_ppo = sys.modules.get("mario_ppo")
+    previous_rollouts = sys.modules.get("rollouts")
+    sys.modules["mario_ppo"] = ppo
+    sys.modules["rollouts"] = rollouts
+    path = Path(__file__).parents[1] / "integrations/super_mario/train_ppo_rollouts.py"
+    spec = importlib.util.spec_from_file_location("microduck_test_ppo_rollout_trainer", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    sys.modules[spec.name] = module
+    try:
+        spec.loader.exec_module(module)
+    finally:
+        if previous_ppo is None:
+            sys.modules.pop("mario_ppo", None)
+        else:
+            sys.modules["mario_ppo"] = previous_ppo
+        if previous_rollouts is None:
+            sys.modules.pop("rollouts", None)
+        else:
+            sys.modules["rollouts"] = previous_rollouts
+    return module
+
+
 def test_flybrain_actions_cover_combinations_without_opposite_directions():
     flybrain = _load_flybrain()
     assert [flybrain.action_levels(i) for i in range(10)] == [
@@ -568,6 +592,44 @@ def test_completed_rollout_can_be_ingested_into_per_and_trained(tmp_path):
     assert reward == -23.0
     assert loss is not None
     assert len(replay) == 2
+
+
+def test_completed_physical_rollout_updates_ppo_only_for_executed_segments(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    rollouts = _load_rollouts()
+    trainer = _load_ppo_rollout_trainer(ppo, rollouts)
+    agent = ppo.PPOAgent(
+        ppo.PPOConfig(feature_dim=6, minibatch_size=2, update_epochs=1), seed=5
+    )
+    recorder = rollouts.RolloutRecorder(tmp_path, 4, 6, run_id="ppo")
+    state = np.zeros((4, 6), dtype=np.float32)
+    for index, execution_fraction in enumerate((1.0, 0.1, 1.0)):
+        action, log_probability, value = agent.act(state)
+        next_state = np.full((4, 6), index + 1, dtype=np.float32)
+        recorder.add(
+            state=state,
+            action=action,
+            reward=float(index + 1),
+            next_state=next_state,
+            terminated=index == 2,
+            truncated=False,
+            reward_components={"progress": float(index + 1)},
+            action_sequence=index,
+            emulator_steps=30,
+            execution_fraction=execution_fraction,
+            behavior_log_probability=log_probability,
+            behavior_value=value,
+        )
+        state = next_state
+
+    count, reward, metrics = trainer.ingest_rollout(
+        next(tmp_path.glob("rollout-*.npz")), agent
+    )
+    assert count == 2
+    assert reward == 6.0
+    assert metrics is not None
+    assert agent.steps == 2
 
 
 def test_checkpoint_continues_random_exploration_sequence(tmp_path):

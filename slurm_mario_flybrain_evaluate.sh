@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Frozen emulator evaluation for an existing MaleCNS DQN checkpoint.
-# This never trains the DQN, never calls dopamine reinforce, and never saves
+# Frozen emulator evaluation for an existing MaleCNS PPO checkpoint.
+# This never trains PPO, never calls dopamine reinforce, and never saves
 # over the supplied checkpoint or dopamine state.
 
 #SBATCH --job-name=microduck-mario-eval
@@ -18,7 +18,7 @@ SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="${MICRODUCK_REPO_DIR:-${SCRIPT_DIR}}"
 : "${SCRATCH:?The cluster must provide SCRATCH (for example /scratch/$USER).}"
 
-MARIO_RUN_TAG="${MARIO_RUN_TAG:-malecns-dopamine-6150-v2}"
+MARIO_RUN_TAG="${MARIO_RUN_TAG:-malecns-ppo-6150-v1}"
 if ! [[ "${MARIO_RUN_TAG}" =~ ^[A-Za-z0-9._-]+$ ]]; then
     echo "ERROR: invalid MARIO_RUN_TAG: ${MARIO_RUN_TAG}" >&2
     exit 1
@@ -28,7 +28,7 @@ ROOT="${SCRATCH}/microduck-rl/mario-flybrain-${MARIO_RUN_TAG}"
 RUN_DIR="${ROOT}/run"
 OUTPUT_DIR="${ROOT}/slurm"
 EVAL_DIR="${RUN_DIR}/evaluations"
-CHECKPOINT="${MARIO_EVAL_CHECKPOINT:-${RUN_DIR}/flybrain-online.pt}"
+CHECKPOINT="${MARIO_EVAL_CHECKPOINT:-${RUN_DIR}/flybrain-ppo.pt}"
 DOPAMINE_STATE="${MARIO_EVAL_DOPAMINE_STATE:-${RUN_DIR}/dopamine-plasticity.npz}"
 mkdir -p "${OUTPUT_DIR}" "${EVAL_DIR}"
 
@@ -63,20 +63,22 @@ uv pip install --python "${SIDECAR_VENV}/bin/python" "${REPO_DIR}/integrations/s
 EPISODES="${MARIO_EVAL_EPISODES:-25}"
 MAX_DECISIONS="${MARIO_EVAL_MAX_DECISIONS:-300}"
 ACTION_REPEAT="${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-30}}"
-EPSILONS="${MARIO_EVAL_EPSILONS:-0.0 0.05}"
+MODES="${MARIO_EVAL_MODES:-mean sampled}"
 
 echo "Job ID:          ${SLURM_JOB_ID}"
 echo "Checkpoint:      ${CHECKPOINT}"
 echo "Dopamine state:  ${DOPAMINE_STATE}"
 echo "Episodes/mode:   ${EPISODES}"
-echo "Epsilons:        ${EPSILONS}"
+echo "Modes:           ${MODES}"
 echo "Learning:        disabled"
 echo "Dopamine update: disabled"
 
-for epsilon in ${EPSILONS}; do
-    epsilon_tag="${epsilon//./p}"
-    report="${EVAL_DIR}/frozen-epsilon-${epsilon_tag}-${SLURM_JOB_ID}.json"
-    echo "Evaluating epsilon=${epsilon}; report=${report}"
+for mode in ${MODES}; do
+    case "${mode}" in mean|sampled) ;; *) echo "ERROR: mode must be mean or sampled" >&2; exit 1 ;; esac
+    report="${EVAL_DIR}/frozen-${mode}-${SLURM_JOB_ID}.json"
+    sample_args=()
+    if [[ "${mode}" == "sampled" ]]; then sample_args+=(--sample-actions); fi
+    echo "Evaluating mode=${mode}; report=${report}"
     "${SIDECAR_VENV}/bin/python" \
         "${REPO_DIR}/integrations/super_mario/evaluate_flybrain.py" \
         --checkpoint "${CHECKPOINT}" \
@@ -86,8 +88,7 @@ for epsilon in ${EPSILONS}; do
         --episodes "${EPISODES}" \
         --max-decisions-per-episode "${MAX_DECISIONS}" \
         --action-repeat "${ACTION_REPEAT}" \
-        --epsilon "${epsilon}" \
-        --allow-legacy-reward-contract \
+        "${sample_args[@]}" \
         --output "${report}"
 done
 

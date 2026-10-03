@@ -223,30 +223,27 @@ whichever direction the duck actually presses. Otherwise the same physical
 press makes Mario walk. A 250 ms deadman timer releases all buttons if
 controller packets stop.
 
-#### MaleCNS fly brain + high-level DQN readout
+#### MaleCNS fly brain + high-level PPO readout
 
 The published MaleCNS v1.0 connectome is deliberately separate from the 50 Hz
 PPO motor controller. Mario pixels stimulate its compound-eye photoreceptors
 and identified visual-projection cells (LPLC2, LC4, LPLC1 and LC10a). The
 166,700-neuron LIF network keeps its published wiring. Reward-modulated
 plasticity is restricted to its real KC-to-MBON synapses: recent Kenyon-cell
-activity forms an eligibility trace, while positive and negative DQN reward
+activity forms an eligibility trace, while positive and negative PPO critic
 prediction errors stimulate PAM- and PPL1-targeted MBON compartments. Learned
-synaptic scales are persisted separately from the DQN checkpoint.
+synaptic scales are persisted separately from the PPO checkpoint.
 The policy sees only four consecutive exponential traces from the connectome's
 1,314 descending neurons and chooses one of ten game intents: idle, walk
 left/right, jump, walk+jump, run left/right, or run+jump.
 The robot still has only three physical controls (LEFT, RIGHT, JUMP). The run
 bit is sent alongside the physical request but never enters the PPO observation;
 after the duck responds, the sidecar applies virtual NES `B` only to its
-measured direction. A temporal CNN and dueling Double-DQN readout learn from
-the four real descending-neuron traces with prioritized replay. There is no
-pixel-to-action bypass. PER priorities belong to whole transitions
-`(activity stack, action, reward, next activity stack, done)`. Every replay
-item stores complete float16 pre-action and post-action stacks, because the
-30-frame action interval advances MaleCNS many times and those stacks need not
-overlap. Random sampling therefore cannot detach an action from its resulting
-connectome state.
+measured direction. A temporal encoder with categorical policy and value heads
+learns from the four real descending-neuron traces. There is no pixel-to-action
+bypass. Physical rollouts store the behavior log probability and critic value;
+the sidecar keeps one PPO snapshot fixed for the complete episode and reloads a
+new checkpoint only at the next episode boundary.
 
 The physical pads are now a tight, non-overlapping triangle (5–20 mm edge gaps)
 so a request change does not require crossing the original large empty spaces.
@@ -266,31 +263,46 @@ python3.13 -m venv .super-mario-venv
 
 # Fast emulator baseline. Use --action-repeat 30 for a first latency-matched
 # physical experiment; tune it from measured request-to-pad latency.
-.super-mario-venv/bin/microduck-train-flybrain \
-    --steps 1000000 --action-repeat 30 --output flybrain.pt \
+.super-mario-venv/bin/microduck-train-ppo-flybrain \
+    --additional-steps 20000 --action-repeat 30 --output flybrain-ppo.pt \
+    --tensorboard-dir tensorboard/ppo-pretrain \
     --male-cns-device cpu --dopamine-state dopamine-plasticity.npz
 ```
 
 On Slurm, use a fresh run tag for the first emulator-pretraining job. The job is
 capped at four hours and receives `SIGTERM` three minutes before the hard limit.
-It atomically checkpoints the DQN and optimizer (`flybrain-online.pt`), dopamine
-plasticity (`dopamine-plasticity.npz`), and the complete PER buffer including its
-sampling state (`flybrain-replay.npz`):
+It atomically checkpoints PPO and its optimizer (`flybrain-ppo.pt`) plus
+dopamine plasticity (`dopamine-plasticity.npz`):
 
 ```bash
-MARIO_RUN_TAG=malecns-dopamine-6150-v4 \
+MARIO_RUN_TAG=malecns-ppo-6150-v1 \
 MARIO_PRETRAIN_STEPS=20000 \
 DOPAMINE_LEARNING_RATE=0.001 \
     ./slurm_mario_flybrain_pretrain.sh
 ```
 
-`MARIO_PRETRAIN_STEPS` is the target total decision count, not the number added
-by each job. If Slurm stops this job early, submit the exact same command and
-tag again; the wrapper restores all three files and continues from the saved
-step. Its header will say `Mode: resume`. If 20,000 finishes and more training
-is useful, resubmit with `MARIO_PRETRAIN_STEPS=40000` to train only decisions
-20,001 through 40,000. Choose a new tag (for example `...-v5`) only when a truly
-fresh DQN and dopamine state is intended; do not delete a partially saved run.
+`MARIO_PRETRAIN_STEPS` is the number of decisions added by each submitted job.
+If Slurm stops early, the checkpoint is still saved; resubmitting the same tag
+adds another block from that state. To seed production from the winning
+controlled benchmark, set an absolute checkpoint path on the first submission:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-6150-v1 \
+MARIO_PPO_INITIAL_CHECKPOINT="$SCRATCH/microduck-rl/mario-algorithm-benchmark-raw-reward-v1-seed-123/run/checkpoints/ppo.pt" \
+MARIO_PRETRAIN_STEPS=20000 \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+This initializes fresh dopamine state while continuing the winning PPO policy.
+
+Evaluate the resulting checkpoint in both deterministic and sampled modes
+without changing PPO or dopamine state:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-6150-v1 \
+MARIO_EVAL_MODES="mean sampled" \
+    ./slurm_mario_flybrain_evaluate.sh
+```
 
 The `malecns-dopamine-6150-v2` and reward-shaped v3 checkpoints must not be
 resumed. New checkpoints use the exact sum of rewards returned by
@@ -298,27 +310,6 @@ resumed. New checkpoints use the exact sum of rewards returned by
 never reweighted, clipped, or overridden. The checkpoint reward-contract gate
 rejects older states. Episode logs show the environment training reward and all
 seven diagnostic Mario reward components.
-
-Before replacing that checkpoint, evaluate it without learning or modifying its
-DQN/dopamine files:
-
-```bash
-MARIO_RUN_TAG=malecns-dopamine-6150-v2 \
-MARIO_EVAL_EPISODES=25 \
-MARIO_EVAL_EPSILONS="0.0 0.05" \
-    ./slurm_mario_flybrain_evaluate.sh
-```
-
-The `epsilon=0` report measures the learned greedy policy; `epsilon=0.05`
-measures it with the exploration used near the end of training. Reports are
-written to `run/evaluations/frozen-epsilon-*.json` and compare the shaped reward
-that v2 learned against the unmodified environment reward. They include death and
-completion rates, maximum x position, first actions, action frequencies,
-initial/fatal-terminal action counts, greedy-Q argmax frequencies, and mean Q
-values. It also reports MaleCNS-state RMS and temporal change. If the greedy
-argmax itself is dominated by a rightward action while the state changes, the
-collapse is in the learned DQN values; a near-zero state-change metric instead
-points to an uninformative MaleCNS input stream.
 
 #### Controlled DQN / Double-DQN / PPO benchmark
 
@@ -372,20 +363,20 @@ average-return curves. Final frozen reports are also written as
 Progress and checkpoint state are available at:
 
 ```bash
-ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-dopamine-6150-v4"
+ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-6150-v1"
 tail -f "$ROOT"/slurm/pretrain-*.log
-ls -lh "$ROOT"/run/{flybrain-online.pt,dopamine-plasticity.npz,flybrain-replay.npz}
+ls -lh "$ROOT"/run/{flybrain-ppo.pt,dopamine-plasticity.npz}
 ```
 
 After that job finishes, use the same tag for physical fine-tuning. The physical
 wrapper refuses to start unless both pretrained artifacts exist. It has the same
 four-hour limit and advance termination signal; rerunning it with the same tag
-loads the DQN and dopamine state, rebuilds PER from saved rollout files, and
-skips rollouts already listed in the processed manifest:
+loads PPO and dopamine state, trains only from physically executed rollout
+segments, and skips rollouts already listed in the processed manifest:
 
 ```bash
 MARIO_POLICY=/scratch/scholar/tyalaman/microduck-rl/mario-controller-6150.onnx \
-MARIO_RUN_TAG=malecns-dopamine-6150-v4 \
+MARIO_RUN_TAG=malecns-ppo-6150-v1 \
 MARIO_RUN_SECONDS=13800 \
 MARIO_DECISION_FRAMES=90 \
 DOPAMINE_LEARNING_RATE=0.001 \

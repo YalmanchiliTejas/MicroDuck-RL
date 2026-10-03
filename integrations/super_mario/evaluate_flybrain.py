@@ -1,4 +1,4 @@
-"""Evaluate a frozen MaleCNS DQN directly in Mario without any learning."""
+"""Evaluate a frozen MaleCNS Mario policy without any learning."""
 
 from __future__ import annotations
 
@@ -56,12 +56,20 @@ def run(args: argparse.Namespace) -> dict:
     import gym_super_mario_bros  # noqa: F401 -- registers environments
 
     device = _device(args.device)
-    agent = FlybrainAgent.load(
-        args.checkpoint,
-        device=device,
-        allow_legacy_reward_contract=args.allow_legacy_reward_contract,
-    )
-    agent.online.eval()
+    payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    algorithm = str(payload.get("algorithm", "dqn"))
+    if algorithm == "ppo":
+        from mario_ppo import PPOAgent
+
+        agent = PPOAgent.load(args.checkpoint, device=device)
+        agent.network.eval()
+    else:
+        agent = FlybrainAgent.load(
+            args.checkpoint,
+            device=device,
+            allow_legacy_reward_contract=args.allow_legacy_reward_contract,
+        )
+        agent.online.eval()
     connectome = MaleCNS(
         data=args.male_cns_data,
         device=args.male_cns_device,
@@ -109,13 +117,22 @@ def run(args: argparse.Namespace) -> dict:
             for decision in range(1, args.max_decisions_per_episode + 1):
                 with torch.no_grad():
                     state_t = torch.as_tensor(state, device=agent.device).unsqueeze(0)
-                    q_values = agent.online(state_t)[0].detach().cpu().numpy()
-                greedy_action = int(np.argmax(q_values))
-                action = agent.act(state, epsilon=args.epsilon)
-                q_sums += q_values
+                    if algorithm == "ppo":
+                        logits, _ = agent.network(state_t)
+                        action_scores = torch.softmax(logits[0], dim=0).cpu().numpy()
+                    else:
+                        action_scores = agent.online(state_t)[0].detach().cpu().numpy()
+                greedy_action = int(np.argmax(action_scores))
+                if algorithm == "ppo":
+                    action, _, _ = agent.act(
+                        state, deterministic=not args.sample_actions
+                    )
+                else:
+                    action = agent.act(state, epsilon=args.epsilon)
+                q_sums += action_scores
                 q_margin_sum += float(
-                    np.partition(q_values, -2)[-1]
-                    - np.partition(q_values, -2)[-2]
+                    np.partition(action_scores, -2)[-1]
+                    - np.partition(action_scores, -2)[-2]
                 )
                 state_rms_sum += float(np.sqrt(np.mean(np.square(state))))
                 q_observations += 1
@@ -213,6 +230,8 @@ def run(args: argparse.Namespace) -> dict:
         ),
         "learning_enabled": False,
         "dopamine_updates_enabled": False,
+        "algorithm": algorithm,
+        "mode": "sampled" if args.sample_actions else "mean",
         "epsilon": args.epsilon,
         "seed": args.seed,
         "episodes": episodes,
@@ -235,7 +254,7 @@ def run(args: argparse.Namespace) -> dict:
             "mean_environment_training_reward": float(
                 np.mean([row["environment_training_reward"] for row in episodes])
             ),
-            "mean_greedy_q_margin": q_margin_sum / max(1, q_observations),
+            "mean_greedy_action_score_margin": q_margin_sum / max(1, q_observations),
             "mean_state_rms": state_rms_sum / max(1, q_observations),
             "mean_temporal_state_delta_rms": (
                 state_delta_rms_sum / max(1, q_observations)
@@ -245,7 +264,9 @@ def run(args: argparse.Namespace) -> dict:
                     "selected": action_counts[index],
                     "selected_fraction": action_counts[index] / decision_count,
                     "greedy_argmax": greedy_counts[index],
-                    "mean_q": float(q_sums[index] / max(1, q_observations)),
+                    "mean_action_score": float(
+                        q_sums[index] / max(1, q_observations)
+                    ),
                 }
                 for index in range(agent.config.num_actions)
             },
@@ -281,6 +302,11 @@ def main() -> None:
     parser.add_argument("--max-decisions-per-episode", type=int, default=500)
     parser.add_argument("--action-repeat", type=int, default=30)
     parser.add_argument("--epsilon", type=float, default=0.0)
+    parser.add_argument(
+        "--sample-actions",
+        action="store_true",
+        help="sample a PPO policy instead of using its deterministic argmax",
+    )
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--first-actions", type=int, default=50)
     parser.add_argument("--output", type=Path)

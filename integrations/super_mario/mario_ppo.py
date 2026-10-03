@@ -113,6 +113,27 @@ class PPOAgent:
             _, value = self.network(state_t)
         return float(value.item())
 
+    def prediction_error(
+        self,
+        reward: float,
+        next_state: np.ndarray,
+        done: bool,
+        *,
+        value: float,
+    ) -> float:
+        """One-step critic error used as the MaleCNS dopamine teaching signal."""
+
+        next_value = 0.0 if done else self.value(next_state)
+        return float(reward + self.config.gamma * next_value - value)
+
+    def action_sampling_state(self) -> dict:
+        """Return action RNG state so checkpoint hot reloads do not repeat choices."""
+
+        return self._action_rng.bit_generator.state
+
+    def restore_action_sampling_state(self, state: dict) -> None:
+        self._action_rng.bit_generator.state = state
+
     def update(
         self,
         *,
