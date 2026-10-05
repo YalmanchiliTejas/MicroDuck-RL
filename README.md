@@ -313,6 +313,38 @@ Evaluation also defaults to the frozen base MaleCNS. To perform the explicit
 modified-connectome ablation, additionally set `MARIO_EVAL_DOPAMINE=1` and
 `MARIO_EVAL_DOPAMINE_STATE=/absolute/path/to/dopamine-plasticity.npz`.
 
+Rank every numbered clean checkpoint with identical frozen evaluations before
+starting another learning stage:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-clean-6150-v1 \
+MARIO_RANK_EPISODES=10 \
+    ./slurm_mario_flybrain_rank.sh
+```
+
+The table and full JSON are written under `run/evaluations/`; the selected
+checkpoint is copied to `run/best-clean-ppo.pt`. Ranking combines raw reward,
+maximum x progress, completion, survival duration, and sampled-action entropy.
+
+Then start dopamine as a separate experiment with a fresh state and frozen PPO:
+
+```bash
+CLEAN_ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-clean-6150-v1"
+
+MARIO_RUN_TAG=malecns-ppo-dopamine-6150-v1 \
+MARIO_PPO_INITIAL_CHECKPOINT="$CLEAN_ROOT/run/best-clean-ppo.pt" \
+MARIO_ENABLE_DOPAMINE=1 \
+MARIO_FREEZE_PPO=1 \
+DOPAMINE_LEARNING_RATE=0.00001 \
+MARIO_PRETRAIN_STEPS=1000 \
+MARIO_PRETRAIN_SAVE_EVERY=250 \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+This v2 dopamine state stores a running prediction-error RMS and applies a
+smooth normalized signal instead of clipping almost every raw Mario TD error to
+`-1` or `+1`. Never copy an older `dopamine-plasticity.npz` into this run.
+
 The `malecns-dopamine-6150-v2` and reward-shaped v3 checkpoints must not be
 resumed. New checkpoints use the exact sum of rewards returned by
 `env.step()` during a held action: component values remain telemetry and are

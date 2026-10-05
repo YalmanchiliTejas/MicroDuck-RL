@@ -136,6 +136,7 @@ def run(args: argparse.Namespace) -> None:
     )
     writer.add_text("training/reward_contract", "raw sum of env.step rewards", 0)
     writer.add_scalar("training/action_repeat", args.action_repeat, agent.steps)
+    writer.add_scalar("training/ppo_frozen", float(args.freeze_ppo), agent.steps)
     writer.flush()
     rollout = {
         "states": [],
@@ -176,12 +177,13 @@ def run(args: argparse.Namespace) -> None:
                     break
             next_state = stack.state
             done = bool(terminated or truncated)
-            rollout["states"].append(state.copy())
-            rollout["actions"].append(action)
-            rollout["log_probabilities"].append(log_probability)
-            rollout["rewards"].append(raw_reward)
-            rollout["dones"].append(done)
-            rollout["values"].append(value)
+            if not args.freeze_ppo:
+                rollout["states"].append(state.copy())
+                rollout["actions"].append(action)
+                rollout["log_probabilities"].append(log_probability)
+                rollout["rewards"].append(raw_reward)
+                rollout["dones"].append(done)
+                rollout["values"].append(value)
             agent.steps += 1
             action_counts[action] += 1
             recent_actions.append(action)
@@ -196,7 +198,9 @@ def run(args: argparse.Namespace) -> None:
             )
             state = next_state
 
-            if len(rollout["states"]) >= agent.config.rollout_steps or done:
+            if not args.freeze_ppo and (
+                len(rollout["states"]) >= agent.config.rollout_steps or done
+            ):
                 metrics = _flush(agent, rollout, state, done)
                 if metrics is not None:
                     for name, metric in metrics.items():
@@ -220,6 +224,21 @@ def run(args: argparse.Namespace) -> None:
                 dopamine = connectome.dopamine_stats()
                 if dopamine is not None:
                     writer.add_scalar("dopamine/rpe", dopamine["signal"], agent.steps)
+                    writer.add_scalar(
+                        "dopamine/raw_prediction_error",
+                        dopamine["raw_prediction_error"],
+                        agent.steps,
+                    )
+                    writer.add_scalar(
+                        "dopamine/normalized_prediction_error",
+                        dopamine["normalized_prediction_error"],
+                        agent.steps,
+                    )
+                    writer.add_scalar(
+                        "dopamine/prediction_error_rms",
+                        dopamine["prediction_error_rms"],
+                        agent.steps,
+                    )
                     writer.add_scalar(
                         "dopamine/mean_kc_mbon_scale",
                         dopamine["mean_kc_mbon_scale"],
@@ -281,11 +300,16 @@ def main() -> None:
     parser.add_argument("--male-cns-device", choices=("auto", "cpu", "cuda"), default="cpu")
     parser.add_argument("--spike-file", type=Path)
     parser.add_argument("--dopamine-state", type=Path)
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=1.0e-5)
     parser.add_argument("--continuation-learning-rate", type=float)
     parser.add_argument("--value-coefficient", type=float)
     parser.add_argument("--entropy-coefficient", type=float)
     parser.add_argument("--target-kl", type=float)
+    parser.add_argument(
+        "--freeze-ppo",
+        action="store_true",
+        help="update dopamine plasticity while preserving PPO network/optimizer weights",
+    )
     args = parser.parse_args()
     if min(args.steps, args.action_repeat, args.rollout_steps, args.save_every) <= 0:
         parser.error("steps, action repeat, rollout steps, and save interval must be positive")
@@ -303,6 +327,8 @@ def main() -> None:
         parser.error("PPO continuation overrides must be positive")
     if args.dopamine_state is not None and args.male_cns_device != "cpu":
         parser.error("--dopamine-state requires --male-cns-device cpu")
+    if args.freeze_ppo and args.dopamine_state is None:
+        parser.error("--freeze-ppo requires --dopamine-state")
     run(args)
 
 

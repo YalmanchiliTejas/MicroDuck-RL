@@ -159,7 +159,7 @@ launcher_args=(
 if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
     launcher_args+=(
         --enable-dopamine
-        --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.001}"
+        --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.00001}"
     )
 fi
 if [[ -n "${FLY_SPIKE_FILE:-}" ]]; then

@@ -470,14 +470,17 @@ def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):
         brain, state_path=state, learning_rate=0.1, recovery_rate=0.0
     )
     plasticity.observe(np.asarray((0,), dtype=np.int64))
-    plasticity.reinforce(+1.0)
+    positive_signal = plasticity.reinforce(+100.0)
+    assert 0.0 < positive_signal < 1.0
+    assert plasticity.stats()["normalized_prediction_error"] == pytest.approx(1.0)
     assert brain.weights[0] < 0.5
     assert brain.weights[1] == pytest.approx(0.6)
     assert plasticity.consume_injection()[0][0].tolist() == [4]
 
     plasticity.reset_episode()
     plasticity.observe(np.asarray((1,), dtype=np.int64))
-    plasticity.reinforce(-1.0)
+    negative_signal = plasticity.reinforce(-100.0)
+    assert -1.0 < negative_signal < 0.0
     assert brain.weights[1] < 0.6
     assert plasticity.consume_injection()[0][0].tolist() == [5]
     plasticity.save()
@@ -487,6 +490,9 @@ def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):
         restored_brain, state_path=state, learning_rate=0.1, recovery_rate=0.0
     )
     assert restored.updates == 2
+    assert restored.rpe_second_moment == pytest.approx(
+        plasticity.rpe_second_moment
+    )
     assert np.allclose(restored_brain.weights[:2], brain.weights[:2])
 
 

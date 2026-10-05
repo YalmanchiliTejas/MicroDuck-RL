@@ -16,17 +16,19 @@ import numpy as np
 class DopaminePlasticity:
     """Eligibility-trace, DAN-gated depression of real KC->MBON synapses."""
 
-    SCHEMA = 1
+    SCHEMA = 2
 
     def __init__(
         self,
         brain,
         *,
         state_path: Path,
-        learning_rate: float = 0.001,
+        learning_rate: float = 1.0e-5,
         eligibility_tau_s: float = 2.0,
         min_scale: float = 0.2,
         recovery_rate: float = 2.0e-4,
+        normalization_decay: float = 0.99,
+        normalization_scale: float = 2.0,
     ) -> None:
         if getattr(brain, "device", "cpu") != "cpu":
             raise ValueError(
@@ -40,6 +42,10 @@ class DopaminePlasticity:
         self.learning_rate = float(learning_rate)
         self.min_scale = float(min_scale)
         self.recovery_rate = float(recovery_rate)
+        if not 0.0 < normalization_decay < 1.0 or normalization_scale <= 0.0:
+            raise ValueError("invalid dopamine normalization settings")
+        self.normalization_decay = float(normalization_decay)
+        self.normalization_scale = float(normalization_scale)
         self.decay = float(np.exp(-float(brain.dt) / eligibility_tau_s))
 
         cell_type = np.asarray(brain.cell_type).astype(str)
@@ -76,6 +82,9 @@ class DopaminePlasticity:
         self.punishment_gate = self._dan_gate(self.ppl1)
         self.pending_signal = 0.0
         self.last_signal = 0.0
+        self.last_prediction_error = 0.0
+        self.last_normalized_error = 0.0
+        self.rpe_second_moment = 1.0
         self.updates = 0
         if self.state_path.exists():
             self.load()
@@ -110,7 +119,24 @@ class DopaminePlasticity:
         return []
 
     def reinforce(self, prediction_error: float) -> float:
-        signal = float(np.clip(prediction_error, -1.0, 1.0))
+        prediction_error = float(prediction_error)
+        if not np.isfinite(prediction_error):
+            raise ValueError("dopamine prediction error must be finite")
+        if self.updates == 0:
+            self.rpe_second_moment = max(prediction_error**2, 1.0e-6)
+        else:
+            self.rpe_second_moment = (
+                self.normalization_decay * self.rpe_second_moment
+                + (1.0 - self.normalization_decay) * prediction_error**2
+            )
+        normalized_error = prediction_error / max(
+            np.sqrt(self.rpe_second_moment), 1.0e-6
+        )
+        # A smooth bounded signal preserves sign and relative magnitude. The
+        # previous hard clip mapped nearly every Mario transition to +/-1.
+        signal = float(np.tanh(normalized_error / self.normalization_scale))
+        self.last_prediction_error = prediction_error
+        self.last_normalized_error = float(normalized_error)
         self.last_signal = signal
         self.pending_signal = signal
         if self.recovery_rate:
@@ -136,6 +162,9 @@ class DopaminePlasticity:
     def stats(self) -> dict[str, float | int]:
         return {
             "signal": self.last_signal,
+            "raw_prediction_error": self.last_prediction_error,
+            "normalized_prediction_error": self.last_normalized_error,
+            "prediction_error_rms": float(np.sqrt(self.rpe_second_moment)),
             "updates": self.updates,
             "eligible_kc_fraction": float(np.mean(self.eligibility > 0.05)),
             "mean_kc_mbon_scale": float(self.scales.mean()),
@@ -154,6 +183,7 @@ class DopaminePlasticity:
                 edge_count=np.asarray(len(self.edge_positions)),
                 scales=self.scales,
                 updates=np.asarray(self.updates),
+                rpe_second_moment=np.asarray(self.rpe_second_moment),
             )
         temporary.replace(self.state_path)
 
@@ -174,3 +204,6 @@ class DopaminePlasticity:
                 raise ValueError("invalid dopamine-plasticity synapse scales")
             self.scales[:] = np.clip(scales, self.min_scale, 1.0)
             self.updates = int(archive["updates"])
+            self.rpe_second_moment = float(archive["rpe_second_moment"])
+            if not np.isfinite(self.rpe_second_moment) or self.rpe_second_moment <= 0:
+                raise ValueError("invalid dopamine prediction-error statistics")

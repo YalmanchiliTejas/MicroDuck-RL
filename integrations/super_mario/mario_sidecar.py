@@ -579,7 +579,7 @@ def main() -> None:
         type=Path,
         help="persist reward-modulated KC-to-MBON synaptic scales here",
     )
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=1.0e-5)
     parser.add_argument("--minimum-execution-fraction", type=float, default=0.5)
     parser.add_argument(
         "--spike-file", type=Path,

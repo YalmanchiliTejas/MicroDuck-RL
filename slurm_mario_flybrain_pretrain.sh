@@ -37,10 +37,19 @@ DOPAMINE_STATE="${RUN_DIR}/dopamine-plasticity.npz"
 TENSORBOARD_DIR="${RUN_DIR}/tensorboard/ppo-pretrain"
 SNAPSHOT_DIR="${RUN_DIR}/checkpoints"
 ENABLE_DOPAMINE="${MARIO_ENABLE_DOPAMINE:-0}"
+FREEZE_PPO="${MARIO_FREEZE_PPO:-0}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
 if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
     echo "ERROR: MARIO_ENABLE_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${FREEZE_PPO}" != "0" && "${FREEZE_PPO}" != "1" ]]; then
+    echo "ERROR: MARIO_FREEZE_PPO must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_FREEZE_PPO=1 requires MARIO_ENABLE_DOPAMINE=1." >&2
     exit 1
 fi
 
@@ -99,7 +108,7 @@ uv pip install \
 PRETRAIN_STEPS="${MARIO_PRETRAIN_STEPS:-20000}"
 ACTION_REPEAT="${MARIO_PRETRAIN_ACTION_REPEAT:-30}"
 SAVE_EVERY="${MARIO_PRETRAIN_SAVE_EVERY:-1000}"
-DOPAMINE_RATE="${DOPAMINE_LEARNING_RATE:-0.001}"
+DOPAMINE_RATE="${DOPAMINE_LEARNING_RATE:-0.00001}"
 CONTINUATION_LR="${MARIO_PPO_LEARNING_RATE:-0.000025}"
 VALUE_COEFFICIENT="${MARIO_PPO_VALUE_COEFFICIENT:-0.05}"
 ENTROPY_COEFFICIENT="${MARIO_PPO_ENTROPY_COEFFICIENT:-0.01}"
@@ -111,6 +120,7 @@ echo "Run:                ${RUN_DIR}"
 echo "Additional decisions:${PRETRAIN_STEPS}"
 echo "Action repeat:       ${ACTION_REPEAT} frames"
 echo "Dopamine enabled:    ${ENABLE_DOPAMINE}"
+echo "PPO frozen:          ${FREEZE_PPO}"
 if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
     echo "Dopamine rate:       ${DOPAMINE_RATE}"
 fi
@@ -143,6 +153,10 @@ if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
         --dopamine-learning-rate "${DOPAMINE_RATE}"
     )
 fi
+freeze_args=()
+if [[ "${FREEZE_PPO}" == "1" ]]; then
+    freeze_args+=(--freeze-ppo)
+fi
 
 srun "${SIDECAR_VENV}/bin/python" \
     "${REPO_DIR}/integrations/super_mario/train_ppo_flybrain.py" \
@@ -161,6 +175,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --male-cns-data "${FLY_DATA}" \
     --male-cns-device cpu \
     "${dopamine_args[@]}" \
+    "${freeze_args[@]}" \
     "${resume_args[@]}" \
     2>&1 | tee "${OUTPUT_DIR}/pretrain-${SLURM_JOB_ID}.log"
 

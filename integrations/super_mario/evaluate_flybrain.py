@@ -296,7 +296,7 @@ def main() -> None:
     parser.add_argument(
         "--male-cns-device", choices=("auto", "cpu", "cuda"), default="cpu"
     )
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=1.0e-5)
     parser.add_argument("--env", default="SuperMarioBros-1-1-v0")
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--max-decisions-per-episode", type=int, default=500)

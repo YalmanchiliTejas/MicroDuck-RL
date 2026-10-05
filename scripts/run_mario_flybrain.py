@@ -103,7 +103,7 @@ def main() -> int:
         action="store_true",
         help="enable persistent MaleCNS dopamine plasticity (off by default)",
     )
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=1.0e-5)
     parser.add_argument("--ppo-learning-rate", type=float, default=0.000025)
     parser.add_argument("--ppo-value-coefficient", type=float, default=0.05)
     parser.add_argument("--ppo-entropy-coefficient", type=float, default=0.01)

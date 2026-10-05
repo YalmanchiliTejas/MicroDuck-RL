@@ -245,7 +245,7 @@ def main() -> None:
     )
     parser.add_argument("--spike-file", type=Path)
     parser.add_argument("--dopamine-state", type=Path)
-    parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--dopamine-learning-rate", type=float, default=1.0e-5)
     args = parser.parse_args()
     if args.steps <= 0 or args.action_repeat <= 0:
         parser.error("--steps and --action-repeat must be positive")
