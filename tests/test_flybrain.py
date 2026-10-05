@@ -253,6 +253,26 @@ def test_ppo_checkpoint_restores_policy_and_sampling_rng(tmp_path):
     assert [restored.act(state)[0] for _ in range(10)] == expected
 
 
+def test_ppo_continuation_overrides_are_checkpointed(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    agent = ppo.PPOAgent(ppo.PPOConfig(feature_dim=6), seed=8)
+    agent.configure_continuation(
+        learning_rate=2.5e-5,
+        value_coefficient=0.05,
+        entropy_coefficient=0.02,
+        target_kl=0.01,
+    )
+    checkpoint = tmp_path / "ppo-safe.pt"
+    agent.save(checkpoint)
+    restored = ppo.PPOAgent.load(checkpoint)
+    assert restored.config.learning_rate == 2.5e-5
+    assert restored.config.value_coefficient == 0.05
+    assert restored.config.entropy_coefficient == 0.02
+    assert restored.config.target_kl == 0.01
+    assert restored.optimizer.param_groups[0]["lr"] == 2.5e-5
+
+
 def test_ppo_update_accepts_unmodified_reward_returns():
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)

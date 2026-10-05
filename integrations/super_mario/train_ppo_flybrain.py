@@ -13,7 +13,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from male_cns import MaleCNS
-from mario_dqn import ActivityStack
+from mario_dqn import ActivityStack, FlybrainAction
 from mario_ppo import PPOAgent, PPOConfig, generalized_advantage_estimates
 from mario_sidecar import nes_actions
 
@@ -28,10 +28,23 @@ def _device(name: str) -> str:
     return "cpu"
 
 
-def _save(agent: PPOAgent, connectome: MaleCNS, output: Path) -> None:
+def _atomic_agent_save(agent: PPOAgent, output: Path) -> None:
     temporary = output.with_name(f".{output.name}.tmp")
     agent.save(temporary)
     temporary.replace(output)
+
+
+def _save(
+    agent: PPOAgent,
+    connectome: MaleCNS,
+    output: Path,
+    snapshot_dir: Path | None = None,
+) -> None:
+    _atomic_agent_save(agent, output)
+    if snapshot_dir is not None:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        snapshot = snapshot_dir / f"flybrain-ppo-step-{agent.steps:09d}.pt"
+        _atomic_agent_save(agent, snapshot)
     connectome.save_plasticity()
 
 
@@ -89,6 +102,19 @@ def run(args: argparse.Namespace) -> None:
             device=_device(args.device),
             seed=args.seed,
         )
+    agent.configure_continuation(
+        learning_rate=args.continuation_learning_rate,
+        value_coefficient=args.value_coefficient,
+        entropy_coefficient=args.entropy_coefficient,
+        target_kl=args.target_kl,
+    )
+    print(
+        "PPO optimizer "
+        f"lr={agent.config.learning_rate:g} value_coef={agent.config.value_coefficient:g} "
+        f"entropy_coef={agent.config.entropy_coefficient:g} "
+        f"target_kl={agent.config.target_kl:g}",
+        flush=True,
+    )
     if agent.config.feature_dim != connectome.feature_dim:
         raise ValueError("PPO checkpoint and MaleCNS feature dimensions differ")
     target_steps = (
@@ -109,6 +135,8 @@ def run(args: argparse.Namespace) -> None:
         purge_step=agent.steps if agent.steps else None,
     )
     writer.add_text("training/reward_contract", "raw sum of env.step rewards", 0)
+    writer.add_scalar("training/action_repeat", args.action_repeat, agent.steps)
+    writer.flush()
     rollout = {
         "states": [],
         "actions": [],
@@ -119,6 +147,7 @@ def run(args: argparse.Namespace) -> None:
     }
     recent_returns: deque[float] = deque(maxlen=100)
     action_counts: Counter[int] = Counter()
+    recent_actions: deque[int] = deque(maxlen=1_000)
     episode_return = 0.0
     episode_decisions = 0
     episode_max_x = 0
@@ -155,9 +184,13 @@ def run(args: argparse.Namespace) -> None:
             rollout["values"].append(value)
             agent.steps += 1
             action_counts[action] += 1
+            recent_actions.append(action)
             episode_return += raw_reward
             episode_decisions += 1
             episode_max_x = max(episode_max_x, int(info.get("x_pos", 0)))
+            writer.add_scalar("reward/action_interval", raw_reward, agent.steps)
+            writer.add_scalar("training/x_pos", int(info.get("x_pos", 0)), agent.steps)
+            writer.add_scalar("training/action", action, agent.steps)
             connectome.reinforce(
                 agent.prediction_error(raw_reward, next_state, done, value=value)
             )
@@ -168,6 +201,7 @@ def run(args: argparse.Namespace) -> None:
                 if metrics is not None:
                     for name, metric in metrics.items():
                         writer.add_scalar(f"loss/{name}", metric, agent.steps)
+                    writer.flush()
 
             if done:
                 episode += 1
@@ -176,6 +210,13 @@ def run(args: argparse.Namespace) -> None:
                 writer.add_scalar("reward/episode_return", episode_return, agent.steps)
                 writer.add_scalar("reward/average_100_episodes", average, agent.steps)
                 writer.add_scalar("episode/max_x", episode_max_x, agent.steps)
+                recent_action_counts = Counter(recent_actions)
+                for action_id, action_name in enumerate(FlybrainAction):
+                    writer.add_scalar(
+                        f"actions/recent_fraction_{action_name.name.lower()}",
+                        recent_action_counts[action_id] / max(1, len(recent_actions)),
+                        agent.steps,
+                    )
                 dopamine = connectome.dopamine_stats()
                 if dopamine is not None:
                     writer.add_scalar("dopamine/rpe", dopamine["signal"], agent.steps)
@@ -197,7 +238,7 @@ def run(args: argparse.Namespace) -> None:
                 episode_max_x = 0
 
             if agent.steps - last_save >= args.save_every:
-                _save(agent, connectome, args.output)
+                _save(agent, connectome, args.output, args.snapshot_dir)
                 writer.flush()
                 last_save = agent.steps
                 rate = agent.steps / max(time.monotonic() - started, 1.0e-6)
@@ -212,7 +253,7 @@ def run(args: argparse.Namespace) -> None:
                 writer.add_scalar(f"loss/{name}", metric, agent.steps)
         for action, count in action_counts.items():
             writer.add_scalar(f"actions/count_{action}", count, agent.steps)
-        _save(agent, connectome, args.output)
+        _save(agent, connectome, args.output, args.snapshot_dir)
         writer.flush()
         writer.close()
         env.close()
@@ -231,6 +272,7 @@ def main() -> None:
     parser.add_argument("--rollout-steps", type=int, default=256)
     parser.add_argument("--save-every", type=int, default=5_000)
     parser.add_argument("--output", type=Path, default=Path("flybrain-ppo.pt"))
+    parser.add_argument("--snapshot-dir", type=Path)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--tensorboard-dir", type=Path, default=Path("tensorboard/ppo"))
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
@@ -240,6 +282,10 @@ def main() -> None:
     parser.add_argument("--spike-file", type=Path)
     parser.add_argument("--dopamine-state", type=Path)
     parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--continuation-learning-rate", type=float)
+    parser.add_argument("--value-coefficient", type=float)
+    parser.add_argument("--entropy-coefficient", type=float)
+    parser.add_argument("--target-kl", type=float)
     args = parser.parse_args()
     if min(args.steps, args.action_repeat, args.rollout_steps, args.save_every) <= 0:
         parser.error("steps, action repeat, rollout steps, and save interval must be positive")
@@ -247,6 +293,14 @@ def main() -> None:
         parser.error("--additional-steps must be positive")
     if args.dopamine_learning_rate <= 0:
         parser.error("--dopamine-learning-rate must be positive")
+    continuation_values = (
+        args.continuation_learning_rate,
+        args.value_coefficient,
+        args.entropy_coefficient,
+        args.target_kl,
+    )
+    if any(value is not None and value <= 0 for value in continuation_values):
+        parser.error("PPO continuation overrides must be positive")
     if args.dopamine_state is not None and args.male_cns_device != "cpu":
         parser.error("--dopamine-state requires --male-cns-device cpu")
     run(args)

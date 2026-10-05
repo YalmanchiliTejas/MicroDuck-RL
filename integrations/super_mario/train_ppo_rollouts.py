@@ -40,6 +40,18 @@ def _atomic_save(agent: PPOAgent, path: Path) -> None:
     temporary.replace(path)
 
 
+def _save_with_snapshot(
+    agent: PPOAgent, output: Path, snapshot_dir: Path | None
+) -> None:
+    _atomic_save(agent, output)
+    if snapshot_dir is not None:
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        _atomic_save(
+            agent,
+            snapshot_dir / f"flybrain-ppo-physical-step-{agent.steps:09d}.pt",
+        )
+
+
 def _load_processed(path: Path) -> set[str]:
     if not path.exists():
         return set()
@@ -151,6 +163,19 @@ def run(args: argparse.Namespace) -> None:
             seed=args.seed,
         )
         print("initialized fresh PPO readout", flush=True)
+    agent.configure_continuation(
+        learning_rate=args.continuation_learning_rate,
+        value_coefficient=args.value_coefficient,
+        entropy_coefficient=args.entropy_coefficient,
+        target_kl=args.target_kl,
+    )
+    print(
+        "PPO optimizer "
+        f"lr={agent.config.learning_rate:g} value_coef={agent.config.value_coefficient:g} "
+        f"entropy_coef={agent.config.entropy_coefficient:g} "
+        f"target_kl={agent.config.target_kl:g}",
+        flush=True,
+    )
 
     args.rollout_dir.mkdir(parents=True, exist_ok=True)
     args.output.parent.mkdir(parents=True, exist_ok=True)
@@ -158,17 +183,36 @@ def run(args: argparse.Namespace) -> None:
     processed = _load_processed(manifest)
     writer = SummaryWriter(log_dir=str(args.tensorboard_dir))
     receiver = RewardReceiver(args.host, args.port)
-    _atomic_save(agent, args.output)
+    telemetry_step = 0
+    _save_with_snapshot(agent, args.output, args.snapshot_dir)
+    writer.add_text("training/reward_contract", "raw sum of env.step rewards", 0)
+    writer.flush()
     print(f"listening for sidecar rewards on udp://{args.host}:{args.port}", flush=True)
     print(f"watching rollouts in {args.rollout_dir}", flush=True)
     try:
         while True:
             for event in receiver.poll():
+                telemetry_step += 1
+                writer.add_scalar(
+                    "physical/action_interval_raw_reward",
+                    event["reward"],
+                    telemetry_step,
+                )
+                writer.add_scalar(
+                    "physical/execution_fraction",
+                    event["execution_fraction"],
+                    telemetry_step,
+                )
+                writer.add_scalar(
+                    "physical/requested_action", event["action"], telemetry_step
+                )
                 print(
                     f"reward episode={event['episode']} action={event['action']} "
                     f"raw={event['reward']:+.1f} executed={event['execution_fraction']:.2f}",
                     flush=True,
                 )
+                if telemetry_step % 10 == 0:
+                    writer.flush()
             changed = False
             for path in sorted(args.rollout_dir.glob("rollout-*-episode-*.npz")):
                 if path.name in processed:
@@ -193,7 +237,7 @@ def run(args: argparse.Namespace) -> None:
                     flush=True,
                 )
             if changed:
-                _atomic_save(agent, args.output)
+                _save_with_snapshot(agent, args.output, args.snapshot_dir)
                 _save_processed(manifest, processed)
                 writer.flush()
                 print(f"saved PPO {args.output} step={agent.steps}", flush=True)
@@ -202,7 +246,7 @@ def run(args: argparse.Namespace) -> None:
             time.sleep(args.poll_seconds)
     finally:
         receiver.close()
-        _atomic_save(agent, args.output)
+        _save_with_snapshot(agent, args.output, args.snapshot_dir)
         writer.flush()
         writer.close()
 
@@ -211,6 +255,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--rollout-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, default=Path("flybrain-ppo.pt"))
+    parser.add_argument("--snapshot-dir", type=Path)
     parser.add_argument("--resume", type=Path)
     parser.add_argument("--processed-manifest", type=Path)
     parser.add_argument("--tensorboard-dir", type=Path, default=Path("tensorboard/ppo-physical"))
@@ -219,6 +264,10 @@ def main() -> None:
     parser.add_argument("--poll-seconds", type=float, default=1.0)
     parser.add_argument("--minimum-execution-fraction", type=float, default=0.5)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
+    parser.add_argument("--continuation-learning-rate", type=float)
+    parser.add_argument("--value-coefficient", type=float)
+    parser.add_argument("--entropy-coefficient", type=float)
+    parser.add_argument("--target-kl", type=float)
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--male-cns-data", type=Path)
     parser.add_argument("--once", action="store_true")
@@ -227,6 +276,14 @@ def main() -> None:
         parser.error("poll interval must be positive and port must be valid")
     if not 0.0 <= args.minimum_execution_fraction <= 1.0:
         parser.error("--minimum-execution-fraction must be in [0, 1]")
+    continuation_values = (
+        args.continuation_learning_rate,
+        args.value_coefficient,
+        args.entropy_coefficient,
+        args.target_kl,
+    )
+    if any(value is not None and value <= 0 for value in continuation_values):
+        parser.error("PPO continuation overrides must be positive")
     run(args)
 
 

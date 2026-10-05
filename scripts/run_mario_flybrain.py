@@ -98,7 +98,16 @@ def main() -> int:
     parser.add_argument(
         "--male-cns-device", choices=("cpu",), default="cpu"
     )
+    parser.add_argument(
+        "--enable-dopamine",
+        action="store_true",
+        help="enable persistent MaleCNS dopamine plasticity (off by default)",
+    )
     parser.add_argument("--dopamine-learning-rate", type=float, default=0.001)
+    parser.add_argument("--ppo-learning-rate", type=float, default=0.000025)
+    parser.add_argument("--ppo-value-coefficient", type=float, default=0.05)
+    parser.add_argument("--ppo-entropy-coefficient", type=float, default=0.01)
+    parser.add_argument("--ppo-target-kl", type=float, default=0.02)
     parser.add_argument("--frame-shm", default="microduck_mario_rgb")
     parser.add_argument("--no-dashboard", action="store_true")
     parser.add_argument(
@@ -119,10 +128,14 @@ def main() -> int:
         or args.duration_seconds < 0
         or args.startup_timeout_seconds <= 0
         or args.dopamine_learning_rate <= 0
+        or args.ppo_learning_rate <= 0
+        or args.ppo_value_coefficient <= 0
+        or args.ppo_entropy_coefficient <= 0
+        or args.ppo_target_kl <= 0
     ):
         parser.error(
-            "decision frames, dopamine learning rate, and startup timeout must be positive; "
-            "duration must be non-negative"
+            "decision frames, optimizer settings, dopamine learning rate, and startup "
+            "timeout must be positive; duration must be non-negative"
         )
 
     run_dir = args.run_dir.resolve()
@@ -179,6 +192,16 @@ def main() -> int:
             checkpoint,
             "--tensorboard-dir",
             run_dir / "tensorboard" / "ppo-physical",
+            "--snapshot-dir",
+            run_dir / "checkpoints",
+            "--continuation-learning-rate",
+            args.ppo_learning_rate,
+            "--value-coefficient",
+            args.ppo_value_coefficient,
+            "--entropy-coefficient",
+            args.ppo_entropy_coefficient,
+            "--target-kl",
+            args.ppo_target_kl,
         )
         if args.male_cns_data:
             trainer_command.extend(("--male-cns-data", str(args.male_cns_data)))
@@ -230,11 +253,16 @@ def main() -> int:
             rollout_dir,
             "--male-cns-device",
             args.male_cns_device,
-            "--dopamine-state",
-            dopamine_state,
-            "--dopamine-learning-rate",
-            args.dopamine_learning_rate,
         )
+        if args.enable_dopamine:
+            sidecar_command.extend(
+                (
+                    "--dopamine-state",
+                    str(dopamine_state),
+                    "--dopamine-learning-rate",
+                    str(args.dopamine_learning_rate),
+                )
+            )
         if args.male_cns_data:
             sidecar_command.extend(("--male-cns-data", str(args.male_cns_data)))
         if args.spike_file:

@@ -55,12 +55,19 @@ RUN_DIR="${SCRATCH_ROOT}/run"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 PRETRAINED_CHECKPOINT="${RUN_DIR}/flybrain-ppo.pt"
 PRETRAINED_DOPAMINE="${RUN_DIR}/dopamine-plasticity.npz"
-if [[ "${MARIO_REQUIRE_PRETRAIN:-1}" == "1" ]] && {
-    [[ ! -f "${PRETRAINED_CHECKPOINT}" ]] || [[ ! -f "${PRETRAINED_DOPAMINE}" ]]
-}; then
+ENABLE_DOPAMINE="${MARIO_ENABLE_DOPAMINE:-0}"
+if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_ENABLE_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${MARIO_REQUIRE_PRETRAIN:-1}" == "1" && ! -f "${PRETRAINED_CHECKPOINT}" ]]; then
     echo "ERROR: physical fine-tuning requires emulator pretraining first." >&2
-    echo "Missing ${PRETRAINED_CHECKPOINT} or ${PRETRAINED_DOPAMINE}." >&2
+    echo "Missing ${PRETRAINED_CHECKPOINT}." >&2
     echo "Run slurm_mario_flybrain_pretrain.sh with this MARIO_RUN_TAG first." >&2
+    exit 1
+fi
+if [[ "${ENABLE_DOPAMINE}" == "1" && ! -f "${PRETRAINED_DOPAMINE}" ]]; then
+    echo "ERROR: dopamine was enabled but its state is missing: ${PRETRAINED_DOPAMINE}" >&2
     exit 1
 fi
 
@@ -111,7 +118,11 @@ echo "Repository:   ${REPO_DIR}"
 echo "Run:          ${RUN_DIR}"
 echo "Policy:       ${MARIO_POLICY}"
 echo "PPO preload:  ${PRETRAINED_CHECKPOINT}"
-echo "DA preload:   ${PRETRAINED_DOPAMINE}"
+if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
+    echo "DA preload:   ${PRETRAINED_DOPAMINE}"
+else
+    echo "DA preload:   disabled (frozen base MaleCNS)"
+fi
 echo "Dashboard:    ssh -L 8765:$(hostname):8765 <cluster-login>"
 
 # One job, two interpreters: mjlab/BAM is pinned to 3.12 while NES needs 3.13.
@@ -139,9 +150,18 @@ launcher_args=(
     --dashboard-port 8765
     --male-cns-data "${FLY_DATA}"
     --male-cns-device cpu
-    --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.001}"
+    --ppo-learning-rate "${MARIO_PPO_LEARNING_RATE:-0.000025}"
+    --ppo-value-coefficient "${MARIO_PPO_VALUE_COEFFICIENT:-0.05}"
+    --ppo-entropy-coefficient "${MARIO_PPO_ENTROPY_COEFFICIENT:-0.01}"
+    --ppo-target-kl "${MARIO_PPO_TARGET_KL:-0.02}"
     --headless
 )
+if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
+    launcher_args+=(
+        --enable-dopamine
+        --dopamine-learning-rate "${DOPAMINE_LEARNING_RATE:-0.001}"
+    )
+fi
 if [[ -n "${FLY_SPIKE_FILE:-}" ]]; then
     launcher_args+=(--spike-file "${FLY_SPIKE_FILE}")
 fi

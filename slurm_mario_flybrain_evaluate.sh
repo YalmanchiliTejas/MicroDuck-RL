@@ -30,7 +30,13 @@ OUTPUT_DIR="${ROOT}/slurm"
 EVAL_DIR="${RUN_DIR}/evaluations"
 CHECKPOINT="${MARIO_EVAL_CHECKPOINT:-${RUN_DIR}/flybrain-ppo.pt}"
 DOPAMINE_STATE="${MARIO_EVAL_DOPAMINE_STATE:-${RUN_DIR}/dopamine-plasticity.npz}"
+EVAL_DOPAMINE="${MARIO_EVAL_DOPAMINE:-0}"
 mkdir -p "${OUTPUT_DIR}" "${EVAL_DIR}"
+
+if [[ "${EVAL_DOPAMINE}" != "0" && "${EVAL_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_EVAL_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     exec sbatch \
@@ -44,10 +50,10 @@ fi
     echo "ERROR: missing checkpoint: ${CHECKPOINT}" >&2
     exit 1
 }
-[[ -f "${DOPAMINE_STATE}" ]] || {
+if [[ "${EVAL_DOPAMINE}" == "1" && ! -f "${DOPAMINE_STATE}" ]]; then
     echo "ERROR: missing dopamine state: ${DOPAMINE_STATE}" >&2
     exit 1
-}
+fi
 
 cd "${REPO_DIR}"
 export UV_CACHE_DIR="${ROOT}/uv-cache"
@@ -67,7 +73,11 @@ MODES="${MARIO_EVAL_MODES:-mean sampled}"
 
 echo "Job ID:          ${SLURM_JOB_ID}"
 echo "Checkpoint:      ${CHECKPOINT}"
-echo "Dopamine state:  ${DOPAMINE_STATE}"
+if [[ "${EVAL_DOPAMINE}" == "1" ]]; then
+    echo "Dopamine state:  ${DOPAMINE_STATE}"
+else
+    echo "Dopamine state:  disabled (frozen base MaleCNS)"
+fi
 echo "Episodes/mode:   ${EPISODES}"
 echo "Modes:           ${MODES}"
 echo "Learning:        disabled"
@@ -78,11 +88,15 @@ for mode in ${MODES}; do
     report="${EVAL_DIR}/frozen-${mode}-${SLURM_JOB_ID}.json"
     sample_args=()
     if [[ "${mode}" == "sampled" ]]; then sample_args+=(--sample-actions); fi
+    dopamine_args=()
+    if [[ "${EVAL_DOPAMINE}" == "1" ]]; then
+        dopamine_args+=(--dopamine-state "${DOPAMINE_STATE}")
+    fi
     echo "Evaluating mode=${mode}; report=${report}"
     "${SIDECAR_VENV}/bin/python" \
         "${REPO_DIR}/integrations/super_mario/evaluate_flybrain.py" \
         --checkpoint "${CHECKPOINT}" \
-        --dopamine-state "${DOPAMINE_STATE}" \
+        "${dopamine_args[@]}" \
         --male-cns-data "${FLY_DATA}" \
         --male-cns-device cpu \
         --episodes "${EPISODES}" \

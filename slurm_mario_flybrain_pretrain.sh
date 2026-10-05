@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# Pretrain the MaleCNS PPO and dopamine plasticity directly in the NES emulator.
+# Pretrain the MaleCNS PPO directly in the NES emulator. Dopamine plasticity is
+# deliberately opt-in so a changing connectome cannot silently invalidate a
+# pretrained PPO observation distribution.
 # Use the same MARIO_RUN_TAG later with slurm_mario_flybrain.sh for physical
 # PPO-controller fine-tuning.
 
@@ -33,10 +35,17 @@ RUN_DIR="${SCRATCH_ROOT}/run"
 CHECKPOINT="${RUN_DIR}/flybrain-ppo.pt"
 DOPAMINE_STATE="${RUN_DIR}/dopamine-plasticity.npz"
 TENSORBOARD_DIR="${RUN_DIR}/tensorboard/ppo-pretrain"
+SNAPSHOT_DIR="${RUN_DIR}/checkpoints"
+ENABLE_DOPAMINE="${MARIO_ENABLE_DOPAMINE:-0}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
+if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_ENABLE_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
-    if [[ ! -e "${CHECKPOINT}" && -e "${DOPAMINE_STATE}" ]]; then
+    if [[ "${ENABLE_DOPAMINE}" == "1" && ! -e "${CHECKPOINT}" && -e "${DOPAMINE_STATE}" ]]; then
         echo "ERROR: incomplete pretraining state in ${RUN_DIR}" >&2
         echo "Dopamine state exists without its PPO checkpoint." >&2
         exit 1
@@ -60,7 +69,7 @@ command -v uv >/dev/null 2>&1 || {
     echo "ERROR: uv is not available on the compute node PATH." >&2
     exit 1
 }
-if [[ ! -e "${CHECKPOINT}" && -e "${DOPAMINE_STATE}" ]]; then
+if [[ "${ENABLE_DOPAMINE}" == "1" && ! -e "${CHECKPOINT}" && -e "${DOPAMINE_STATE}" ]]; then
     echo "ERROR: incomplete pretraining state in ${RUN_DIR}" >&2
     exit 1
 fi
@@ -91,27 +100,48 @@ PRETRAIN_STEPS="${MARIO_PRETRAIN_STEPS:-20000}"
 ACTION_REPEAT="${MARIO_PRETRAIN_ACTION_REPEAT:-30}"
 SAVE_EVERY="${MARIO_PRETRAIN_SAVE_EVERY:-1000}"
 DOPAMINE_RATE="${DOPAMINE_LEARNING_RATE:-0.001}"
+CONTINUATION_LR="${MARIO_PPO_LEARNING_RATE:-0.000025}"
+VALUE_COEFFICIENT="${MARIO_PPO_VALUE_COEFFICIENT:-0.05}"
+ENTROPY_COEFFICIENT="${MARIO_PPO_ENTROPY_COEFFICIENT:-0.01}"
+TARGET_KL="${MARIO_PPO_TARGET_KL:-0.02}"
 
 echo "Job ID:             ${SLURM_JOB_ID}"
 echo "Host:               $(hostname)"
 echo "Run:                ${RUN_DIR}"
 echo "Additional decisions:${PRETRAIN_STEPS}"
 echo "Action repeat:       ${ACTION_REPEAT} frames"
-echo "Dopamine rate:       ${DOPAMINE_RATE}"
+echo "Dopamine enabled:    ${ENABLE_DOPAMINE}"
+if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
+    echo "Dopamine rate:       ${DOPAMINE_RATE}"
+fi
+echo "PPO learning rate:   ${CONTINUATION_LR}"
+echo "PPO value coef:      ${VALUE_COEFFICIENT}"
+echo "PPO entropy coef:    ${ENTROPY_COEFFICIENT}"
+echo "PPO target KL:       ${TARGET_KL}"
 echo "Checkpoint:          ${CHECKPOINT}"
-echo "Dopamine state:      ${DOPAMINE_STATE}"
+echo "Snapshots:           ${SNAPSHOT_DIR}"
 echo "TensorBoard:         ${TENSORBOARD_DIR}"
 
 resume_args=()
 if [[ -f "${CHECKPOINT}" ]]; then
     resume_args+=(--resume "${CHECKPOINT}")
-    if [[ -f "${DOPAMINE_STATE}" ]]; then
+    if [[ "${ENABLE_DOPAMINE}" == "1" && -f "${DOPAMINE_STATE}" ]]; then
         echo "Mode:                resume PPO and dopamine"
-    else
+    elif [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
         echo "Mode:                resume PPO; initialize fresh dopamine"
+    else
+        echo "Mode:                resume PPO; frozen MaleCNS"
     fi
 else
     echo "Mode:                fresh"
+fi
+
+dopamine_args=()
+if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
+    dopamine_args+=(
+        --dopamine-state "${DOPAMINE_STATE}"
+        --dopamine-learning-rate "${DOPAMINE_RATE}"
+    )
 fi
 
 srun "${SIDECAR_VENV}/bin/python" \
@@ -121,12 +151,16 @@ srun "${SIDECAR_VENV}/bin/python" \
     --save-every "${SAVE_EVERY}" \
     --rollout-steps "${MARIO_PPO_ROLLOUT_STEPS:-256}" \
     --output "${CHECKPOINT}" \
+    --snapshot-dir "${SNAPSHOT_DIR}" \
     --tensorboard-dir "${TENSORBOARD_DIR}" \
     --device "${MARIO_PPO_DEVICE:-auto}" \
+    --continuation-learning-rate "${CONTINUATION_LR}" \
+    --value-coefficient "${VALUE_COEFFICIENT}" \
+    --entropy-coefficient "${ENTROPY_COEFFICIENT}" \
+    --target-kl "${TARGET_KL}" \
     --male-cns-data "${FLY_DATA}" \
     --male-cns-device cpu \
-    --dopamine-state "${DOPAMINE_STATE}" \
-    --dopamine-learning-rate "${DOPAMINE_RATE}" \
+    "${dopamine_args[@]}" \
     "${resume_args[@]}" \
     2>&1 | tee "${OUTPUT_DIR}/pretrain-${SLURM_JOB_ID}.log"
 
