@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 from collections import Counter, deque
 from pathlib import Path
+import shutil
 import signal
 import time
 
@@ -41,11 +42,18 @@ def _save(
     snapshot_dir: Path | None = None,
 ) -> None:
     _atomic_agent_save(agent, output)
+    connectome.save_plasticity()
     if snapshot_dir is not None:
         snapshot_dir.mkdir(parents=True, exist_ok=True)
         snapshot = snapshot_dir / f"flybrain-ppo-step-{agent.steps:09d}.pt"
         _atomic_agent_save(agent, snapshot)
-    connectome.save_plasticity()
+        if connectome.dopamine is not None:
+            dopamine_snapshot = (
+                snapshot_dir / f"dopamine-plasticity-step-{agent.steps:09d}.npz"
+            )
+            temporary = dopamine_snapshot.with_name(f".{dopamine_snapshot.name}.tmp")
+            shutil.copy2(connectome.dopamine.state_path, temporary)
+            temporary.replace(dopamine_snapshot)
 
 
 def _flush(
