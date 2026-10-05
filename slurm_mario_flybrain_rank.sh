@@ -24,9 +24,22 @@ fi
 ROOT="${SCRATCH}/microduck-rl/mario-flybrain-${MARIO_RUN_TAG}"
 RUN_DIR="${ROOT}/run"
 OUTPUT_DIR="${ROOT}/slurm"
-REPORT_DIR="${RUN_DIR}/evaluations/checkpoint-ranking"
-RANKING="${RUN_DIR}/evaluations/checkpoint-ranking.json"
-BEST="${RUN_DIR}/best-clean-ppo.pt"
+RANK_DOPAMINE="${MARIO_RANK_DOPAMINE:-0}"
+if [[ "${RANK_DOPAMINE}" != "0" && "${RANK_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_RANK_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${RANK_DOPAMINE}" == "1" ]]; then
+    REPORT_DIR="${RUN_DIR}/evaluations/dopamine-checkpoint-ranking"
+    RANKING="${RUN_DIR}/evaluations/dopamine-checkpoint-ranking.json"
+    BEST="${RUN_DIR}/best-dopamine-ppo.pt"
+    BEST_DOPAMINE="${RUN_DIR}/best-dopamine-plasticity.npz"
+else
+    REPORT_DIR="${RUN_DIR}/evaluations/checkpoint-ranking"
+    RANKING="${RUN_DIR}/evaluations/checkpoint-ranking.json"
+    BEST="${RUN_DIR}/best-clean-ppo.pt"
+    BEST_DOPAMINE=""
+fi
 mkdir -p "${OUTPUT_DIR}" "${REPORT_DIR}"
 
 if [[ -z "${SLURM_JOB_ID:-}" ]]; then
@@ -54,9 +67,21 @@ uv pip install --python "${SIDECAR_VENV}/bin/python" "${REPO_DIR}/integrations/s
 
 echo "Checkpoint directory: ${RUN_DIR}/checkpoints"
 echo "Episodes per mode:    ${MARIO_RANK_EPISODES:-10}"
-echo "Dopamine:             disabled"
+if [[ "${RANK_DOPAMINE}" == "1" ]]; then
+    echo "Dopamine:             paired frozen snapshots"
+else
+    echo "Dopamine:             disabled"
+fi
 echo "Ranking output:        ${RANKING}"
 echo "Selected checkpoint:   ${BEST}"
+
+dopamine_args=()
+if [[ "${RANK_DOPAMINE}" == "1" ]]; then
+    dopamine_args+=(
+        --dopamine-checkpoint-dir "${RUN_DIR}/checkpoints"
+        --best-dopamine-output "${BEST_DOPAMINE}"
+    )
+fi
 
 srun "${SIDECAR_VENV}/bin/python" \
     "${REPO_DIR}/integrations/super_mario/rank_ppo_checkpoints.py" \
@@ -64,6 +89,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --reports-dir "${REPORT_DIR}" \
     --output "${RANKING}" \
     --best-output "${BEST}" \
+    "${dopamine_args[@]}" \
     --episodes "${MARIO_RANK_EPISODES:-10}" \
     --max-decisions "${MARIO_EVAL_MAX_DECISIONS:-300}" \
     --action-repeat "${MARIO_EVAL_ACTION_REPEAT:-30}" \

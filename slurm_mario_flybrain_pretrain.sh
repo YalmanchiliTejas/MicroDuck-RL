@@ -38,6 +38,7 @@ TENSORBOARD_DIR="${RUN_DIR}/tensorboard/ppo-pretrain"
 SNAPSHOT_DIR="${RUN_DIR}/checkpoints"
 ENABLE_DOPAMINE="${MARIO_ENABLE_DOPAMINE:-0}"
 FREEZE_PPO="${MARIO_FREEZE_PPO:-0}"
+FREEZE_DOPAMINE="${MARIO_FREEZE_DOPAMINE:-0}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
 if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -48,8 +49,20 @@ if [[ "${FREEZE_PPO}" != "0" && "${FREEZE_PPO}" != "1" ]]; then
     echo "ERROR: MARIO_FREEZE_PPO must be 0 or 1." >&2
     exit 1
 fi
+if [[ "${FREEZE_DOPAMINE}" != "0" && "${FREEZE_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_FREEZE_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
 if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
     echo "ERROR: MARIO_FREEZE_PPO=1 requires MARIO_ENABLE_DOPAMINE=1." >&2
+    exit 1
+fi
+if [[ "${FREEZE_DOPAMINE}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
+    echo "ERROR: MARIO_FREEZE_DOPAMINE=1 requires MARIO_ENABLE_DOPAMINE=1." >&2
+    exit 1
+fi
+if [[ "${FREEZE_PPO}" == "1" && "${FREEZE_DOPAMINE}" == "1" ]]; then
+    echo "ERROR: PPO and dopamine cannot both be frozen." >&2
     exit 1
 fi
 
@@ -62,7 +75,7 @@ if [[ -z "${SLURM_JOB_ID:-}" ]]; then
     submit_args=(
         --output="${OUTPUT_DIR}/pretrain-%j.out"
         --error="${OUTPUT_DIR}/pretrain-%j.err"
-        --export="ALL,MARIO_RUN_TAG=${MARIO_RUN_TAG},MICRODUCK_REPO_DIR=${REPO_DIR},MARIO_PPO_INITIAL_CHECKPOINT=${MARIO_PPO_INITIAL_CHECKPOINT:-}"
+        --export="ALL,MARIO_RUN_TAG=${MARIO_RUN_TAG},MICRODUCK_REPO_DIR=${REPO_DIR},MARIO_PPO_INITIAL_CHECKPOINT=${MARIO_PPO_INITIAL_CHECKPOINT:-},MARIO_DOPAMINE_INITIAL_STATE=${MARIO_DOPAMINE_INITIAL_STATE:-}"
     )
     if [[ -n "${SLURM_PARTITION:-}" ]]; then
         submit_args+=(--partition="${SLURM_PARTITION}")
@@ -89,6 +102,14 @@ if [[ ! -e "${CHECKPOINT}" && -n "${MARIO_PPO_INITIAL_CHECKPOINT:-}" ]]; then
     fi
     cp -- "${MARIO_PPO_INITIAL_CHECKPOINT}" "${CHECKPOINT}"
     echo "Seeded production PPO from ${MARIO_PPO_INITIAL_CHECKPOINT}"
+fi
+if [[ "${ENABLE_DOPAMINE}" == "1" && ! -e "${DOPAMINE_STATE}" && -n "${MARIO_DOPAMINE_INITIAL_STATE:-}" ]]; then
+    if [[ ! -f "${MARIO_DOPAMINE_INITIAL_STATE}" ]]; then
+        echo "ERROR: MARIO_DOPAMINE_INITIAL_STATE does not exist: ${MARIO_DOPAMINE_INITIAL_STATE}" >&2
+        exit 1
+    fi
+    cp -- "${MARIO_DOPAMINE_INITIAL_STATE}" "${DOPAMINE_STATE}"
+    echo "Seeded dopamine state from ${MARIO_DOPAMINE_INITIAL_STATE}"
 fi
 
 export UV_CACHE_DIR="${SCRATCH_ROOT}/uv-cache"
@@ -121,6 +142,7 @@ echo "Additional decisions:${PRETRAIN_STEPS}"
 echo "Action repeat:       ${ACTION_REPEAT} frames"
 echo "Dopamine enabled:    ${ENABLE_DOPAMINE}"
 echo "PPO frozen:          ${FREEZE_PPO}"
+echo "Dopamine frozen:     ${FREEZE_DOPAMINE}"
 if [[ "${ENABLE_DOPAMINE}" == "1" ]]; then
     echo "Dopamine rate:       ${DOPAMINE_RATE}"
 fi
@@ -156,6 +178,9 @@ fi
 freeze_args=()
 if [[ "${FREEZE_PPO}" == "1" ]]; then
     freeze_args+=(--freeze-ppo)
+fi
+if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
+    freeze_args+=(--freeze-dopamine)
 fi
 
 srun "${SIDECAR_VENV}/bin/python" \

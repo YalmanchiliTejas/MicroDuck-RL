@@ -345,6 +345,37 @@ This v2 dopamine state stores a running prediction-error RMS and applies a
 smooth normalized signal instead of clipping almost every raw Mario TD error to
 `-1` or `+1`. Never copy an older `dopamine-plasticity.npz` into this run.
 
+Rank the matched PPO/dopamine snapshots after that warm-up:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-dopamine-6150-v1 \
+MARIO_RANK_DOPAMINE=1 \
+MARIO_RANK_EPISODES=25 \
+    ./slurm_mario_flybrain_rank.sh
+```
+
+This copies the winning pair to `run/best-dopamine-ppo.pt` and
+`run/best-dopamine-plasticity.npz`. Adapt PPO to that fixed learned connectome
+under a new run tag so the winning pair cannot be overwritten:
+
+```bash
+DOPAMINE_ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-dopamine-6150-v1"
+
+MARIO_RUN_TAG=malecns-ppo-dopamine-adapt-6150-v1 \
+MARIO_PPO_INITIAL_CHECKPOINT="$DOPAMINE_ROOT/run/best-dopamine-ppo.pt" \
+MARIO_DOPAMINE_INITIAL_STATE="$DOPAMINE_ROOT/run/best-dopamine-plasticity.npz" \
+MARIO_ENABLE_DOPAMINE=1 \
+MARIO_FREEZE_PPO=0 \
+MARIO_FREEZE_DOPAMINE=1 \
+MARIO_PPO_LEARNING_RATE=0.00001 \
+MARIO_PRETRAIN_STEPS=500 \
+MARIO_PRETRAIN_SAVE_EVERY=100 \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+Evaluate this adaptation with `MARIO_EVAL_DOPAMINE=1` before extending it or
+starting physical training.
+
 The `malecns-dopamine-6150-v2` and reward-shaped v3 checkpoints must not be
 resumed. New checkpoints use the exact sum of rewards returned by
 `env.step()` during a held action: component values remain telemetry and are

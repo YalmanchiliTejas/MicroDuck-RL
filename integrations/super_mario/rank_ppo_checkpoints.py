@@ -60,6 +60,12 @@ def main() -> None:
     parser.add_argument("--reports-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--best-output", type=Path)
+    parser.add_argument(
+        "--dopamine-checkpoint-dir",
+        type=Path,
+        help="evaluate each PPO with dopamine-plasticity-step-STEP.npz from this directory",
+    )
+    parser.add_argument("--best-dopamine-output", type=Path)
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--max-decisions", type=int, default=300)
     parser.add_argument("--action-repeat", type=int, default=30)
@@ -70,6 +76,8 @@ def main() -> None:
     args = parser.parse_args()
     if args.episodes <= 0 or args.max_decisions <= 0 or args.action_repeat <= 0:
         parser.error("evaluation counts must be positive")
+    if args.best_dopamine_output is not None and args.dopamine_checkpoint_dir is None:
+        parser.error("--best-dopamine-output requires --dopamine-checkpoint-dir")
 
     checkpoints = sorted(args.checkpoint_dir.glob(args.pattern), key=_step)
     if not checkpoints:
@@ -78,15 +86,27 @@ def main() -> None:
     rows: list[dict] = []
     for checkpoint in checkpoints:
         step = _step(checkpoint)
+        dopamine_state = None
+        if args.dopamine_checkpoint_dir is not None:
+            dopamine_state = args.dopamine_checkpoint_dir / (
+                f"dopamine-plasticity-step-{step:09d}.npz"
+            )
+            if not dopamine_state.is_file():
+                parser.error(
+                    f"missing dopamine state paired with step {step}: {dopamine_state}"
+                )
         summaries = {}
         for mode in ("mean", "sampled"):
-            report_path = args.reports_dir / f"step-{step:09d}-{mode}.json"
+            state_label = "dopamine" if dopamine_state is not None else "clean"
+            report_path = (
+                args.reports_dir / f"step-{step:09d}-{state_label}-{mode}.json"
+            )
             if args.reuse_reports and report_path.exists():
                 report = json.loads(report_path.read_text())
             else:
                 evaluation_args = argparse.Namespace(
                     checkpoint=checkpoint,
-                    dopamine_state=None,
+                    dopamine_state=dopamine_state,
                     dopamine_learning_rate=1.0e-5,
                     male_cns_data=args.male_cns_data,
                     male_cns_device="cpu",
@@ -120,6 +140,9 @@ def main() -> None:
             {
                 "step": step,
                 "checkpoint": str(checkpoint.resolve()),
+                "dopamine_state": (
+                    None if dopamine_state is None else str(dopamine_state.resolve())
+                ),
                 "mean_raw_reward": 0.5
                 * (mean["mean_raw_reward"] + sampled["mean_raw_reward"]),
                 "mean_max_x": 0.5 * (mean["mean_max_x"] + sampled["mean_max_x"]),
@@ -145,6 +168,7 @@ def main() -> None:
     rows.sort(key=lambda row: (row["score"], row["step"]), reverse=True)
     result = {
         "recommended_checkpoint": rows[0]["checkpoint"],
+        "recommended_dopamine_state": rows[0]["dopamine_state"],
         "scoring": {
             "relative_mean_raw_reward": 0.30,
             "relative_mean_max_x": 0.30,
@@ -159,13 +183,21 @@ def main() -> None:
             "seed": args.seed,
             "action_repeat": args.action_repeat,
             "max_decisions": args.max_decisions,
-            "dopamine": "disabled",
+            "dopamine": (
+                "paired frozen state"
+                if args.dopamine_checkpoint_dir is not None
+                else "disabled"
+            ),
         },
         "ranking": rows,
     }
     _atomic_json(args.output, result)
     if args.best_output is not None:
         _atomic_copy(Path(rows[0]["checkpoint"]), args.best_output)
+    if args.best_dopamine_output is not None:
+        _atomic_copy(
+            Path(rows[0]["dopamine_state"]), args.best_dopamine_output
+        )
 
     print("\nrank  step       score  reward   max_x  survive entropy complete checkpoint")
     for rank, row in enumerate(rows, start=1):
@@ -178,6 +210,8 @@ def main() -> None:
     print(f"\nRecommended checkpoint: {rows[0]['checkpoint']}")
     if args.best_output is not None:
         print(f"Copied recommendation to: {args.best_output}")
+    if args.best_dopamine_output is not None:
+        print(f"Copied paired dopamine state to: {args.best_dopamine_output}")
     print(f"Full ranking: {args.output}")
 
 

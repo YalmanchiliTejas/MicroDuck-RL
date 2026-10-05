@@ -145,6 +145,9 @@ def run(args: argparse.Namespace) -> None:
     writer.add_text("training/reward_contract", "raw sum of env.step rewards", 0)
     writer.add_scalar("training/action_repeat", args.action_repeat, agent.steps)
     writer.add_scalar("training/ppo_frozen", float(args.freeze_ppo), agent.steps)
+    writer.add_scalar(
+        "training/dopamine_frozen", float(args.freeze_dopamine), agent.steps
+    )
     writer.flush()
     rollout = {
         "states": [],
@@ -201,9 +204,10 @@ def run(args: argparse.Namespace) -> None:
             writer.add_scalar("reward/action_interval", raw_reward, agent.steps)
             writer.add_scalar("training/x_pos", int(info.get("x_pos", 0)), agent.steps)
             writer.add_scalar("training/action", action, agent.steps)
-            connectome.reinforce(
-                agent.prediction_error(raw_reward, next_state, done, value=value)
-            )
+            if not args.freeze_dopamine:
+                connectome.reinforce(
+                    agent.prediction_error(raw_reward, next_state, done, value=value)
+                )
             state = next_state
 
             if not args.freeze_ppo and (
@@ -318,6 +322,11 @@ def main() -> None:
         action="store_true",
         help="update dopamine plasticity while preserving PPO network/optimizer weights",
     )
+    parser.add_argument(
+        "--freeze-dopamine",
+        action="store_true",
+        help="load learned dopamine synapses but do not update them",
+    )
     args = parser.parse_args()
     if min(args.steps, args.action_repeat, args.rollout_steps, args.save_every) <= 0:
         parser.error("steps, action repeat, rollout steps, and save interval must be positive")
@@ -337,6 +346,10 @@ def main() -> None:
         parser.error("--dopamine-state requires --male-cns-device cpu")
     if args.freeze_ppo and args.dopamine_state is None:
         parser.error("--freeze-ppo requires --dopamine-state")
+    if args.freeze_dopamine and args.dopamine_state is None:
+        parser.error("--freeze-dopamine requires --dopamine-state")
+    if args.freeze_ppo and args.freeze_dopamine:
+        parser.error("cannot freeze both PPO and dopamine; there would be no learning")
     run(args)
 
 
