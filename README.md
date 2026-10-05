@@ -250,8 +250,10 @@ so a request change does not require crossing the original large empty spaces.
 Changing this layout changes the controller task: retrain the Mario PPO before
 using a checkpoint trained against the old geometry.
 
-Install the Python 3.13 sidecar, then train the MaleCNS readout and dopamine
-plasticity directly in the emulator. On first use the `flybrain` package
+Install the Python 3.13 sidecar, then train the MaleCNS readout directly in the
+emulator with a frozen connectome. Dopamine plasticity is opt-in and should
+only be introduced in a separate experiment after the PPO is stable. On first
+use the `flybrain` package
 downloads its prebuilt MaleCNS
 files (about 260 MB) to `$FLY_DATA` (default `~/fly-data`). The simulator and
 reservoir interface come from [fly.ai](https://github.com/alextitonis/fly.ai);
@@ -265,19 +267,20 @@ python3.13 -m venv .super-mario-venv
 # physical experiment; tune it from measured request-to-pad latency.
 .super-mario-venv/bin/microduck-train-ppo-flybrain \
     --additional-steps 20000 --action-repeat 30 --output flybrain-ppo.pt \
+    --snapshot-dir checkpoints \
     --tensorboard-dir tensorboard/ppo-pretrain \
-    --male-cns-device cpu --dopamine-state dopamine-plasticity.npz
+    --male-cns-device cpu --continuation-learning-rate 0.000025 \
+    --value-coefficient 0.05 --target-kl 0.02
 ```
 
 On Slurm, use a fresh run tag for the first emulator-pretraining job. The job is
 capped at four hours and receives `SIGTERM` three minutes before the hard limit.
-It atomically checkpoints PPO and its optimizer (`flybrain-ppo.pt`) plus
-dopamine plasticity (`dopamine-plasticity.npz`):
+It atomically checkpoints PPO and its optimizer (`flybrain-ppo.pt`) and keeps
+numbered rollback points in `run/checkpoints/`:
 
 ```bash
-MARIO_RUN_TAG=malecns-ppo-6150-v1 \
+MARIO_RUN_TAG=malecns-ppo-clean-6150-v1 \
 MARIO_PRETRAIN_STEPS=20000 \
-DOPAMINE_LEARNING_RATE=0.001 \
     ./slurm_mario_flybrain_pretrain.sh
 ```
 
@@ -287,22 +290,28 @@ adds another block from that state. To seed production from the winning
 controlled benchmark, set an absolute checkpoint path on the first submission:
 
 ```bash
-MARIO_RUN_TAG=malecns-ppo-6150-v1 \
+MARIO_RUN_TAG=malecns-ppo-clean-6150-v1 \
 MARIO_PPO_INITIAL_CHECKPOINT="$SCRATCH/microduck-rl/mario-algorithm-benchmark-raw-reward-v1-seed-123/run/checkpoints/ppo.pt" \
-MARIO_PRETRAIN_STEPS=20000 \
+MARIO_PRETRAIN_STEPS=5000 \
     ./slurm_mario_flybrain_pretrain.sh
 ```
 
-This initializes fresh dopamine state while continuing the winning PPO policy.
+This continues the winning PPO with a lower learning rate, scale-normalized
+critic loss, KL early stopping, and a frozen MaleCNS. It does not change or
+shape the Gymnasium reward.
 
 Evaluate the resulting checkpoint in both deterministic and sampled modes
 without changing PPO or dopamine state:
 
 ```bash
-MARIO_RUN_TAG=malecns-ppo-6150-v1 \
+MARIO_RUN_TAG=malecns-ppo-clean-6150-v1 \
 MARIO_EVAL_MODES="mean sampled" \
     ./slurm_mario_flybrain_evaluate.sh
 ```
+
+Evaluation also defaults to the frozen base MaleCNS. To perform the explicit
+modified-connectome ablation, additionally set `MARIO_EVAL_DOPAMINE=1` and
+`MARIO_EVAL_DOPAMINE_STATE=/absolute/path/to/dopamine-plasticity.npz`.
 
 The `malecns-dopamine-6150-v2` and reward-shaped v3 checkpoints must not be
 resumed. New checkpoints use the exact sum of rewards returned by
@@ -363,25 +372,28 @@ average-return curves. Final frozen reports are also written as
 Progress and checkpoint state are available at:
 
 ```bash
-ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-6150-v1"
+ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-clean-6150-v1"
 tail -f "$ROOT"/slurm/pretrain-*.log
-ls -lh "$ROOT"/run/{flybrain-ppo.pt,dopamine-plasticity.npz}
+ls -lh "$ROOT"/run/flybrain-ppo.pt "$ROOT"/run/checkpoints/*.pt
 ```
 
 After that job finishes, use the same tag for physical fine-tuning. The physical
-wrapper refuses to start unless both pretrained artifacts exist. It has the same
+wrapper refuses to start unless the pretrained PPO exists. It has the same
 four-hour limit and advance termination signal; rerunning it with the same tag
-loads PPO and dopamine state, trains only from physically executed rollout
-segments, and skips rollouts already listed in the processed manifest:
+loads PPO with a frozen MaleCNS, trains only from physically executed rollout
+segments, keeps numbered checkpoints, and skips rollouts already listed in the
+processed manifest:
 
 ```bash
 MARIO_POLICY=/scratch/scholar/tyalaman/microduck-rl/mario-controller-6150.onnx \
-MARIO_RUN_TAG=malecns-ppo-6150-v1 \
+MARIO_RUN_TAG=malecns-ppo-clean-6150-v1 \
 MARIO_RUN_SECONDS=13800 \
 MARIO_DECISION_FRAMES=90 \
-DOPAMINE_LEARNING_RATE=0.001 \
     ./slurm_mario_flybrain.sh
 ```
+
+Only a later, separate experiment should set `MARIO_ENABLE_DOPAMINE=1`; never
+reuse the compromised `malecns-ppo-6150-v1` dopamine state.
 
 For an end-to-end MuJoCo rehearsal, first export the trained
 `Mjlab-MarioController-Flat-MicroDuck` PPO through the normal normalized ONNX
