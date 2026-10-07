@@ -1,8 +1,8 @@
 import importlib.util
 import json
-from pathlib import Path
 import sys
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -54,7 +54,7 @@ def _load_evaluator(flybrain, rollouts):
         "mario_dqn": flybrain,
         "rollouts": rollouts,
         "male_cns": types.SimpleNamespace(MaleCNS=object),
-        "mario_sidecar": types.SimpleNamespace(nes_actions=lambda: []),
+        "mario_sidecar": types.SimpleNamespace(nes_actions=list),
     }
     previous = {name: sys.modules.get(name) for name in injected}
     sys.modules.update(injected)
@@ -253,6 +253,54 @@ def test_ppo_checkpoint_restores_policy_and_sampling_rng(tmp_path):
     assert [restored.act(state)[0] for _ in range(10)] == expected
 
 
+def test_factorized_ppo_maps_three_heads_to_ten_action_probabilities():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    logits = torch.zeros((1, 7), dtype=torch.float32)
+    probabilities = ppo._factorized_probabilities(logits)[0]
+    assert probabilities.shape == (10,)
+    assert probabilities.sum().item() == pytest.approx(1.0)
+    # Neutral actions marginalize over the irrelevant run head.
+    assert probabilities[flybrain.FlybrainAction.IDLE].item() == pytest.approx(1 / 6)
+    assert probabilities[flybrain.FlybrainAction.JUMP].item() == pytest.approx(1 / 6)
+    # Directional combinations share direction, jump, and run probability.
+    assert probabilities[flybrain.FlybrainAction.RIGHT].item() == pytest.approx(1 / 12)
+    assert probabilities[flybrain.FlybrainAction.RIGHT_JUMP].item() == pytest.approx(1 / 12)
+
+
+def test_categorical_ppo_checkpoint_migrates_to_factorized_heads(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    state = np.zeros((4, 6), dtype=np.float32)
+    source = ppo.PPOAgent(ppo.PPOConfig(feature_dim=6), seed=8)
+    source.steps = 123
+    checkpoint = tmp_path / "categorical.pt"
+    source.save(checkpoint)
+
+    migrated = ppo.PPOAgent.load(checkpoint, policy_mode="factorized")
+    assert migrated.config.policy_mode == "factorized"
+    assert migrated.steps == 123
+    assert migrated.action_probabilities(state).sum() == pytest.approx(1.0)
+    assert torch.equal(
+        migrated.network.frame_projection[0].weight,
+        source.network.frame_projection[0].weight,
+    )
+    assert torch.equal(migrated.network.value.weight, source.network.value.weight)
+    assert migrated.optimizer.state_dict()["state"] == {}
+
+
+def test_schema_one_categorical_ppo_checkpoint_still_loads(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    checkpoint = tmp_path / "schema-one.pt"
+    ppo.PPOAgent(ppo.PPOConfig(feature_dim=6), seed=8).save(checkpoint)
+    payload = torch.load(checkpoint, weights_only=False)
+    payload["schema"] = 1
+    payload["config"].pop("policy_mode")
+    torch.save(payload, checkpoint)
+    assert ppo.PPOAgent.load(checkpoint).config.policy_mode == "categorical"
+
+
 def test_ppo_continuation_overrides_are_checkpointed(tmp_path):
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
@@ -294,6 +342,31 @@ def test_ppo_update_accepts_unmodified_reward_returns():
     )
     assert agent.updates == 1
     assert all(np.isfinite(value) for value in metrics.values())
+
+
+def test_factorized_ppo_update_reports_per_head_entropy_and_kl():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    config = ppo.PPOConfig(
+        feature_dim=6,
+        policy_mode="factorized",
+        rollout_steps=4,
+        update_epochs=1,
+        minibatch_size=2,
+    )
+    agent = ppo.PPOAgent(config, seed=9)
+    states = np.zeros((4, 4, 6), dtype=np.float32)
+    samples = [agent.act(state) for state in states]
+    metrics = agent.update(
+        states=states,
+        actions=np.asarray([sample[0] for sample in samples]),
+        old_log_probabilities=np.asarray([sample[1] for sample in samples]),
+        returns=np.asarray([100.0, -25.0, 50.0, 10.0], dtype=np.float32),
+        advantages=np.asarray([100.0, -25.0, 50.0, 10.0], dtype=np.float32),
+    )
+    assert metrics["approx_kl"] >= 0.0
+    for name in ("direction_entropy", "jump_entropy", "run_entropy"):
+        assert metrics[name] > 0.0
 
 
 def test_replay_samples_self_contained_pre_and_post_action_states():

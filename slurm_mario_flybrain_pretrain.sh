@@ -39,6 +39,7 @@ SNAPSHOT_DIR="${RUN_DIR}/checkpoints"
 ENABLE_DOPAMINE="${MARIO_ENABLE_DOPAMINE:-0}"
 FREEZE_PPO="${MARIO_FREEZE_PPO:-0}"
 FREEZE_DOPAMINE="${MARIO_FREEZE_DOPAMINE:-0}"
+FACTORIZED_PPO="${MARIO_PPO_FACTORIZED:-0}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
 if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -51,6 +52,10 @@ if [[ "${FREEZE_PPO}" != "0" && "${FREEZE_PPO}" != "1" ]]; then
 fi
 if [[ "${FREEZE_DOPAMINE}" != "0" && "${FREEZE_DOPAMINE}" != "1" ]]; then
     echo "ERROR: MARIO_FREEZE_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${FACTORIZED_PPO}" != "0" && "${FACTORIZED_PPO}" != "1" ]]; then
+    echo "ERROR: MARIO_PPO_FACTORIZED must be 0 or 1." >&2
     exit 1
 fi
 if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -127,6 +132,7 @@ uv pip install \
     "${REPO_DIR}/integrations/super_mario"
 
 PRETRAIN_STEPS="${MARIO_PRETRAIN_STEPS:-20000}"
+TARGET_STEPS="${MARIO_PRETRAIN_TARGET_STEPS:-}"
 ACTION_REPEAT="${MARIO_PRETRAIN_ACTION_REPEAT:-30}"
 SAVE_EVERY="${MARIO_PRETRAIN_SAVE_EVERY:-1000}"
 DOPAMINE_RATE="${DOPAMINE_LEARNING_RATE:-0.00001}"
@@ -135,10 +141,23 @@ VALUE_COEFFICIENT="${MARIO_PPO_VALUE_COEFFICIENT:-0.05}"
 ENTROPY_COEFFICIENT="${MARIO_PPO_ENTROPY_COEFFICIENT:-0.01}"
 TARGET_KL="${MARIO_PPO_TARGET_KL:-0.02}"
 
+step_args=(--additional-steps "${PRETRAIN_STEPS}")
+if [[ -n "${TARGET_STEPS}" ]]; then
+    if ! [[ "${TARGET_STEPS}" =~ ^[1-9][0-9]*$ ]]; then
+        echo "ERROR: MARIO_PRETRAIN_TARGET_STEPS must be a positive integer." >&2
+        exit 1
+    fi
+    step_args=(--steps "${TARGET_STEPS}")
+fi
+
 echo "Job ID:             ${SLURM_JOB_ID}"
 echo "Host:               $(hostname)"
 echo "Run:                ${RUN_DIR}"
-echo "Additional decisions:${PRETRAIN_STEPS}"
+if [[ -n "${TARGET_STEPS}" ]]; then
+    echo "Target decision step: ${TARGET_STEPS}"
+else
+    echo "Additional decisions:${PRETRAIN_STEPS}"
+fi
 echo "Action repeat:       ${ACTION_REPEAT} frames"
 echo "Dopamine enabled:    ${ENABLE_DOPAMINE}"
 echo "PPO frozen:          ${FREEZE_PPO}"
@@ -150,6 +169,7 @@ echo "PPO learning rate:   ${CONTINUATION_LR}"
 echo "PPO value coef:      ${VALUE_COEFFICIENT}"
 echo "PPO entropy coef:    ${ENTROPY_COEFFICIENT}"
 echo "PPO target KL:       ${TARGET_KL}"
+echo "PPO factorized:      ${FACTORIZED_PPO}"
 echo "Checkpoint:          ${CHECKPOINT}"
 echo "Snapshots:           ${SNAPSHOT_DIR}"
 echo "TensorBoard:         ${TENSORBOARD_DIR}"
@@ -179,13 +199,17 @@ freeze_args=()
 if [[ "${FREEZE_PPO}" == "1" ]]; then
     freeze_args+=(--freeze-ppo)
 fi
+policy_args=()
+if [[ "${FACTORIZED_PPO}" == "1" ]]; then
+    policy_args+=(--factorized-policy)
+fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
     freeze_args+=(--freeze-dopamine)
 fi
 
 srun "${SIDECAR_VENV}/bin/python" \
     "${REPO_DIR}/integrations/super_mario/train_ppo_flybrain.py" \
-    --additional-steps "${PRETRAIN_STEPS}" \
+    "${step_args[@]}" \
     --action-repeat "${ACTION_REPEAT}" \
     --save-every "${SAVE_EVERY}" \
     --rollout-steps "${MARIO_PPO_ROLLOUT_STEPS:-256}" \
@@ -201,6 +225,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --male-cns-device cpu \
     "${dopamine_args[@]}" \
     "${freeze_args[@]}" \
+    "${policy_args[@]}" \
     "${resume_args[@]}" \
     2>&1 | tee "${OUTPUT_DIR}/pretrain-${SLURM_JOB_ID}.log"
 

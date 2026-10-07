@@ -300,6 +300,33 @@ This continues the winning PPO with a lower learning rate, scale-normalized
 critic loss, KL early stopping, and a frozen MaleCNS. It does not change or
 shape the Gymnasium reward.
 
+For the factorized PPO readout, direction, jump, and virtual run use separate
+policy heads while preserving the same ten external game intents and robot
+protocol. A categorical seed retains its temporal encoder and critic, migrates
+the old policy weights into the three heads, and starts a fresh optimizer. Use
+an absolute target step for long Slurm runs so resubmission after the four-hour
+limit continues toward the same target rather than adding a new block each
+time:
+
+```bash
+CLEAN_ROOT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-clean-6150-v1"
+
+MARIO_RUN_TAG=malecns-ppo-factorized-entropy005-6150-v1 \
+MARIO_PPO_INITIAL_CHECKPOINT="$CLEAN_ROOT/run/best-clean-ppo.pt" \
+MARIO_PPO_FACTORIZED=1 \
+MARIO_ENABLE_DOPAMINE=0 \
+MARIO_PPO_ENTROPY_COEFFICIENT=0.05 \
+MARIO_PPO_TARGET_KL=0.02 \
+MARIO_PRETRAIN_TARGET_STEPS=300000 \
+MARIO_PRETRAIN_SAVE_EVERY=5000 \
+FLY_DATA="$CLEAN_ROOT/male-cns" \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+PPO updates write `loss/approx_kl`, total action entropy, and per-head
+direction/jump/run entropy to TensorBoard and mirror them in the Slurm text
+log. Resubmit the identical command until decision step 300,000 is reached.
+
 Evaluate the resulting checkpoint in both deterministic and sampled modes
 without changing PPO or dopamine state:
 

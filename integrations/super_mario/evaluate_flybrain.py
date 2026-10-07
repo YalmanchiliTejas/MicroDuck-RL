@@ -3,13 +3,12 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter
 import json
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
 import torch
-
 from male_cns import MaleCNS
 from mario_dqn import ActivityStack, FlybrainAction, FlybrainAgent
 from mario_sidecar import nes_actions
@@ -51,9 +50,9 @@ def _atomic_json(path: Path, report: dict) -> None:
 
 
 def run(args: argparse.Namespace) -> dict:
+    import gym_super_mario_bros  # noqa: F401 -- registers environments
     import gymnasium as gym
     from nes_py.wrappers import JoypadSpace
-    import gym_super_mario_bros  # noqa: F401 -- registers environments
 
     device = _device(args.device)
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
@@ -118,8 +117,7 @@ def run(args: argparse.Namespace) -> dict:
                 with torch.no_grad():
                     state_t = torch.as_tensor(state, device=agent.device).unsqueeze(0)
                     if algorithm == "ppo":
-                        logits, _ = agent.network(state_t)
-                        action_scores = torch.softmax(logits[0], dim=0).cpu().numpy()
+                        action_scores = agent.action_probabilities(state)
                     else:
                         action_scores = agent.online(state_t)[0].detach().cpu().numpy()
                 greedy_action = int(np.argmax(action_scores))

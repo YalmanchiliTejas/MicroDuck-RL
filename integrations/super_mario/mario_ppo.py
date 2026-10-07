@@ -7,14 +7,15 @@ from pathlib import Path
 
 import numpy as np
 import torch
+from mario_dqn import ACTION_LEVELS
+from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-from mario_dqn import ACTION_LEVELS
-from reward_contract import REWARD_CONTRACT
-
-
-PPO_CHECKPOINT_SCHEMA = 1
+PPO_CHECKPOINT_SCHEMA = 2
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, PPO_CHECKPOINT_SCHEMA)
+POLICY_MODES = ("categorical", "factorized")
+FACTORIZED_HEAD_SIZES = (3, 2, 2)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +23,7 @@ class PPOConfig:
     feature_dim: int = 1314
     stack_depth: int = 4
     num_actions: int = len(ACTION_LEVELS)
+    policy_mode: str = "categorical"
     gamma: float = 0.99
     gae_lambda: float = 0.95
     learning_rate: float = 2.5e-4
@@ -41,6 +43,8 @@ class PPOConfig:
             raise ValueError("PPO temporal input must contain exactly four frames")
         if self.num_actions != len(ACTION_LEVELS):
             raise ValueError("PPO action count does not match the Mario action space")
+        if self.policy_mode not in POLICY_MODES:
+            raise ValueError(f"PPO policy mode must be one of {POLICY_MODES}")
         if self.rollout_steps <= 0 or self.minibatch_size <= 0:
             raise ValueError("rollout and minibatch sizes must be positive")
         if self.target_kl <= 0:
@@ -48,7 +52,7 @@ class PPOConfig:
 
 
 class ActorCritic(nn.Module):
-    """Shared temporal encoder with categorical-policy and value heads."""
+    """Shared temporal encoder with categorical or factorized policy heads."""
 
     def __init__(self, config: PPOConfig) -> None:
         super().__init__()
@@ -61,7 +65,13 @@ class ActorCritic(nn.Module):
         )
         encoded_dim = 256 * (config.stack_depth - 1)
         self.shared = nn.Sequential(nn.Linear(encoded_dim, 512), nn.ReLU())
-        self.policy = nn.Linear(512, config.num_actions)
+        self.policy_mode = config.policy_mode
+        if config.policy_mode == "factorized":
+            self.direction_policy = nn.Linear(512, FACTORIZED_HEAD_SIZES[0])
+            self.jump_policy = nn.Linear(512, FACTORIZED_HEAD_SIZES[1])
+            self.run_policy = nn.Linear(512, FACTORIZED_HEAD_SIZES[2])
+        else:
+            self.policy = nn.Linear(512, config.num_actions)
         self.value = nn.Linear(512, 1)
 
     def forward(self, activity: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
@@ -70,7 +80,57 @@ class ActorCritic(nn.Module):
         projected = self.frame_projection(activity.float())
         features = self.temporal(projected.transpose(1, 2))
         shared = self.shared(features)
-        return self.policy(shared), self.value(shared).squeeze(1)
+        if self.policy_mode == "factorized":
+            logits = torch.cat(
+                (
+                    self.direction_policy(shared),
+                    self.jump_policy(shared),
+                    self.run_policy(shared),
+                ),
+                dim=1,
+            )
+        else:
+            logits = self.policy(shared)
+        return logits, self.value(shared).squeeze(1)
+
+
+def _factorized_probabilities(logits: torch.Tensor) -> torch.Tensor:
+    """Map direction/jump/run head logits onto the stable ten-action contract."""
+
+    direction_logits, jump_logits, run_logits = torch.split(
+        logits, FACTORIZED_HEAD_SIZES, dim=1
+    )
+    direction = torch.softmax(direction_logits, dim=1)
+    jump = torch.softmax(jump_logits, dim=1)
+    run = torch.softmax(run_logits, dim=1)
+    neutral, left, right = direction.unbind(dim=1)
+    released, pressed = jump.unbind(dim=1)
+    walk, running = run.unbind(dim=1)
+    # Running has no meaning without a horizontal direction, so neutral actions
+    # marginalize over the run head instead of creating duplicate intents.
+    return torch.stack(
+        (
+            neutral * released,
+            left * released * walk,
+            right * released * walk,
+            neutral * pressed,
+            left * pressed * walk,
+            right * pressed * walk,
+            left * released * running,
+            right * released * running,
+            left * pressed * running,
+            right * pressed * running,
+        ),
+        dim=1,
+    )
+
+
+def _head_entropies(logits: torch.Tensor) -> tuple[torch.Tensor, ...]:
+    entropies = []
+    for head_logits in torch.split(logits, FACTORIZED_HEAD_SIZES, dim=1):
+        head_log_probs = F.log_softmax(head_logits, dim=1)
+        entropies.append(-(head_log_probs.exp() * head_log_probs).sum(dim=1))
+    return tuple(entropies)
 
 
 class PPOAgent:
@@ -102,13 +162,26 @@ class PPOAgent:
         with torch.no_grad():
             state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
             logits, value = self.network(state_t)
-            probabilities = torch.softmax(logits[0], dim=0).cpu().numpy()
+            probabilities = self._action_probabilities(logits)[0].cpu().numpy()
         if deterministic:
             action = int(np.argmax(probabilities))
         else:
             action = int(self._action_rng.choice(len(probabilities), p=probabilities))
         log_probability = float(np.log(max(float(probabilities[action]), 1.0e-12)))
         return action, log_probability, float(value.item())
+
+    def _action_probabilities(self, logits: torch.Tensor) -> torch.Tensor:
+        if self.config.policy_mode == "factorized":
+            return _factorized_probabilities(logits)
+        return torch.softmax(logits, dim=1)
+
+    def action_probabilities(self, state: np.ndarray) -> np.ndarray:
+        """Return probabilities for the stable ten external Mario actions."""
+
+        with torch.no_grad():
+            state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
+            logits, _ = self.network(state_t)
+            return self._action_probabilities(logits)[0].cpu().numpy()
 
     def value(self, state: np.ndarray) -> float:
         with torch.no_grad():
@@ -195,6 +268,9 @@ class PPOAgent:
             "value_loss": 0.0,
             "value_loss_unscaled": 0.0,
             "entropy": 0.0,
+            "direction_entropy": 0.0,
+            "jump_entropy": 0.0,
+            "run_entropy": 0.0,
             "approx_kl": 0.0,
             "clip_fraction": 0.0,
         }
@@ -209,8 +285,8 @@ class PPOAgent:
                 indices = permutation[start : start + cfg.minibatch_size]
                 idx = torch.as_tensor(indices, device=self.device, dtype=torch.long)
                 logits, values = self.network(states_t[idx])
-                log_probs = F.log_softmax(logits, dim=1)
-                probabilities = log_probs.exp()
+                probabilities = self._action_probabilities(logits)
+                log_probs = torch.log(probabilities.clamp_min(1.0e-12))
                 selected_log_probs = log_probs.gather(
                     1, actions_t[idx].unsqueeze(1)
                 ).squeeze(1)
@@ -228,6 +304,14 @@ class PPOAgent:
                 value_loss_unscaled = F.mse_loss(values, returns_t[idx])
                 value_loss = value_loss_unscaled / return_scale.square()
                 entropy = -(probabilities * log_probs).sum(dim=1).mean()
+                if cfg.policy_mode == "factorized":
+                    direction_entropy, jump_entropy, run_entropy = (
+                        head_entropy.mean()
+                        for head_entropy in _head_entropies(logits)
+                    )
+                else:
+                    zero = entropy.detach() * 0.0
+                    direction_entropy = jump_entropy = run_entropy = zero
                 loss = (
                     policy_loss
                     + cfg.value_coefficient * value_loss
@@ -244,6 +328,9 @@ class PPOAgent:
                 totals["value_loss"] += float(value_loss.item())
                 totals["value_loss_unscaled"] += float(value_loss_unscaled.item())
                 totals["entropy"] += float(entropy.item())
+                totals["direction_entropy"] += float(direction_entropy.item())
+                totals["jump_entropy"] += float(jump_entropy.item())
+                totals["run_entropy"] += float(run_entropy.item())
                 totals["approx_kl"] += float(approx_kl.item())
                 totals["clip_fraction"] += float(clip_fraction.item())
                 epoch_kl += float(approx_kl.item())
@@ -283,18 +370,36 @@ class PPOAgent:
 
     @classmethod
     def load(
-        cls, path: str | Path, device: str | torch.device = "cpu"
-    ) -> "PPOAgent":
+        cls,
+        path: str | Path,
+        device: str | torch.device = "cpu",
+        *,
+        policy_mode: str | None = None,
+    ) -> PPOAgent:
         checkpoint = torch.load(path, map_location=device, weights_only=False)
         if (
-            checkpoint.get("schema") != PPO_CHECKPOINT_SCHEMA
+            checkpoint.get("schema") not in SUPPORTED_CHECKPOINT_SCHEMAS
             or checkpoint.get("algorithm") != "ppo"
             or checkpoint.get("reward_contract") != REWARD_CONTRACT
         ):
             raise ValueError("unsupported PPO checkpoint or reward contract")
-        agent = cls(PPOConfig(**checkpoint["config"]), device=device)
-        agent.network.load_state_dict(checkpoint["network"])
-        agent.optimizer.load_state_dict(checkpoint["optimizer"])
+        source_config_values = dict(checkpoint["config"])
+        source_config_values.setdefault("policy_mode", "categorical")
+        source_config = PPOConfig(**source_config_values)
+        target_mode = policy_mode or source_config.policy_mode
+        if target_mode not in POLICY_MODES:
+            raise ValueError(f"unsupported PPO policy mode: {target_mode}")
+        agent = cls(replace(source_config, policy_mode=target_mode), device=device)
+        if target_mode == source_config.policy_mode:
+            agent.network.load_state_dict(checkpoint["network"])
+            agent.optimizer.load_state_dict(checkpoint["optimizer"])
+        else:
+            if source_config.policy_mode != "categorical" or target_mode != "factorized":
+                raise ValueError(
+                    f"unsupported PPO policy migration: {source_config.policy_mode} "
+                    f"to {target_mode}"
+                )
+            agent._migrate_categorical_network(checkpoint["network"])
         agent.steps = int(checkpoint["steps"])
         agent.updates = int(checkpoint["updates"])
         agent._action_rng.bit_generator.state = checkpoint["action_rng_state"]
@@ -302,6 +407,40 @@ class PPOAgent:
             "minibatch_rng_state"
         ]
         return agent
+
+    def _migrate_categorical_network(self, state: dict[str, torch.Tensor]) -> None:
+        """Reuse a categorical policy's encoder/critic and factor its action head."""
+
+        common = {
+            key: value
+            for key, value in state.items()
+            if not key.startswith("policy.")
+        }
+        missing, unexpected = self.network.load_state_dict(common, strict=False)
+        expected_missing = {
+            "direction_policy.weight",
+            "direction_policy.bias",
+            "jump_policy.weight",
+            "jump_policy.bias",
+            "run_policy.weight",
+            "run_policy.bias",
+        }
+        if set(missing) != expected_missing or unexpected:
+            raise ValueError("categorical PPO checkpoint has incompatible network fields")
+
+        old_weight = state["policy.weight"].to(self.device)
+        old_bias = state["policy.bias"].to(self.device)
+
+        def initialize(head: nn.Linear, groups: tuple[tuple[int, ...], ...]) -> None:
+            with torch.no_grad():
+                for row, indices in enumerate(groups):
+                    index = torch.as_tensor(indices, device=self.device)
+                    head.weight[row].copy_(old_weight.index_select(0, index).mean(dim=0))
+                    head.bias[row].copy_(old_bias.index_select(0, index).mean())
+
+        initialize(self.network.direction_policy, ((0, 3), (1, 4, 6, 8), (2, 5, 7, 9)))
+        initialize(self.network.jump_policy, ((0, 1, 2, 6, 7), (3, 4, 5, 8, 9)))
+        initialize(self.network.run_policy, ((1, 2, 4, 5), (6, 7, 8, 9)))
 
 
 def generalized_advantage_estimates(

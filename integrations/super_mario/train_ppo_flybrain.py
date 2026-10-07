@@ -3,20 +3,19 @@
 from __future__ import annotations
 
 import argparse
-from collections import Counter, deque
-from pathlib import Path
 import shutil
 import signal
 import time
+from collections import Counter, deque
+from pathlib import Path
 
 import numpy as np
 import torch
-from torch.utils.tensorboard import SummaryWriter
-
 from male_cns import MaleCNS
 from mario_dqn import ActivityStack, FlybrainAction
 from mario_ppo import PPOAgent, PPOConfig, generalized_advantage_estimates
 from mario_sidecar import nes_actions
+from torch.utils.tensorboard import SummaryWriter
 
 
 def _device(name: str) -> str:
@@ -85,10 +84,30 @@ def _flush(
     return metrics
 
 
+def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None:
+    """Persist PPO update diagnostics and mirror the key values to stdout."""
+    for name, metric in metrics.items():
+        writer.add_scalar(f"loss/{name}", metric, step)
+    writer.flush()
+    print(
+        "ppo_update "
+        f"step={step} "
+        f"approx_kl={metrics['approx_kl']:.6f} "
+        f"entropy={metrics['entropy']:.6f} "
+        f"direction_entropy={metrics['direction_entropy']:.6f} "
+        f"jump_entropy={metrics['jump_entropy']:.6f} "
+        f"run_entropy={metrics['run_entropy']:.6f} "
+        f"clip_fraction={metrics['clip_fraction']:.6f} "
+        f"epochs={int(metrics['epochs_completed'])} "
+        f"early_stop={int(metrics['early_stop'])}",
+        flush=True,
+    )
+
+
 def run(args: argparse.Namespace) -> None:
+    import gym_super_mario_bros  # noqa: F401
     import gymnasium as gym
     from nes_py.wrappers import JoypadSpace
-    import gym_super_mario_bros  # noqa: F401
 
     connectome = MaleCNS(
         data=args.male_cns_data,
@@ -99,13 +118,21 @@ def run(args: argparse.Namespace) -> None:
         dopamine_learning_rate=args.dopamine_learning_rate,
     )
     if args.resume is not None:
-        agent = PPOAgent.load(args.resume, device=_device(args.device))
+        requested_policy_mode = "factorized" if args.factorized_policy else None
+        agent = PPOAgent.load(
+            args.resume,
+            device=_device(args.device),
+            policy_mode=requested_policy_mode,
+        )
         print(f"resumed PPO={args.resume} step={agent.steps}", flush=True)
     else:
         agent = PPOAgent(
             PPOConfig(
                 feature_dim=connectome.feature_dim,
                 rollout_steps=args.rollout_steps,
+                policy_mode=(
+                    "factorized" if args.factorized_policy else "categorical"
+                ),
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -118,6 +145,7 @@ def run(args: argparse.Namespace) -> None:
     )
     print(
         "PPO optimizer "
+        f"policy={agent.config.policy_mode} "
         f"lr={agent.config.learning_rate:g} value_coef={agent.config.value_coefficient:g} "
         f"entropy_coef={agent.config.entropy_coefficient:g} "
         f"target_kl={agent.config.target_kl:g}",
@@ -215,9 +243,7 @@ def run(args: argparse.Namespace) -> None:
             ):
                 metrics = _flush(agent, rollout, state, done)
                 if metrics is not None:
-                    for name, metric in metrics.items():
-                        writer.add_scalar(f"loss/{name}", metric, agent.steps)
-                    writer.flush()
+                    _record_update_metrics(writer, agent.steps, metrics)
 
             if done:
                 episode += 1
@@ -280,8 +306,7 @@ def run(args: argparse.Namespace) -> None:
     finally:
         metrics = _flush(agent, rollout, state, False)
         if metrics is not None:
-            for name, metric in metrics.items():
-                writer.add_scalar(f"loss/{name}", metric, agent.steps)
+            _record_update_metrics(writer, agent.steps, metrics)
         for action, count in action_counts.items():
             writer.add_scalar(f"actions/count_{action}", count, agent.steps)
         _save(agent, connectome, args.output, args.snapshot_dir)
@@ -317,6 +342,14 @@ def main() -> None:
     parser.add_argument("--value-coefficient", type=float)
     parser.add_argument("--entropy-coefficient", type=float)
     parser.add_argument("--target-kl", type=float)
+    parser.add_argument(
+        "--factorized-policy",
+        action="store_true",
+        help=(
+            "use direction/jump/run PPO heads; categorical checkpoints retain "
+            "their encoder and critic and migrate the action head"
+        ),
+    )
     parser.add_argument(
         "--freeze-ppo",
         action="store_true",
