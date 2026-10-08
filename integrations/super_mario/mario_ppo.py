@@ -18,6 +18,12 @@ POLICY_MODES = ("categorical", "factorized")
 FACTORIZED_HEAD_SIZES = (3, 2, 2)
 
 
+def rollout_ready(transition_count: int, rollout_steps: int) -> bool:
+    """Return whether PPO has a complete cross-episode rollout to update from."""
+
+    return transition_count >= rollout_steps
+
+
 @dataclass(frozen=True, slots=True)
 class PPOConfig:
     feature_dim: int = 1314
@@ -345,6 +351,7 @@ class PPOAgent:
         metrics = {
             key: value / max(1, minibatches) for key, value in totals.items()
         }
+        metrics["batch_size"] = float(len(states))
         metrics["epochs_completed"] = float(epochs_completed)
         metrics["early_stop"] = float(epochs_completed < cfg.update_epochs)
         return metrics

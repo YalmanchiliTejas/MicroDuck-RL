@@ -323,7 +323,9 @@ FLY_DATA="$CLEAN_ROOT/male-cns" \
     ./slurm_mario_flybrain_pretrain.sh
 ```
 
-PPO updates write `loss/approx_kl`, total action entropy, and per-head
+PPO rollouts accumulate across episode boundaries until all 256 decisions are
+available; terminal masks keep GAE from leaking value between episodes. Updates
+write `loss/approx_kl`, actual batch size, total action entropy, and per-head
 direction/jump/run entropy to TensorBoard and mirror them in the Slurm text
 log. Resubmit the identical command until decision step 300,000 is reached.
 

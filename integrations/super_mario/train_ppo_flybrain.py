@@ -13,7 +13,12 @@ import numpy as np
 import torch
 from male_cns import MaleCNS
 from mario_dqn import ActivityStack, FlybrainAction
-from mario_ppo import PPOAgent, PPOConfig, generalized_advantage_estimates
+from mario_ppo import (
+    PPOAgent,
+    PPOConfig,
+    generalized_advantage_estimates,
+    rollout_ready,
+)
 from mario_sidecar import nes_actions
 from torch.utils.tensorboard import SummaryWriter
 
@@ -98,6 +103,7 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
         f"jump_entropy={metrics['jump_entropy']:.6f} "
         f"run_entropy={metrics['run_entropy']:.6f} "
         f"clip_fraction={metrics['clip_fraction']:.6f} "
+        f"batch_size={int(metrics['batch_size'])} "
         f"epochs={int(metrics['epochs_completed'])} "
         f"early_stop={int(metrics['early_stop'])}",
         flush=True,
@@ -238,8 +244,15 @@ def run(args: argparse.Namespace) -> None:
                 )
             state = next_state
 
-            if not args.freeze_ppo and (
-                len(rollout["states"]) >= agent.config.rollout_steps or done
+            # Accumulate across episode boundaries. The stored done mask keeps
+            # GAE from bootstrapping through a terminal state, while waiting
+            # for a full rollout avoids noisy 4-10 transition PPO updates when
+            # an exploratory policy dies early.
+            if (
+                not args.freeze_ppo
+                and rollout_ready(
+                    len(rollout["states"]), agent.config.rollout_steps
+                )
             ):
                 metrics = _flush(agent, rollout, state, done)
                 if metrics is not None:

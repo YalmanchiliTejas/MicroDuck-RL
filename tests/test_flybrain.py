@@ -239,6 +239,29 @@ def test_ppo_gae_uses_raw_rewards_and_terminal_boundaries():
     assert np.allclose(returns, [2.0, 1.0])
 
 
+def test_ppo_gae_keeps_multiple_episodes_separate_in_one_rollout():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    advantages, returns = ppo.generalized_advantage_estimates(
+        np.asarray([1.0, 1.0, 1.0, 1.0]),
+        np.zeros(4),
+        np.asarray([0.0, 1.0, 0.0, 1.0]),
+        next_value=100.0,
+        gamma=1.0,
+        gae_lambda=1.0,
+    )
+    assert np.allclose(advantages, [2.0, 1.0, 2.0, 1.0])
+    assert np.allclose(returns, [2.0, 1.0, 2.0, 1.0])
+
+
+def test_ppo_waits_for_a_complete_rollout_across_short_episodes():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    assert not ppo.rollout_ready(4, 256)
+    assert not ppo.rollout_ready(255, 256)
+    assert ppo.rollout_ready(256, 256)
+
+
 def test_ppo_checkpoint_restores_policy_and_sampling_rng(tmp_path):
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
@@ -341,6 +364,7 @@ def test_ppo_update_accepts_unmodified_reward_returns():
         advantages=np.asarray([100.0, -25.0, 50.0, 10.0], dtype=np.float32),
     )
     assert agent.updates == 1
+    assert metrics["batch_size"] == 4.0
     assert all(np.isfinite(value) for value in metrics.values())
 
 
