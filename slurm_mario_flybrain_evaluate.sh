@@ -70,6 +70,16 @@ EPISODES="${MARIO_EVAL_EPISODES:-25}"
 MAX_DECISIONS="${MARIO_EVAL_MAX_DECISIONS:-300}"
 ACTION_REPEAT="${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-30}}"
 MODES="${MARIO_EVAL_MODES:-mean sampled}"
+RECORD_EPISODES="${MARIO_EVAL_RECORD_EPISODES:-0}"
+RECORD_FPS="${MARIO_EVAL_RECORD_FPS:-60}"
+if ! [[ "${RECORD_EPISODES}" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: MARIO_EVAL_RECORD_EPISODES must be a non-negative integer." >&2
+    exit 1
+fi
+if ! [[ "${RECORD_FPS}" =~ ^[1-9][0-9]*$ ]]; then
+    echo "ERROR: MARIO_EVAL_RECORD_FPS must be a positive integer." >&2
+    exit 1
+fi
 
 echo "Job ID:          ${SLURM_JOB_ID}"
 echo "Checkpoint:      ${CHECKPOINT}"
@@ -80,6 +90,7 @@ else
 fi
 echo "Episodes/mode:   ${EPISODES}"
 echo "Modes:           ${MODES}"
+echo "Recorded episodes:${RECORD_EPISODES} per mode"
 echo "Learning:        disabled"
 echo "Dopamine update: disabled"
 
@@ -92,11 +103,20 @@ for mode in ${MODES}; do
     if [[ "${EVAL_DOPAMINE}" == "1" ]]; then
         dopamine_args+=(--dopamine-state "${DOPAMINE_STATE}")
     fi
+    record_args=()
+    if [[ "${RECORD_EPISODES}" != "0" ]]; then
+        record_args+=(
+            --record-dir "${EVAL_DIR}/forensics/${SLURM_JOB_ID}-${mode}"
+            --record-episodes "${RECORD_EPISODES}"
+            --record-fps "${RECORD_FPS}"
+        )
+    fi
     echo "Evaluating mode=${mode}; report=${report}"
     "${SIDECAR_VENV}/bin/python" \
         "${REPO_DIR}/integrations/super_mario/evaluate_flybrain.py" \
         --checkpoint "${CHECKPOINT}" \
         "${dopamine_args[@]}" \
+        "${record_args[@]}" \
         --male-cns-data "${FLY_DATA}" \
         --male-cns-device cpu \
         --episodes "${EPISODES}" \

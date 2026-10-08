@@ -338,6 +338,22 @@ MARIO_EVAL_MODES="mean sampled" \
     ./slurm_mario_flybrain_evaluate.sh
 ```
 
+For a synchronized forensic replay, record leading episodes as annotated GIFs
+with per-frame and per-decision JSONL. PPO traces include all ten action
+probabilities, factorized direction/jump/run probabilities when present, critic
+value, MaleCNS state-change magnitudes, reward components, and terminal state:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-factorized-fullrollout-entropy005-6150-v1 \
+MARIO_EVAL_CHECKPOINT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-factorized-fullrollout-entropy005-6150-v1/run/best-clean-ppo.pt" \
+MARIO_EVAL_MODES="mean sampled" \
+MARIO_EVAL_EPISODES=3 \
+MARIO_EVAL_RECORD_EPISODES=3 \
+    ./slurm_mario_flybrain_evaluate.sh
+```
+
+Artifacts are written beneath `run/evaluations/forensics/<job>-<mode>/`.
+
 Evaluation also defaults to the frozen base MaleCNS. To perform the explicit
 modified-connectome ablation, additionally set `MARIO_EVAL_DOPAMINE=1` and
 `MARIO_EVAL_DOPAMINE_STATE=/absolute/path/to/dopamine-plasticity.npz`.

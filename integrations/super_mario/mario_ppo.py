@@ -184,10 +184,30 @@ class PPOAgent:
     def action_probabilities(self, state: np.ndarray) -> np.ndarray:
         """Return probabilities for the stable ten external Mario actions."""
 
+        return self.policy_diagnostics(state)["action_probabilities"]
+
+    def policy_diagnostics(self, state: np.ndarray) -> dict[str, object]:
+        """Expose frozen-policy probabilities and value for rollout forensics."""
+
         with torch.no_grad():
             state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
-            logits, _ = self.network(state_t)
-            return self._action_probabilities(logits)[0].cpu().numpy()
+            logits, value = self.network(state_t)
+            action_probabilities = self._action_probabilities(logits)[0]
+            diagnostics: dict[str, object] = {
+                "action_probabilities": action_probabilities.cpu().numpy(),
+                "value": float(value.item()),
+            }
+            if self.config.policy_mode == "factorized":
+                direction, jump, run = (
+                    torch.softmax(head, dim=1)[0].cpu().numpy()
+                    for head in torch.split(logits, FACTORIZED_HEAD_SIZES, dim=1)
+                )
+                diagnostics.update(
+                    direction_probabilities=direction,
+                    jump_probabilities=jump,
+                    run_probabilities=run,
+                )
+            return diagnostics
 
     def value(self, state: np.ndarray) -> float:
         with torch.no_grad():

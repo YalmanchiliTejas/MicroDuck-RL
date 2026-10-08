@@ -49,6 +49,68 @@ def _atomic_json(path: Path, report: dict) -> None:
     temporary.replace(path)
 
 
+def _atomic_jsonl(path: Path, rows: list[dict]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.tmp")
+    temporary.write_text(
+        "".join(json.dumps(row, sort_keys=True) + "\n" for row in rows)
+    )
+    temporary.replace(path)
+
+
+class ForensicRecorder:
+    """Record one emulator episode as synchronized GIF and JSONL traces."""
+
+    def __init__(self, directory: Path, episode: int, fps: int) -> None:
+        self.directory = directory
+        self.episode = episode
+        self.fps = fps
+        self.frames = []
+        self.frame_rows: list[dict] = []
+        self.decision_rows: list[dict] = []
+
+    def add_frame(self, frame: np.ndarray, row: dict, overlay: list[str]) -> None:
+        from PIL import Image, ImageDraw
+
+        image = Image.fromarray(np.asarray(frame, dtype=np.uint8)).convert("RGB")
+        draw = ImageDraw.Draw(image)
+        line_height = 11
+        overlay_height = line_height * len(overlay) + 4
+        draw.rectangle((0, 0, image.width, overlay_height), fill=(0, 0, 0))
+        for line, text in enumerate(overlay):
+            draw.text((3, 2 + line * line_height), text, fill=(255, 255, 255))
+        self.frames.append(image)
+        self.frame_rows.append(row)
+
+    def add_decision(self, row: dict) -> None:
+        self.decision_rows.append(row)
+
+    def close(self) -> dict[str, str]:
+        self.directory.mkdir(parents=True, exist_ok=True)
+        stem = f"episode-{self.episode:03d}"
+        frame_trace = self.directory / f"{stem}-frames.jsonl"
+        decision_trace = self.directory / f"{stem}-decisions.jsonl"
+        animation = self.directory / f"{stem}.gif"
+        _atomic_jsonl(frame_trace, self.frame_rows)
+        _atomic_jsonl(decision_trace, self.decision_rows)
+        if self.frames:
+            temporary = animation.with_name(f".{animation.name}.tmp.gif")
+            self.frames[0].save(
+                temporary,
+                save_all=True,
+                append_images=self.frames[1:],
+                duration=max(1, round(1000 / self.fps)),
+                loop=0,
+                optimize=False,
+            )
+            temporary.replace(animation)
+        return {
+            "video": str(animation.resolve()),
+            "frame_trace": str(frame_trace.resolve()),
+            "decision_trace": str(decision_trace.resolve()),
+        }
+
+
 def run(args: argparse.Namespace) -> dict:
     import gym_super_mario_bros  # noqa: F401 -- registers environments
     import gymnasium as gym
@@ -99,12 +161,17 @@ def run(args: argparse.Namespace) -> dict:
     state_delta_rms_sum = 0.0
     episodes: list[dict] = []
     first_actions: list[str] = []
+    forensic_artifacts: list[dict] = []
+    record_dir = getattr(args, "record_dir", None)
+    record_episodes = int(getattr(args, "record_episodes", 0))
+    record_fps = int(getattr(args, "record_fps", 60))
 
     try:
         for episode_index in range(args.episodes):
-            observation, _ = env.reset(seed=args.seed + episode_index)
+            observation, reset_info = env.reset(seed=args.seed + episode_index)
             stack = ActivityStack(agent.config.stack_depth)
             state = stack.reset(connectome.reset(observation))
+            current_x = int(reset_info.get("x_pos", 0))
             components = {key: 0.0 for key in REWARD_COMPONENTS}
             raw_total = environment_training_total = legacy_total = 0.0
             max_x = 0
@@ -112,21 +179,29 @@ def run(args: argparse.Namespace) -> dict:
             death = completion = False
             initial_action: int | None = None
             terminal_action: int | None = None
+            recorder = (
+                ForensicRecorder(record_dir, episode_index, record_fps)
+                if record_dir is not None and episode_index < record_episodes
+                else None
+            )
 
             for decision in range(1, args.max_decisions_per_episode + 1):
+                policy_diagnostics: dict[str, object] = {}
                 with torch.no_grad():
                     state_t = torch.as_tensor(state, device=agent.device).unsqueeze(0)
                     if algorithm == "ppo":
-                        action_scores = agent.action_probabilities(state)
+                        policy_diagnostics = agent.policy_diagnostics(state)
+                        action_scores = policy_diagnostics["action_probabilities"]
                     else:
                         action_scores = agent.online(state_t)[0].detach().cpu().numpy()
                 greedy_action = int(np.argmax(action_scores))
                 if algorithm == "ppo":
-                    action, _, _ = agent.act(
+                    action, log_probability, value = agent.act(
                         state, deterministic=not args.sample_actions
                     )
                 else:
                     action = agent.act(state, epsilon=args.epsilon)
+                    log_probability = value = None
                 q_sums += action_scores
                 q_margin_sum += float(
                     np.partition(action_scores, -2)[-1]
@@ -145,14 +220,20 @@ def run(args: argparse.Namespace) -> dict:
 
                 interval_raw = 0.0
                 interval_components: dict[str, float] = {}
-                for _ in range(args.action_repeat):
+                x_before = current_x
+                state_rms = float(np.sqrt(np.mean(np.square(state))))
+                for frame_in_decision in range(1, args.action_repeat + 1):
                     observation, reward, terminated, truncated, info = env.step(action)
                     interval_raw += float(reward)
-                    max_x = max(max_x, int(info.get("x_pos", 0)))
-                    for key, value in info.get("reward_components", {}).items():
+                    current_x = int(info.get("x_pos", current_x))
+                    max_x = max(max_x, current_x)
+                    for key, component_value in info.get(
+                        "reward_components", {}
+                    ).items():
                         if key in REWARD_COMPONENTS:
                             interval_components[key] = (
-                                interval_components.get(key, 0.0) + float(value)
+                                interval_components.get(key, 0.0)
+                                + float(component_value)
                             )
                     stack.append(
                         connectome.observe(
@@ -168,11 +249,40 @@ def run(args: argparse.Namespace) -> dict:
                     completion |= bool(
                         info.get("clear", False) or info.get("flag_get", False)
                     )
+                    if recorder is not None:
+                        frame_row = {
+                            "episode": episode_index,
+                            "decision": decision,
+                            "frame_in_decision": frame_in_decision,
+                            "action": action_names[action],
+                            "x": current_x,
+                            "y": int(info.get("y_pos", 0)),
+                            "reward": float(reward),
+                            "interval_reward": interval_raw,
+                            "terminated": bool(terminated),
+                            "truncated": bool(truncated),
+                            "death": bool(death),
+                            "completion": bool(completion),
+                        }
+                        recorder.add_frame(
+                            observation,
+                            frame_row,
+                            [
+                                (
+                                    f"episode={episode_index} decision={decision} "
+                                    f"frame={frame_in_decision}/{args.action_repeat}"
+                                ),
+                                (
+                                    f"action={action_names[action]} x={current_x} "
+                                    f"y={frame_row['y']} reward={interval_raw:+.1f}"
+                                ),
+                            ],
+                        )
                     if terminated or truncated:
                         break
 
-                for key, value in interval_components.items():
-                    components[key] += value
+                for key, component_value in interval_components.items():
+                    components[key] += component_value
                 raw_total += interval_raw
                 environment_training_total += training_reward(
                     interval_components, raw_reward=interval_raw
@@ -184,6 +294,95 @@ def run(args: argparse.Namespace) -> dict:
                 state_delta_rms_sum += float(
                     np.sqrt(np.mean(np.square(next_state - state)))
                 )
+                if recorder is not None:
+                    action_probabilities = [float(value) for value in action_scores]
+                    probability_array = np.asarray(action_probabilities)
+                    decision_row = {
+                        "episode": episode_index,
+                        "decision": decision,
+                        "x_before": x_before,
+                        "x_after": current_x,
+                        "max_x": max_x,
+                        "action": action_names[action],
+                        "greedy_action": action_names[greedy_action],
+                        "selected_probability": (
+                            float(action_scores[action]) if algorithm == "ppo" else None
+                        ),
+                        "log_probability": log_probability,
+                        "critic_value": value,
+                        "action_entropy": (
+                            float(
+                                -np.sum(
+                                    probability_array
+                                    * np.log(np.maximum(probability_array, 1.0e-12))
+                                )
+                            )
+                            if algorithm == "ppo"
+                            else None
+                        ),
+                        "action_probabilities": dict(
+                            zip(action_names, action_probabilities, strict=True)
+                        ),
+                        "direction_probabilities": (
+                            dict(
+                                zip(
+                                    ("neutral", "left", "right"),
+                                    (
+                                        float(item)
+                                        for item in policy_diagnostics.get(
+                                            "direction_probabilities", []
+                                        )
+                                    ),
+                                    strict=True,
+                                )
+                            )
+                            if "direction_probabilities" in policy_diagnostics
+                            else None
+                        ),
+                        "jump_probabilities": (
+                            dict(
+                                zip(
+                                    ("released", "pressed"),
+                                    (
+                                        float(item)
+                                        for item in policy_diagnostics.get(
+                                            "jump_probabilities", []
+                                        )
+                                    ),
+                                    strict=True,
+                                )
+                            )
+                            if "jump_probabilities" in policy_diagnostics
+                            else None
+                        ),
+                        "run_probabilities": (
+                            dict(
+                                zip(
+                                    ("off", "on"),
+                                    (
+                                        float(item)
+                                        for item in policy_diagnostics.get(
+                                            "run_probabilities", []
+                                        )
+                                    ),
+                                    strict=True,
+                                )
+                            )
+                            if "run_probabilities" in policy_diagnostics
+                            else None
+                        ),
+                        "state_rms": state_rms,
+                        "state_delta_rms": float(
+                            np.sqrt(np.mean(np.square(next_state - state)))
+                        ),
+                        "interval_reward": interval_raw,
+                        "reward_components": interval_components,
+                        "terminated": bool(terminated),
+                        "truncated": bool(truncated),
+                        "death": bool(death),
+                        "completion": bool(completion),
+                    }
+                    recorder.add_decision(decision_row)
                 state = next_state
                 if terminated or truncated:
                     break
@@ -210,6 +409,10 @@ def run(args: argparse.Namespace) -> dict:
                 "components": components,
             }
             episodes.append(row)
+            if recorder is not None:
+                forensic_artifacts.append(
+                    {"episode": episode_index, **recorder.close()}
+                )
             print(
                 f"episode={episode_index} decisions={decision} max_x={max_x} "
                 f"death={int(death)} completion={int(completion)} "
@@ -233,6 +436,7 @@ def run(args: argparse.Namespace) -> dict:
         "epsilon": args.epsilon,
         "seed": args.seed,
         "episodes": episodes,
+        "forensic_artifacts": forensic_artifacts,
         "summary": {
             "episode_count": len(episodes),
             "death_rate": float(np.mean([row["death"] for row in episodes])),
@@ -309,6 +513,18 @@ def main() -> None:
     parser.add_argument("--first-actions", type=int, default=50)
     parser.add_argument("--output", type=Path)
     parser.add_argument(
+        "--record-dir",
+        type=Path,
+        help="write annotated GIFs plus synchronized frame/decision JSONL traces",
+    )
+    parser.add_argument(
+        "--record-episodes",
+        type=int,
+        default=0,
+        help="record this many leading episodes (requires --record-dir)",
+    )
+    parser.add_argument("--record-fps", type=int, default=60)
+    parser.add_argument(
         "--allow-legacy-reward-contract",
         action="store_true",
         help="evaluation only: load a schema-4 checkpoint without permitting training resume",
@@ -322,9 +538,13 @@ def main() -> None:
         or args.max_decisions_per_episode <= 0
         or args.action_repeat <= 0
         or args.first_actions < 0
+        or args.record_episodes < 0
+        or args.record_fps <= 0
         or not 0.0 <= args.epsilon <= 1.0
     ):
         parser.error("episode/decision/action counts must be positive and epsilon in [0, 1]")
+    if args.record_episodes and args.record_dir is None:
+        parser.error("--record-episodes requires --record-dir")
     run(args)
 
 

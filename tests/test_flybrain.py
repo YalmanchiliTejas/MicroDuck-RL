@@ -291,6 +291,20 @@ def test_factorized_ppo_maps_three_heads_to_ten_action_probabilities():
     assert probabilities[flybrain.FlybrainAction.RIGHT_JUMP].item() == pytest.approx(1 / 12)
 
 
+def test_factorized_ppo_exposes_forensic_head_probabilities():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    agent = ppo.PPOAgent(
+        ppo.PPOConfig(feature_dim=6, policy_mode="factorized"), seed=8
+    )
+    diagnostics = agent.policy_diagnostics(np.zeros((4, 6), dtype=np.float32))
+    assert diagnostics["action_probabilities"].sum() == pytest.approx(1.0)
+    assert diagnostics["direction_probabilities"].sum() == pytest.approx(1.0)
+    assert diagnostics["jump_probabilities"].sum() == pytest.approx(1.0)
+    assert diagnostics["run_probabilities"].sum() == pytest.approx(1.0)
+    assert np.isfinite(diagnostics["value"])
+
+
 def test_categorical_ppo_checkpoint_migrates_to_factorized_heads(tmp_path):
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
@@ -545,6 +559,32 @@ def test_frozen_evaluator_exposes_old_fatal_progress_reward_bug():
 
     assert evaluator._legacy_training_reward(fatal_progress, 0.0) == 5.0
     assert rollouts.training_reward(fatal_progress, raw_reward=-7.0) == -7.0
+
+
+def test_forensic_recorder_writes_gif_and_synchronized_jsonl(tmp_path):
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    evaluator = _load_evaluator(flybrain, rollouts)
+    recorder = evaluator.ForensicRecorder(tmp_path, episode=2, fps=60)
+    recorder.add_frame(
+        np.zeros((16, 20, 3), dtype=np.uint8),
+        {"episode": 2, "decision": 1, "x": 42},
+        ["action=right", "x=42"],
+    )
+    recorder.add_decision(
+        {"episode": 2, "decision": 1, "action": "right", "x_after": 42}
+    )
+    artifacts = recorder.close()
+    for path in artifacts.values():
+        assert Path(path).is_file()
+    assert json.loads((tmp_path / "episode-002-frames.jsonl").read_text()) == {
+        "decision": 1,
+        "episode": 2,
+        "x": 42,
+    }
+    assert json.loads((tmp_path / "episode-002-decisions.jsonl").read_text())[
+        "action"
+    ] == "right"
 
 
 def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):
