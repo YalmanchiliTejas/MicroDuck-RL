@@ -263,15 +263,21 @@ this is the real MaleCNS model, not a locally invented network:
 python3.13 -m venv .super-mario-venv
 .super-mario-venv/bin/pip install ./integrations/super_mario
 
-# Fast emulator baseline. Use --action-repeat 30 for a first latency-matched
-# physical experiment; tune it from measured request-to-pad latency.
+# Direct NES PPO uses the successful four-frame cadence from the reference
+# Mario PPO recipe. The embodied controller keeps its slower measured cadence.
 .super-mario-venv/bin/microduck-train-ppo-flybrain \
-    --additional-steps 20000 --action-repeat 30 --output flybrain-ppo.pt \
+    --additional-steps 20000 --action-repeat 4 --output flybrain-ppo.pt \
     --snapshot-dir checkpoints \
     --tensorboard-dir tensorboard/ppo-pretrain \
     --male-cns-device cpu --continuation-learning-rate 0.000025 \
     --value-coefficient 0.05 --target-kl 0.02
 ```
+
+The PPO learning reward follows the `vietnh1009` recipe: add raw score delta
+divided by 40, add `+50` for a flag or `-50` for death, then divide the entire
+action-interval reward by 10. Checkpoints and physical rollouts record this as
+`vietnh1009-shaped-action-interval-v1`; older raw-reward artifacts cannot be
+resumed accidentally.
 
 On Slurm, use a fresh run tag for the first emulator-pretraining job. The job is
 capped at four hours and receives `SIGTERM` three minutes before the hard limit.

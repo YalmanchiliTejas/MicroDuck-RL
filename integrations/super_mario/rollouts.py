@@ -30,18 +30,26 @@ REWARD_COMPONENTS = (
 def training_reward(
     components: dict[str, float], *, raw_reward: float | None = None
 ) -> float:
-    """Return the unmodified Gymnasium reward accumulated for one action.
+    """Return the vietnh1009 PPO reward for one high-level action interval.
 
-    ``components`` are retained for diagnostics only.  Learning algorithms all
-    receive exactly the sum of rewards returned by ``env.step`` while their
-    high-level action is held; no scaling, clipping, terminal override, or
-    hand-authored component weighting is applied.
+    The reference recipe adds raw score delta / 40, adds +50 for a flag or -50
+    for death, then divides the complete reward by 10.  Modern
+    gym-super-mario-bros reports its score component as raw score delta / 100,
+    so multiplying that component by 2.5 reproduces score delta / 40 without
+    maintaining a second score-history state.  Completion wins over death if a
+    backend ever reports both on the same interval.
     """
 
-    del components
     if raw_reward is None or not np.isfinite(raw_reward):
         raise ValueError("raw Gymnasium reward must be finite and present")
-    return float(raw_reward)
+    score_bonus = float(components.get("score", 0.0)) * 2.5
+    if float(components.get("completion", 0.0)) > 0.0:
+        terminal_bonus = 50.0
+    elif float(components.get("death", 0.0)) < 0.0:
+        terminal_bonus = -50.0
+    else:
+        terminal_bonus = 0.0
+    return float((raw_reward + score_bonus + terminal_bonus) / 10.0)
 
 
 def encode_reward_packet(event: dict) -> bytes:

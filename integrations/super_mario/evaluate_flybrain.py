@@ -502,7 +502,7 @@ def main() -> None:
     parser.add_argument("--env", default="SuperMarioBros-1-1-v0")
     parser.add_argument("--episodes", type=int, default=50)
     parser.add_argument("--max-decisions-per-episode", type=int, default=500)
-    parser.add_argument("--action-repeat", type=int, default=30)
+    parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--epsilon", type=float, default=0.0)
     parser.add_argument(
         "--sample-actions",

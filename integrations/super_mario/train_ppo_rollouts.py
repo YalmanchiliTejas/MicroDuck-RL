@@ -185,7 +185,7 @@ def run(args: argparse.Namespace) -> None:
     receiver = RewardReceiver(args.host, args.port)
     telemetry_step = 0
     _save_with_snapshot(agent, args.output, args.snapshot_dir)
-    writer.add_text("training/reward_contract", "raw sum of env.step rewards", 0)
+    writer.add_text("training/reward_contract", REWARD_CONTRACT, 0)
     writer.flush()
     print(f"listening for sidecar rewards on udp://{args.host}:{args.port}", flush=True)
     print(f"watching rollouts in {args.rollout_dir}", flush=True)

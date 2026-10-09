@@ -1,4 +1,4 @@
-"""Pretrain the MaleCNS Mario readout with discrete PPO and raw Gym rewards."""
+"""Pretrain the MaleCNS Mario readout with discrete PPO."""
 
 from __future__ import annotations
 
@@ -20,6 +20,8 @@ from mario_ppo import (
     rollout_ready,
 )
 from mario_sidecar import nes_actions
+from reward_contract import REWARD_CONTRACT
+from rollouts import REWARD_COMPONENTS, training_reward
 from torch.utils.tensorboard import SummaryWriter
 
 
@@ -176,7 +178,7 @@ def run(args: argparse.Namespace) -> None:
         log_dir=str(args.tensorboard_dir),
         purge_step=agent.steps if agent.steps else None,
     )
-    writer.add_text("training/reward_contract", "raw sum of env.step rewards", 0)
+    writer.add_text("training/reward_contract", REWARD_CONTRACT, 0)
     writer.add_scalar("training/action_repeat", args.action_repeat, agent.steps)
     writer.add_scalar("training/ppo_frozen", float(args.freeze_ppo), agent.steps)
     writer.add_scalar(
@@ -194,7 +196,8 @@ def run(args: argparse.Namespace) -> None:
     recent_returns: deque[float] = deque(maxlen=100)
     action_counts: Counter[int] = Counter()
     recent_actions: deque[int] = deque(maxlen=1_000)
-    episode_return = 0.0
+    episode_raw_return = 0.0
+    episode_training_return = 0.0
     episode_decisions = 0
     episode_max_x = 0
     episode = 0
@@ -212,35 +215,58 @@ def run(args: argparse.Namespace) -> None:
         while agent.steps < target_steps and not stop:
             action, log_probability, value = agent.act(state)
             raw_reward = 0.0
+            reward_components: dict[str, float] = {}
             terminated = truncated = False
             info: dict = {}
             for _ in range(args.action_repeat):
                 observation, reward, terminated, truncated, info = env.step(action)
                 raw_reward += float(reward)
-                stack.append(connectome.observe(observation, action_sequence=agent.steps))
+                for key, component_value in info.get(
+                    "reward_components", {}
+                ).items():
+                    if key in REWARD_COMPONENTS:
+                        reward_components[key] = reward_components.get(
+                            key, 0.0
+                        ) + float(component_value)
+                stack.append(
+                    connectome.observe(
+                        observation, action_sequence=agent.steps
+                    )
+                )
                 if terminated or truncated:
                     break
             next_state = stack.state
             done = bool(terminated or truncated)
+            learning_reward = training_reward(
+                reward_components, raw_reward=raw_reward
+            )
             if not args.freeze_ppo:
                 rollout["states"].append(state.copy())
                 rollout["actions"].append(action)
                 rollout["log_probabilities"].append(log_probability)
-                rollout["rewards"].append(raw_reward)
+                rollout["rewards"].append(learning_reward)
                 rollout["dones"].append(done)
                 rollout["values"].append(value)
             agent.steps += 1
             action_counts[action] += 1
             recent_actions.append(action)
-            episode_return += raw_reward
+            episode_raw_return += raw_reward
+            episode_training_return += learning_reward
             episode_decisions += 1
             episode_max_x = max(episode_max_x, int(info.get("x_pos", 0)))
-            writer.add_scalar("reward/action_interval", raw_reward, agent.steps)
+            writer.add_scalar(
+                "reward/action_interval", learning_reward, agent.steps
+            )
+            writer.add_scalar(
+                "reward/action_interval_raw", raw_reward, agent.steps
+            )
             writer.add_scalar("training/x_pos", int(info.get("x_pos", 0)), agent.steps)
             writer.add_scalar("training/action", action, agent.steps)
             if not args.freeze_dopamine:
                 connectome.reinforce(
-                    agent.prediction_error(raw_reward, next_state, done, value=value)
+                    agent.prediction_error(
+                        learning_reward, next_state, done, value=value
+                    )
                 )
             state = next_state
 
@@ -260,9 +286,16 @@ def run(args: argparse.Namespace) -> None:
 
             if done:
                 episode += 1
-                recent_returns.append(episode_return)
+                recent_returns.append(episode_training_return)
                 average = float(np.mean(recent_returns))
-                writer.add_scalar("reward/episode_return", episode_return, agent.steps)
+                writer.add_scalar(
+                    "reward/episode_return",
+                    episode_training_return,
+                    agent.steps,
+                )
+                writer.add_scalar(
+                    "reward/episode_raw_return", episode_raw_return, agent.steps
+                )
                 writer.add_scalar("reward/average_100_episodes", average, agent.steps)
                 writer.add_scalar("episode/max_x", episode_max_x, agent.steps)
                 recent_action_counts = Counter(recent_actions)
@@ -297,13 +330,16 @@ def run(args: argparse.Namespace) -> None:
                     )
                 print(
                     f"episode={episode} step={agent.steps} decisions={episode_decisions} "
-                    f"raw_return={episode_return:+.1f} avg100={average:+.1f} "
+                    f"raw_return={episode_raw_return:+.1f} "
+                    f"training_return={episode_training_return:+.3f} "
+                    f"avg100={average:+.3f} "
                     f"max_x={episode_max_x}",
                     flush=True,
                 )
                 observation, _ = env.reset()
                 state = stack.reset(connectome.reset(observation))
-                episode_return = 0.0
+                episode_raw_return = 0.0
+                episode_training_return = 0.0
                 episode_decisions = 0
                 episode_max_x = 0
 
@@ -337,7 +373,7 @@ def main() -> None:
         type=int,
         help="train this many more decisions from either a fresh or resumed checkpoint",
     )
-    parser.add_argument("--action-repeat", type=int, default=30)
+    parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--rollout-steps", type=int, default=256)
     parser.add_argument("--save-every", type=int, default=5_000)
     parser.add_argument("--output", type=Path, default=Path("flybrain-ppo.pt"))

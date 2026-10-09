@@ -542,13 +542,20 @@ def test_reward_packet_preserves_action_sequence_components_and_terminal():
     assert rollouts.decode_reward_packet(rollouts.encode_reward_packet(event)) == event
 
 
-def test_training_reward_is_exact_unmodified_gymnasium_reward():
+def test_training_reward_matches_vietnh1009_shaping():
     rollouts = _load_rollouts()
-    components = {"progress": 150.0, "death": -25.0}
-    assert rollouts.training_reward(components, raw_reward=123.5) == 123.5
-    assert rollouts.training_reward({}, raw_reward=-17.0) == -17.0
+    assert rollouts.training_reward({}, raw_reward=12.0) == pytest.approx(1.2)
+    assert rollouts.training_reward(
+        {"score": 1.0}, raw_reward=1.0
+    ) == pytest.approx(0.35)
+    assert rollouts.training_reward(
+        {"completion": 50.0}, raw_reward=15.0
+    ) == pytest.approx(6.5)
+    assert rollouts.training_reward(
+        {"death": -25.0}, raw_reward=-15.0
+    ) == pytest.approx(-6.5)
     with pytest.raises(ValueError, match="raw Gymnasium reward"):
-        rollouts.training_reward(components)
+        rollouts.training_reward({"death": -25.0})
 
 
 def test_frozen_evaluator_exposes_old_fatal_progress_reward_bug():
@@ -558,7 +565,9 @@ def test_frozen_evaluator_exposes_old_fatal_progress_reward_bug():
     fatal_progress = {"progress": 150.0, "death": -25.0}
 
     assert evaluator._legacy_training_reward(fatal_progress, 0.0) == 5.0
-    assert rollouts.training_reward(fatal_progress, raw_reward=-7.0) == -7.0
+    assert rollouts.training_reward(
+        fatal_progress, raw_reward=-7.0
+    ) == pytest.approx(-5.7)
 
 
 def test_forensic_recorder_writes_gif_and_synchronized_jsonl(tmp_path):
@@ -667,9 +676,9 @@ def test_rollout_recorder_writes_atomic_replay_ready_episode(tmp_path):
     assert len(paths) == 1
     metadata, arrays = rollouts.load_rollout(paths[0])
     assert metadata["complete"] is True
-    assert metadata["reward_contract"] == "gymnasium-raw-action-interval-v1"
+    assert metadata["reward_contract"] == "vietnh1009-shaped-action-interval-v1"
     assert arrays["actions"].tolist() == [2, 4]
-    assert np.allclose(arrays["training_rewards"], [3.0, -25.0])
+    assert np.allclose(arrays["training_rewards"], [0.3, -7.5])
     assert arrays["action_sequences"].tolist() == [10, 11]
     assert arrays["next_states"][1, :, 0].tolist() == [3, 4, 5, 6]
     assert not list(tmp_path.glob("*.tmp"))
@@ -824,7 +833,7 @@ def test_checkpoint_rejects_legacy_reward_contract(tmp_path):
     payload.pop("reward_contract")
     torch.save(payload, checkpoint)
 
-    with pytest.raises(ValueError, match="unmodified Gymnasium reward contract"):
+    with pytest.raises(ValueError, match="current Mario reward contract"):
         flybrain.FlybrainAgent.load(checkpoint)
     restored = flybrain.FlybrainAgent.load(
         checkpoint, allow_legacy_reward_contract=True

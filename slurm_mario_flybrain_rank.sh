@@ -92,7 +92,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     "${dopamine_args[@]}" \
     --episodes "${MARIO_RANK_EPISODES:-10}" \
     --max-decisions "${MARIO_EVAL_MAX_DECISIONS:-300}" \
-    --action-repeat "${MARIO_EVAL_ACTION_REPEAT:-30}" \
+    --action-repeat "${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-4}}" \
     --seed "${MARIO_EVAL_SEED:-42}" \
     --male-cns-data "${FLY_DATA}" \
     --device "${MARIO_PPO_DEVICE:-auto}" \

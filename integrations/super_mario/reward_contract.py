@@ -1,3 +1,3 @@
-"""Shared identifier for the unmodified Mario environment reward contract."""
+"""Shared identifier for the Mario PPO reward contract."""
 
-REWARD_CONTRACT = "gymnasium-raw-action-interval-v1"
+REWARD_CONTRACT = "vietnh1009-shaped-action-interval-v1"

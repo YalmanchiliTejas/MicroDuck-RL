@@ -68,7 +68,7 @@ def main() -> None:
     parser.add_argument("--best-dopamine-output", type=Path)
     parser.add_argument("--episodes", type=int, default=10)
     parser.add_argument("--max-decisions", type=int, default=300)
-    parser.add_argument("--action-repeat", type=int, default=30)
+    parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--male-cns-data", type=Path)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")

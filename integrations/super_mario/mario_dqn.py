@@ -483,7 +483,7 @@ class FlybrainAgent:
             or checkpoint.get("reward_contract") != REWARD_CONTRACT
         ):
             raise ValueError(
-                "checkpoint does not use the unmodified Gymnasium reward contract; "
+                "checkpoint does not use the current Mario reward contract; "
                 "start a fresh benchmark/readout state"
             )
         agent = cls(FlybrainConfig(**checkpoint["config"]), device=device)
