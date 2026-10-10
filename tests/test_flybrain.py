@@ -276,6 +276,72 @@ def test_ppo_checkpoint_restores_policy_and_sampling_rng(tmp_path):
     assert [restored.act(state)[0] for _ in range(10)] == expected
 
 
+def test_controller_temporal_stack_tracks_jump_edges_and_holds():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    stack = ppo.ControllerTemporalStack(feature_dim=6, depth=16)
+    state = stack.reset(np.ones(6, dtype=np.float32))
+    assert state.shape == (16, 6 + ppo.CONTROLLER_FEATURE_DIM)
+
+    right_jump = int(flybrain.FlybrainAction.RIGHT_JUMP)
+    right = int(flybrain.FlybrainAction.RIGHT)
+    state = stack.append_interval(
+        [np.full(6, 1.0, dtype=np.float32), np.full(6, 3.0, dtype=np.float32)],
+        right_jump,
+    )
+    assert np.allclose(state[-1, :6], 2.0)
+    assert stack.last_diagnostics == {
+        "action_hold_decisions": 1,
+        "jump_hold_decisions": 1,
+        "jump_pressed_edge": True,
+        "jump_released_edge": False,
+    }
+    stack.append_interval([np.ones(6, dtype=np.float32)], right_jump)
+    assert stack.last_diagnostics["action_hold_decisions"] == 2
+    assert stack.last_diagnostics["jump_hold_decisions"] == 2
+    assert not stack.last_diagnostics["jump_pressed_edge"]
+    stack.append_interval([np.ones(6, dtype=np.float32)], right)
+    assert stack.last_diagnostics["action_hold_decisions"] == 1
+    assert stack.last_diagnostics["jump_hold_decisions"] == 0
+    assert stack.last_diagnostics["jump_released_edge"]
+
+
+def test_controller_gru_ppo_checkpoint_round_trip(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    config = ppo.PPOConfig(
+        feature_dim=6,
+        stack_depth=16,
+        temporal_encoder="controller_gru",
+        controller_feature_dim=ppo.CONTROLLER_FEATURE_DIM,
+        rollout_steps=4,
+        minibatch_size=2,
+    )
+    agent = ppo.PPOAgent(config, seed=11)
+    state = np.zeros((16, 6 + ppo.CONTROLLER_FEATURE_DIM), dtype=np.float32)
+    assert agent.action_probabilities(state).sum() == pytest.approx(1.0)
+    checkpoint = tmp_path / "controller-gru.pt"
+    agent.save(checkpoint)
+    restored = ppo.PPOAgent.load(checkpoint)
+    assert restored.config.temporal_encoder == "controller_gru"
+    assert restored.config.stack_depth == 16
+    assert restored.action_probabilities(state).sum() == pytest.approx(1.0)
+
+    states = np.zeros(
+        (4, 16, 6 + ppo.CONTROLLER_FEATURE_DIM), dtype=np.float32
+    )
+    samples = [restored.act(value) for value in states]
+    metrics = restored.update(
+        states=states,
+        actions=np.asarray([sample[0] for sample in samples]),
+        old_log_probabilities=np.asarray([sample[1] for sample in samples]),
+        returns=np.asarray([1.0, 0.5, -0.5, 2.0], dtype=np.float32),
+        advantages=np.asarray([1.0, 0.5, -0.5, 2.0], dtype=np.float32),
+    )
+    assert metrics["batch_size"] == 4.0
+    assert all(np.isfinite(value) for value in metrics.values())
+
+
 def test_factorized_ppo_maps_three_heads_to_ten_action_probabilities():
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)

@@ -270,13 +270,14 @@ def run(args: argparse.Namespace) -> None:
     interval_components: dict[str, float] = {}
     interval_steps = 0
     interval_execution_steps = 0
+    interval_activities = []
     rollout_episode = 0
     rollout_transition = 0
     flybrain_mtime_ns = None
     if args.flybrain:
         from male_cns import MaleCNS
         from mario_dqn import ActivityStack, action_levels
-        from mario_ppo import PPOAgent
+        from mario_ppo import ControllerTemporalStack, PPOAgent
         from rollouts import RewardSender, RolloutRecorder, training_reward
 
         flybrain = PPOAgent.load(args.flybrain, device=args.flybrain_device)
@@ -302,7 +303,13 @@ def run(args: argparse.Namespace) -> None:
             f"{male_cns.feature_dim:,} descending-neuron readout features",
             flush=True,
         )
-        activity_stack = ActivityStack(flybrain.config.stack_depth)
+        activity_stack = (
+            ControllerTemporalStack(
+                flybrain.config.feature_dim, flybrain.config.stack_depth
+            )
+            if flybrain.config.temporal_encoder == "controller_gru"
+            else ActivityStack(flybrain.config.stack_depth)
+        )
         activity_stack.reset(male_cns.reset(observation))
         request_sender = RequestSender(args.request_host, args.request_port)
         if not args.no_reward_telemetry:
@@ -311,7 +318,7 @@ def run(args: argparse.Namespace) -> None:
             rollout_recorder = RolloutRecorder(
                 args.rollout_dir,
                 flybrain.config.stack_depth,
-                flybrain.config.feature_dim,
+                flybrain.config.feature_dim + flybrain.config.controller_feature_dim,
                 run_id=run_id,
             )
     publisher = (
@@ -326,7 +333,13 @@ def run(args: argparse.Namespace) -> None:
         while args.max_steps <= 0 or step < args.max_steps:
             if flybrain is not None and step >= next_flybrain_decision:
                 if active_state is not None:
-                    next_state = activity_stack.state
+                    next_state = (
+                        activity_stack.append_interval(
+                            interval_activities, active_action
+                        )
+                        if flybrain.config.temporal_encoder == "controller_gru"
+                        else activity_stack.state
+                    )
                     execution_fraction = interval_execution_steps / max(interval_steps, 1)
                     if rollout_recorder is not None:
                         event = rollout_recorder.add(
@@ -409,6 +422,7 @@ def run(args: argparse.Namespace) -> None:
                 interval_components = {}
                 interval_steps = 0
                 interval_execution_steps = 0
+                interval_activities = []
                 next_flybrain_decision = step + args.flybrain_decision_frames
             if request_sender is not None:
                 # Refresh every frame so the robot-side deadman releases safely
@@ -424,11 +438,13 @@ def run(args: argparse.Namespace) -> None:
             applied_action = action_index(levels, run=virtual_run)
             observation, reward, terminated, truncated, info = env.step(applied_action)
             if male_cns is not None:
-                activity_stack.append(
-                    male_cns.observe(
-                        observation, action_sequence=active_action_sequence
-                    )
+                activity = male_cns.observe(
+                    observation, action_sequence=active_action_sequence
                 )
+                if flybrain.config.temporal_encoder == "controller_gru":
+                    interval_activities.append(activity)
+                else:
+                    activity_stack.append(activity)
             if active_state is not None:
                 interval_reward += float(reward)
                 interval_steps += 1
@@ -461,7 +477,13 @@ def run(args: argparse.Namespace) -> None:
                 )
             if terminated or truncated:
                 if active_state is not None:
-                    terminal_state = activity_stack.state
+                    terminal_state = (
+                        activity_stack.append_interval(
+                            interval_activities, active_action
+                        )
+                        if flybrain.config.temporal_encoder == "controller_gru"
+                        else activity_stack.state
+                    )
                     execution_fraction = interval_execution_steps / max(interval_steps, 1)
                     if rollout_recorder is not None:
                         event = rollout_recorder.add(
@@ -512,6 +534,7 @@ def run(args: argparse.Namespace) -> None:
                     interval_components = {}
                     interval_steps = 0
                     interval_execution_steps = 0
+                    interval_activities = []
                     rollout_episode += 1
                     rollout_transition = 0
                 observation, info = env.reset()

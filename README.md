@@ -303,8 +303,8 @@ MARIO_PRETRAIN_STEPS=5000 \
 ```
 
 This continues the winning PPO with a lower learning rate, scale-normalized
-critic loss, KL early stopping, and a frozen MaleCNS. It does not change or
-shape the Gymnasium reward.
+critic loss, KL early stopping, and a frozen MaleCNS. It keeps the versioned
+reward contract fixed for the entire continuation.
 
 For the factorized PPO readout, direction, jump, and virtual run use separate
 policy heads while preserving the same ten external game intents and robot
@@ -334,6 +334,31 @@ available; terminal masks keep GAE from leaking value between episodes. Updates
 write `loss/approx_kl`, actual batch size, total action entropy, and per-head
 direction/jump/run entropy to TensorBoard and mirror them in the Slurm text
 log. Resubmit the identical command until decision step 300,000 is reached.
+
+For obstacle timing and correct NES button edges, the decision-scale temporal
+controller keeps MaleCNS stepping on every emulator frame, averages its four
+traces over each action interval, and retains 16 intervals in a GRU. Each
+interval also carries a motor efference copy: the previous action, NES button
+levels, same-action and jump-hold durations, and jump press/release edges. No
+privileged emulator coordinates enter the policy. This is a new architecture,
+so start it from scratch rather than seeding it with a `conv4` checkpoint:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-viet-temporal16-nodopamine-6150-v1 \
+MARIO_PPO_TEMPORAL_CONTROLLER=1 \
+MARIO_PPO_TEMPORAL_DECISIONS=16 \
+MARIO_PPO_FACTORIZED=0 \
+MARIO_ENABLE_DOPAMINE=0 \
+MARIO_PRETRAIN_TARGET_STEPS=300000 \
+MARIO_PRETRAIN_ACTION_REPEAT=4 \
+MARIO_PRETRAIN_SAVE_EVERY=5000 \
+MARIO_PPO_ENTROPY_COEFFICIENT=0.01 \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+TensorBoard and episode logs record consecutive-action and jump-hold lengths
+plus jump press/release edges, making another held-button stall directly
+visible instead of hiding it inside the action histogram.
 
 Evaluate the resulting checkpoint in both deterministic and sampled modes
 without changing PPO or dopamine state:

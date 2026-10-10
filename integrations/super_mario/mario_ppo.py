@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, dataclass, replace
 from pathlib import Path
 
@@ -12,10 +13,14 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 2
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 3
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
 FACTORIZED_HEAD_SIZES = (3, 2, 2)
+TEMPORAL_ENCODERS = ("conv4", "controller_gru")
+CONTROLLER_FEATURE_DIM = len(ACTION_LEVELS) + 8
+CONTROLLER_GRU_DEPTH = 16
+HOLD_DURATION_SCALE = 32.0
 
 
 def rollout_ready(transition_count: int, rollout_steps: int) -> bool:
@@ -30,6 +35,8 @@ class PPOConfig:
     stack_depth: int = 4
     num_actions: int = len(ACTION_LEVELS)
     policy_mode: str = "categorical"
+    temporal_encoder: str = "conv4"
+    controller_feature_dim: int = 0
     gamma: float = 0.99
     gae_lambda: float = 0.95
     learning_rate: float = 2.5e-4
@@ -45,8 +52,19 @@ class PPOConfig:
     def __post_init__(self) -> None:
         if self.feature_dim <= 0:
             raise ValueError("feature_dim must be positive")
-        if self.stack_depth != 4:
-            raise ValueError("PPO temporal input must contain exactly four frames")
+        if self.temporal_encoder not in TEMPORAL_ENCODERS:
+            raise ValueError(f"PPO temporal encoder must be one of {TEMPORAL_ENCODERS}")
+        if self.temporal_encoder == "conv4":
+            if self.stack_depth != 4 or self.controller_feature_dim != 0:
+                raise ValueError("conv4 PPO requires four traces and no controller features")
+        elif (
+            self.stack_depth < 2
+            or self.controller_feature_dim != CONTROLLER_FEATURE_DIM
+        ):
+            raise ValueError(
+                "controller_gru PPO requires a multi-decision sequence and the "
+                "versioned controller feature layout"
+            )
         if self.num_actions != len(ACTION_LEVELS):
             raise ValueError("PPO action count does not match the Mario action space")
         if self.policy_mode not in POLICY_MODES:
@@ -63,13 +81,17 @@ class ActorCritic(nn.Module):
     def __init__(self, config: PPOConfig) -> None:
         super().__init__()
         self.stack_depth = config.stack_depth
-        self.frame_projection = nn.Sequential(
-            nn.Linear(config.feature_dim, 256), nn.ReLU()
-        )
-        self.temporal = nn.Sequential(
-            nn.Conv1d(256, 256, kernel_size=2), nn.ReLU(), nn.Flatten()
-        )
-        encoded_dim = 256 * (config.stack_depth - 1)
+        input_dim = config.feature_dim + config.controller_feature_dim
+        self.frame_projection = nn.Sequential(nn.Linear(input_dim, 256), nn.ReLU())
+        self.temporal_encoder = config.temporal_encoder
+        if config.temporal_encoder == "controller_gru":
+            self.temporal = nn.GRU(256, 256, batch_first=True)
+            encoded_dim = 256
+        else:
+            self.temporal = nn.Sequential(
+                nn.Conv1d(256, 256, kernel_size=2), nn.ReLU(), nn.Flatten()
+            )
+            encoded_dim = 256 * (config.stack_depth - 1)
         self.shared = nn.Sequential(nn.Linear(encoded_dim, 512), nn.ReLU())
         self.policy_mode = config.policy_mode
         if config.policy_mode == "factorized":
@@ -82,9 +104,15 @@ class ActorCritic(nn.Module):
 
     def forward(self, activity: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         if activity.ndim != 3 or activity.shape[1] != self.stack_depth:
-            raise ValueError("activity must have shape (batch, 4, descending_neurons)")
+            raise ValueError(
+                f"activity must have shape (batch, {self.stack_depth}, features)"
+            )
         projected = self.frame_projection(activity.float())
-        features = self.temporal(projected.transpose(1, 2))
+        if self.temporal_encoder == "controller_gru":
+            features, _ = self.temporal(projected)
+            features = features[:, -1]
+        else:
+            features = self.temporal(projected.transpose(1, 2))
         shared = self.shared(features)
         if self.policy_mode == "factorized":
             logits = torch.cat(
@@ -98,6 +126,112 @@ class ActorCritic(nn.Module):
         else:
             logits = self.policy(shared)
         return logits, self.value(shared).squeeze(1)
+
+
+class ControllerTemporalStack:
+    """Decision-scale MaleCNS history augmented with motor efference copy."""
+
+    def __init__(self, feature_dim: int, depth: int = CONTROLLER_GRU_DEPTH) -> None:
+        if feature_dim <= 0 or depth < 2:
+            raise ValueError("controller temporal stack dimensions must be positive")
+        self.feature_dim = feature_dim
+        self.depth = depth
+        self._frames: deque[np.ndarray] = deque(maxlen=depth)
+        self.previous_action: int | None = None
+        self.action_hold_decisions = 0
+        self.jump_hold_decisions = 0
+        self.last_diagnostics: dict[str, int | bool] = {}
+
+    @property
+    def input_dim(self) -> int:
+        return self.feature_dim + CONTROLLER_FEATURE_DIM
+
+    def reset(self, activity: np.ndarray) -> np.ndarray:
+        activity = self._validate_activity(activity)
+        self.previous_action = None
+        self.action_hold_decisions = 0
+        self.jump_hold_decisions = 0
+        self.last_diagnostics = {
+            "action_hold_decisions": 0,
+            "jump_hold_decisions": 0,
+            "jump_pressed_edge": False,
+            "jump_released_edge": False,
+        }
+        initial = np.concatenate(
+            (activity, np.zeros(CONTROLLER_FEATURE_DIM, dtype=np.float32))
+        )
+        self._frames.clear()
+        padding = np.zeros(self.input_dim, dtype=np.float32)
+        self._frames.extend(padding.copy() for _ in range(self.depth - 1))
+        self._frames.append(initial)
+        return self.state
+
+    def append_interval(
+        self, activities: list[np.ndarray] | tuple[np.ndarray, ...], action: int
+    ) -> np.ndarray:
+        if not activities:
+            raise ValueError("an action interval must contain MaleCNS activity")
+        activity = np.mean(
+            np.stack([self._validate_activity(value) for value in activities]),
+            axis=0,
+            dtype=np.float32,
+        )
+        action = int(action)
+        if not 0 <= action < len(ACTION_LEVELS):
+            raise ValueError(f"invalid controller action: {action}")
+        previous_jump = (
+            False
+            if self.previous_action is None
+            else bool(ACTION_LEVELS[self.previous_action][2])
+        )
+        left, right, jump, run = ACTION_LEVELS[action]
+        self.action_hold_decisions = (
+            self.action_hold_decisions + 1 if action == self.previous_action else 1
+        )
+        self.jump_hold_decisions = self.jump_hold_decisions + 1 if jump else 0
+        jump_pressed_edge = bool(jump and not previous_jump)
+        jump_released_edge = bool(previous_jump and not jump)
+
+        action_one_hot = np.zeros(len(ACTION_LEVELS), dtype=np.float32)
+        action_one_hot[action] = 1.0
+        feedback = np.concatenate(
+            (
+                action_one_hot,
+                np.asarray((left, right, jump, run), dtype=np.float32),
+                np.asarray(
+                    (
+                        min(self.action_hold_decisions / HOLD_DURATION_SCALE, 1.0),
+                        min(self.jump_hold_decisions / HOLD_DURATION_SCALE, 1.0),
+                        jump_pressed_edge,
+                        jump_released_edge,
+                    ),
+                    dtype=np.float32,
+                ),
+            )
+        )
+        self._frames.append(np.concatenate((activity, feedback)))
+        self.previous_action = action
+        self.last_diagnostics = {
+            "action_hold_decisions": self.action_hold_decisions,
+            "jump_hold_decisions": self.jump_hold_decisions,
+            "jump_pressed_edge": jump_pressed_edge,
+            "jump_released_edge": jump_released_edge,
+        }
+        return self.state
+
+    def _validate_activity(self, activity: np.ndarray) -> np.ndarray:
+        value = np.asarray(activity, dtype=np.float32)
+        if value.shape != (self.feature_dim,):
+            raise ValueError(
+                f"MaleCNS activity must have shape ({self.feature_dim},), got {value.shape}"
+            )
+        return value
+
+    @property
+    def state(self) -> np.ndarray:
+        if len(self._frames) != self.depth:
+            raise RuntimeError("controller temporal stack has not been reset")
+        return np.stack(tuple(self._frames), axis=0)
 
 
 def _factorized_probabilities(logits: torch.Tensor) -> torch.Tensor:

@@ -40,6 +40,7 @@ ENABLE_DOPAMINE="${MARIO_ENABLE_DOPAMINE:-0}"
 FREEZE_PPO="${MARIO_FREEZE_PPO:-0}"
 FREEZE_DOPAMINE="${MARIO_FREEZE_DOPAMINE:-0}"
 FACTORIZED_PPO="${MARIO_PPO_FACTORIZED:-0}"
+TEMPORAL_CONTROLLER="${MARIO_PPO_TEMPORAL_CONTROLLER:-0}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
 if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -56,6 +57,10 @@ if [[ "${FREEZE_DOPAMINE}" != "0" && "${FREEZE_DOPAMINE}" != "1" ]]; then
 fi
 if [[ "${FACTORIZED_PPO}" != "0" && "${FACTORIZED_PPO}" != "1" ]]; then
     echo "ERROR: MARIO_PPO_FACTORIZED must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${TEMPORAL_CONTROLLER}" != "0" && "${TEMPORAL_CONTROLLER}" != "1" ]]; then
+    echo "ERROR: MARIO_PPO_TEMPORAL_CONTROLLER must be 0 or 1." >&2
     exit 1
 fi
 if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -170,6 +175,10 @@ echo "PPO value coef:      ${VALUE_COEFFICIENT}"
 echo "PPO entropy coef:    ${ENTROPY_COEFFICIENT}"
 echo "PPO target KL:       ${TARGET_KL}"
 echo "PPO factorized:      ${FACTORIZED_PPO}"
+echo "Temporal controller: ${TEMPORAL_CONTROLLER}"
+if [[ "${TEMPORAL_CONTROLLER}" == "1" ]]; then
+    echo "Temporal decisions:  ${MARIO_PPO_TEMPORAL_DECISIONS:-16}"
+fi
 echo "Checkpoint:          ${CHECKPOINT}"
 echo "Snapshots:           ${SNAPSHOT_DIR}"
 echo "TensorBoard:         ${TENSORBOARD_DIR}"
@@ -202,6 +211,12 @@ fi
 policy_args=()
 if [[ "${FACTORIZED_PPO}" == "1" ]]; then
     policy_args+=(--factorized-policy)
+fi
+if [[ "${TEMPORAL_CONTROLLER}" == "1" ]]; then
+    policy_args+=(
+        --temporal-controller
+        --temporal-decisions "${MARIO_PPO_TEMPORAL_DECISIONS:-16}"
+    )
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
     freeze_args+=(--freeze-dopamine)

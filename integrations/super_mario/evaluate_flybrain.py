@@ -120,7 +120,7 @@ def run(args: argparse.Namespace) -> dict:
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     algorithm = str(payload.get("algorithm", "dqn"))
     if algorithm == "ppo":
-        from mario_ppo import PPOAgent
+        from mario_ppo import ControllerTemporalStack, PPOAgent
 
         agent = PPOAgent.load(args.checkpoint, device=device)
         agent.network.eval()
@@ -169,7 +169,14 @@ def run(args: argparse.Namespace) -> dict:
     try:
         for episode_index in range(args.episodes):
             observation, reset_info = env.reset(seed=args.seed + episode_index)
-            stack = ActivityStack(agent.config.stack_depth)
+            stack = (
+                ControllerTemporalStack(
+                    agent.config.feature_dim, agent.config.stack_depth
+                )
+                if algorithm == "ppo"
+                and agent.config.temporal_encoder == "controller_gru"
+                else ActivityStack(agent.config.stack_depth)
+            )
             state = stack.reset(connectome.reset(observation))
             current_x = int(reset_info.get("x_pos", 0))
             components = {key: 0.0 for key in REWARD_COMPONENTS}
@@ -177,6 +184,8 @@ def run(args: argparse.Namespace) -> dict:
             max_x = 0
             terminated = truncated = False
             death = completion = False
+            jump_press_edges = jump_release_edges = 0
+            max_action_hold = max_jump_hold = 0
             initial_action: int | None = None
             terminal_action: int | None = None
             recorder = (
@@ -220,6 +229,7 @@ def run(args: argparse.Namespace) -> dict:
 
                 interval_raw = 0.0
                 interval_components: dict[str, float] = {}
+                interval_activities: list[np.ndarray] = []
                 x_before = current_x
                 state_rms = float(np.sqrt(np.mean(np.square(state))))
                 for frame_in_decision in range(1, args.action_repeat + 1):
@@ -235,12 +245,17 @@ def run(args: argparse.Namespace) -> dict:
                                 interval_components.get(key, 0.0)
                                 + float(component_value)
                             )
-                    stack.append(
-                        connectome.observe(
-                            observation,
-                            action_sequence=q_observations - 1,
-                        )
+                    activity = connectome.observe(
+                        observation,
+                        action_sequence=q_observations - 1,
                     )
+                    if (
+                        algorithm == "ppo"
+                        and agent.config.temporal_encoder == "controller_gru"
+                    ):
+                        interval_activities.append(activity)
+                    else:
+                        stack.append(activity)
                     death |= bool(
                         info.get("death", False)
                         or info.get("is_dead", False)
@@ -290,7 +305,29 @@ def run(args: argparse.Namespace) -> dict:
                 legacy_total += _legacy_training_reward(
                     interval_components, interval_raw
                 )
-                next_state = stack.state
+                if (
+                    algorithm == "ppo"
+                    and agent.config.temporal_encoder == "controller_gru"
+                ):
+                    next_state = stack.append_interval(interval_activities, action)
+                    controller_diagnostics = dict(stack.last_diagnostics)
+                    jump_press_edges += int(
+                        controller_diagnostics["jump_pressed_edge"]
+                    )
+                    jump_release_edges += int(
+                        controller_diagnostics["jump_released_edge"]
+                    )
+                    max_action_hold = max(
+                        max_action_hold,
+                        int(controller_diagnostics["action_hold_decisions"]),
+                    )
+                    max_jump_hold = max(
+                        max_jump_hold,
+                        int(controller_diagnostics["jump_hold_decisions"]),
+                    )
+                else:
+                    next_state = stack.state
+                    controller_diagnostics = None
                 state_delta_rms_sum += float(
                     np.sqrt(np.mean(np.square(next_state - state)))
                 )
@@ -375,6 +412,7 @@ def run(args: argparse.Namespace) -> dict:
                         "state_delta_rms": float(
                             np.sqrt(np.mean(np.square(next_state - state)))
                         ),
+                        "controller": controller_diagnostics,
                         "interval_reward": interval_raw,
                         "reward_components": interval_components,
                         "terminated": bool(terminated),
@@ -403,6 +441,10 @@ def run(args: argparse.Namespace) -> dict:
                 "completion": completion,
                 "initial_action": action_names[initial_action],
                 "terminal_action": action_names[terminal_action],
+                "jump_press_edges": jump_press_edges,
+                "jump_release_edges": jump_release_edges,
+                "max_action_hold_decisions": max_action_hold,
+                "max_jump_hold_decisions": max_jump_hold,
                 "environment_terminated": bool(terminated),
                 "environment_truncated": bool(truncated),
                 "evaluator_truncated": not (terminated or truncated),
@@ -432,6 +474,11 @@ def run(args: argparse.Namespace) -> dict:
         "learning_enabled": False,
         "dopamine_updates_enabled": False,
         "algorithm": algorithm,
+        "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
+        "temporal_depth": agent.config.stack_depth,
+        "controller_feature_dim": getattr(
+            agent.config, "controller_feature_dim", 0
+        ),
         "mode": "sampled" if args.sample_actions else "mean",
         "epsilon": args.epsilon,
         "seed": args.seed,
@@ -460,6 +507,18 @@ def run(args: argparse.Namespace) -> dict:
             "mean_state_rms": state_rms_sum / max(1, q_observations),
             "mean_temporal_state_delta_rms": (
                 state_delta_rms_sum / max(1, q_observations)
+            ),
+            "mean_jump_press_edges": float(
+                np.mean([row["jump_press_edges"] for row in episodes])
+            ),
+            "mean_jump_release_edges": float(
+                np.mean([row["jump_release_edges"] for row in episodes])
+            ),
+            "mean_max_action_hold_decisions": float(
+                np.mean([row["max_action_hold_decisions"] for row in episodes])
+            ),
+            "mean_max_jump_hold_decisions": float(
+                np.mean([row["max_jump_hold_decisions"] for row in episodes])
             ),
             "actions": {
                 action_names[index]: {

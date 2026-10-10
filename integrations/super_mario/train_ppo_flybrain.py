@@ -14,6 +14,9 @@ import torch
 from male_cns import MaleCNS
 from mario_dqn import ActivityStack, FlybrainAction
 from mario_ppo import (
+    CONTROLLER_FEATURE_DIM,
+    CONTROLLER_GRU_DEPTH,
+    ControllerTemporalStack,
     PPOAgent,
     PPOConfig,
     generalized_advantage_estimates,
@@ -133,6 +136,11 @@ def run(args: argparse.Namespace) -> None:
             policy_mode=requested_policy_mode,
         )
         print(f"resumed PPO={args.resume} step={agent.steps}", flush=True)
+        if args.temporal_controller and agent.config.temporal_encoder != "controller_gru":
+            raise ValueError(
+                "--temporal-controller cannot convert an existing conv4 checkpoint; "
+                "start a fresh run"
+            )
     else:
         agent = PPOAgent(
             PPOConfig(
@@ -140,6 +148,15 @@ def run(args: argparse.Namespace) -> None:
                 rollout_steps=args.rollout_steps,
                 policy_mode=(
                     "factorized" if args.factorized_policy else "categorical"
+                ),
+                temporal_encoder=(
+                    "controller_gru" if args.temporal_controller else "conv4"
+                ),
+                stack_depth=(
+                    args.temporal_decisions if args.temporal_controller else 4
+                ),
+                controller_feature_dim=(
+                    CONTROLLER_FEATURE_DIM if args.temporal_controller else 0
                 ),
             ),
             device=_device(args.device),
@@ -154,6 +171,8 @@ def run(args: argparse.Namespace) -> None:
     print(
         "PPO optimizer "
         f"policy={agent.config.policy_mode} "
+        f"temporal={agent.config.temporal_encoder} "
+        f"history={agent.config.stack_depth} "
         f"lr={agent.config.learning_rate:g} value_coef={agent.config.value_coefficient:g} "
         f"entropy_coef={agent.config.entropy_coefficient:g} "
         f"target_kl={agent.config.target_kl:g}",
@@ -172,7 +191,11 @@ def run(args: argparse.Namespace) -> None:
         nes_actions(),
     )
     observation, _ = env.reset(seed=args.seed + agent.steps)
-    stack = ActivityStack(agent.config.stack_depth)
+    stack = (
+        ControllerTemporalStack(agent.config.feature_dim, agent.config.stack_depth)
+        if agent.config.temporal_encoder == "controller_gru"
+        else ActivityStack(agent.config.stack_depth)
+    )
     state = stack.reset(connectome.reset(observation))
     writer = SummaryWriter(
         log_dir=str(args.tensorboard_dir),
@@ -200,6 +223,10 @@ def run(args: argparse.Namespace) -> None:
     episode_training_return = 0.0
     episode_decisions = 0
     episode_max_x = 0
+    episode_jump_press_edges = 0
+    episode_jump_release_edges = 0
+    episode_max_action_hold = 0
+    episode_max_jump_hold = 0
     episode = 0
     stop = False
     last_save = agent.steps
@@ -216,6 +243,7 @@ def run(args: argparse.Namespace) -> None:
             action, log_probability, value = agent.act(state)
             raw_reward = 0.0
             reward_components: dict[str, float] = {}
+            interval_activities: list[np.ndarray] = []
             terminated = truncated = False
             info: dict = {}
             for _ in range(args.action_repeat):
@@ -228,14 +256,50 @@ def run(args: argparse.Namespace) -> None:
                         reward_components[key] = reward_components.get(
                             key, 0.0
                         ) + float(component_value)
-                stack.append(
-                    connectome.observe(
-                        observation, action_sequence=agent.steps
-                    )
+                activity = connectome.observe(
+                    observation, action_sequence=agent.steps
                 )
+                if agent.config.temporal_encoder == "controller_gru":
+                    interval_activities.append(activity)
+                else:
+                    stack.append(activity)
                 if terminated or truncated:
                     break
-            next_state = stack.state
+            if agent.config.temporal_encoder == "controller_gru":
+                next_state = stack.append_interval(interval_activities, action)
+                controller = stack.last_diagnostics
+                episode_jump_press_edges += int(controller["jump_pressed_edge"])
+                episode_jump_release_edges += int(controller["jump_released_edge"])
+                episode_max_action_hold = max(
+                    episode_max_action_hold,
+                    int(controller["action_hold_decisions"]),
+                )
+                episode_max_jump_hold = max(
+                    episode_max_jump_hold,
+                    int(controller["jump_hold_decisions"]),
+                )
+                writer.add_scalar(
+                    "controller/action_hold_decisions",
+                    controller["action_hold_decisions"],
+                    agent.steps,
+                )
+                writer.add_scalar(
+                    "controller/jump_hold_decisions",
+                    controller["jump_hold_decisions"],
+                    agent.steps,
+                )
+                writer.add_scalar(
+                    "controller/jump_pressed_edge",
+                    float(controller["jump_pressed_edge"]),
+                    agent.steps,
+                )
+                writer.add_scalar(
+                    "controller/jump_released_edge",
+                    float(controller["jump_released_edge"]),
+                    agent.steps,
+                )
+            else:
+                next_state = stack.state
             done = bool(terminated or truncated)
             learning_reward = training_reward(
                 reward_components, raw_reward=raw_reward
@@ -333,7 +397,14 @@ def run(args: argparse.Namespace) -> None:
                     f"raw_return={episode_raw_return:+.1f} "
                     f"training_return={episode_training_return:+.3f} "
                     f"avg100={average:+.3f} "
-                    f"max_x={episode_max_x}",
+                    f"max_x={episode_max_x}"
+                    + (
+                        f" jump_edges={episode_jump_press_edges}/{episode_jump_release_edges} "
+                        f"max_action_hold={episode_max_action_hold} "
+                        f"max_jump_hold={episode_max_jump_hold}"
+                        if agent.config.temporal_encoder == "controller_gru"
+                        else ""
+                    ),
                     flush=True,
                 )
                 observation, _ = env.reset()
@@ -342,6 +413,10 @@ def run(args: argparse.Namespace) -> None:
                 episode_training_return = 0.0
                 episode_decisions = 0
                 episode_max_x = 0
+                episode_jump_press_edges = 0
+                episode_jump_release_edges = 0
+                episode_max_action_hold = 0
+                episode_max_jump_hold = 0
 
             if agent.steps - last_save >= args.save_every:
                 _save(agent, connectome, args.output, args.snapshot_dir)
@@ -392,6 +467,17 @@ def main() -> None:
     parser.add_argument("--entropy-coefficient", type=float)
     parser.add_argument("--target-kl", type=float)
     parser.add_argument(
+        "--temporal-controller",
+        action="store_true",
+        help="use decision-scale MaleCNS aggregation, controller feedback, and a GRU",
+    )
+    parser.add_argument(
+        "--temporal-decisions",
+        type=int,
+        default=CONTROLLER_GRU_DEPTH,
+        help="number of action intervals visible to the controller GRU",
+    )
+    parser.add_argument(
         "--factorized-policy",
         action="store_true",
         help=(
@@ -414,6 +500,8 @@ def main() -> None:
         parser.error("steps, action repeat, rollout steps, and save interval must be positive")
     if args.additional_steps is not None and args.additional_steps <= 0:
         parser.error("--additional-steps must be positive")
+    if args.temporal_decisions < 2:
+        parser.error("--temporal-decisions must be at least two")
     if args.dopamine_learning_rate <= 0:
         parser.error("--dopamine-learning-rate must be positive")
     continuation_values = (
