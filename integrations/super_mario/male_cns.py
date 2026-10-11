@@ -21,6 +21,7 @@ VISUAL_CHANNELS = {
     "target": ["LC10a"],
 }
 VISUAL_ENCODERS = ("column_v1", "retina_lite_v2")
+VISUAL_ABLATIONS = ("normal", "threat", "loom", "small_motion", "target", "all")
 
 
 def _top_mean(values: np.ndarray, fraction: float = 0.1) -> float:
@@ -33,15 +34,18 @@ def _top_mean(values: np.ndarray, fraction: float = 0.1) -> float:
     return float(np.partition(flat, len(flat) - count)[-count:].mean())
 
 
-def _align_previous(gray: np.ndarray, previous: np.ndarray) -> np.ndarray:
+def _align_previous_with_shift(
+    gray: np.ndarray, previous: np.ndarray
+) -> tuple[np.ndarray, int]:
     """Compensate small horizontal camera scroll before measuring local motion."""
 
     if gray.shape != previous.shape:
-        return previous
+        return previous, 0
     height, width = gray.shape
     top = max(0, int(round(height * 0.12)))
     best_error = float("inf")
     best = previous
+    best_shift = 0
     for shift in range(-4, 5):
         if shift < 0:
             current_view = gray[top:, : width + shift]
@@ -55,12 +59,17 @@ def _align_previous(gray: np.ndarray, previous: np.ndarray) -> np.ndarray:
         error = float(np.mean(np.abs(current_view - previous_view)))
         if error < best_error:
             best_error = error
+            best_shift = shift
             best = np.roll(previous, shift, axis=1)
             if shift < 0:
                 best[:, shift:] = previous[:, -1:]
             elif shift > 0:
                 best[:, :shift] = previous[:, :1]
-    return best
+    return best, best_shift
+
+
+def _align_previous(gray: np.ndarray, previous: np.ndarray) -> np.ndarray:
+    return _align_previous_with_shift(gray, previous)[0]
 
 
 class MaleCNS:
@@ -77,10 +86,14 @@ class MaleCNS:
         dopamine_state: Path | None = None,
         dopamine_learning_rate: float = 1.0e-5,
         visual_encoder: str = "column_v1",
+        visual_ablation: str = "normal",
     ) -> None:
         if visual_encoder not in VISUAL_ENCODERS:
             raise ValueError(f"visual encoder must be one of {VISUAL_ENCODERS}")
         self.visual_encoder = visual_encoder
+        if visual_ablation not in VISUAL_ABLATIONS:
+            raise ValueError(f"visual ablation must be one of {VISUAL_ABLATIONS}")
+        self.visual_ablation = visual_ablation
         try:
             from flybrain import FlyBrain, Trace
         except ImportError as exc:  # pragma: no cover - exercised in cluster env
@@ -127,6 +140,7 @@ class MaleCNS:
             for name in VISUAL_CHANNELS
             for side in ("L", "R")
         }
+        self.last_retina_measurements: dict[str, float | int] = {}
         self.spike_file = Path(spike_file) if spike_file is not None else None
         if self.spike_file is not None:
             self.spike_file.parent.mkdir(parents=True, exist_ok=True)
@@ -180,7 +194,7 @@ class MaleCNS:
     ) -> dict[tuple[str, str], float]:
         """Fixed 2-D motion filters feeding biologically named visual channels."""
 
-        aligned = _align_previous(gray, previous)
+        aligned, camera_shift = _align_previous_with_shift(gray, previous)
         motion = np.abs(gray - aligned)
         dark = 1.0 - gray
         old_dark = 1.0 - aligned
@@ -194,6 +208,7 @@ class MaleCNS:
             "ground": slice(int(height * 0.76), int(height * 0.98)),
         }
         amounts: dict[tuple[str, str], float] = {}
+        self.last_retina_measurements = {"camera_shift_pixels": camera_shift}
         for side, horizontal in (
             ("L", slice(0, midpoint)),
             ("R", slice(midpoint, width)),
@@ -203,6 +218,16 @@ class MaleCNS:
             growth = _top_mean(dark_growth[bands["lower"], horizontal], 0.08)
             ground_motion = _top_mean(motion[bands["ground"], horizontal], 0.06)
             local_edges = _top_mean(gradient_x[bands["lower"], horizontal], 0.08)
+            suffix = side.lower()
+            self.last_retina_measurements.update(
+                {
+                    f"lower_motion_{suffix}": lower_motion,
+                    f"middle_motion_{suffix}": middle_motion,
+                    f"dark_growth_{suffix}": growth,
+                    f"ground_motion_{suffix}": ground_motion,
+                    f"local_edges_{suffix}": local_edges,
+                }
+            )
             amounts[("small_motion", side)] = min(
                 0.8, 0.15 * lower_motion + 0.85 * middle_motion
             )
@@ -226,6 +251,7 @@ class MaleCNS:
         if self.visual_encoder == "retina_lite_v2":
             encoded = self._retina_lite_amounts(gray, previous)
         else:
+            self.last_retina_measurements = {}
             motion = np.abs(gray - previous)
             dark = 1.0 - gray
             midpoint = gray.shape[1] // 2
@@ -252,6 +278,8 @@ class MaleCNS:
         for side in ("L", "R"):
             for name in VISUAL_CHANNELS:
                 amount = encoded[(name, side)]
+                if self.visual_ablation in (name, "all"):
+                    amount = 0.0
                 self.last_visual_drive[f"{name}_{side.lower()}"] = amount
                 if amount > 0.0:
                     inject.append((self.visual[name][side], amount))
@@ -260,6 +288,9 @@ class MaleCNS:
 
     def visual_stats(self) -> dict[str, float]:
         return dict(self.last_visual_drive)
+
+    def retina_stats(self) -> dict[str, float | int]:
+        return dict(self.last_retina_measurements)
 
     def observe(self, frame: np.ndarray, *, action_sequence: int = -1) -> np.ndarray:
         eye_drive, inject = self._encode(frame)

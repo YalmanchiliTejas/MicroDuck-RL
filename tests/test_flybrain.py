@@ -53,7 +53,10 @@ def _load_evaluator(flybrain, rollouts):
     injected = {
         "mario_dqn": flybrain,
         "rollouts": rollouts,
-        "male_cns": types.SimpleNamespace(MaleCNS=object),
+        "male_cns": types.SimpleNamespace(
+            MaleCNS=object,
+            VISUAL_ABLATIONS=("normal", "threat", "loom", "small_motion", "target", "all"),
+        ),
         "mario_sidecar": types.SimpleNamespace(nes_actions=list),
     }
     previous = {name: sys.modules.get(name) for name in injected}
@@ -444,6 +447,31 @@ def test_retina_lite_suppresses_horizontal_camera_scroll():
     assert np.mean(np.abs(current - aligned)) < 1.0e-6
 
 
+def test_retina_ablation_silences_only_named_injection():
+    male_cns = _load_male_cns()
+    encoder = male_cns.MaleCNS.__new__(male_cns.MaleCNS)
+    encoder.visual_encoder = "retina_lite_v2"
+    encoder.visual_ablation = "threat"
+    encoder.previous_gray = np.ones((100, 120), dtype=np.float32)
+    encoder.last_visual_drive = {}
+    encoder.last_retina_measurements = {}
+    encoder.brain = types.SimpleNamespace(azimuth=np.asarray((-1.0, 1.0)))
+    encoder.visual = {
+        name: {side: np.asarray([index], dtype=np.int64) for side in ("L", "R")}
+        for index, name in enumerate(male_cns.VISUAL_CHANNELS)
+    }
+    frame = np.full((100, 120, 3), 255, dtype=np.uint8)
+    frame[65:82, 86:101] = 0
+
+    _, injected = encoder._encode(frame)
+
+    assert encoder.visual_stats()["threat_r"] == 0.0
+    assert encoder.visual_stats()["loom_r"] > 0.0
+    assert encoder.retina_stats()["dark_growth_r"] > 0.0
+    assert all(not np.array_equal(indices, encoder.visual["threat"]["R"])
+               for indices, _ in injected)
+
+
 def test_ppo_continuation_overrides_are_checkpointed(tmp_path):
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
@@ -700,6 +728,78 @@ def test_forensic_recorder_writes_gif_and_synchronized_jsonl(tmp_path):
     assert json.loads((tmp_path / "episode-002-decisions.jsonl").read_text())[
         "action"
     ] == "right"
+
+
+def test_paired_replay_uses_same_frames_and_actions_for_channel_masks(monkeypatch):
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    evaluator = _load_evaluator(flybrain, rollouts)
+    ppo = _load_ppo(flybrain)
+    monkeypatch.setitem(sys.modules, "mario_ppo", ppo)
+
+    class FakeConnectome:
+        visual_ablation = "normal"
+
+        def reset(self, _frame):
+            return np.zeros(2, dtype=np.float32)
+
+        def observe(self, frame):
+            value = float(frame[0, 0, 0]) / 255.0
+            if self.visual_ablation == "all":
+                value = 0.0
+            return np.asarray((value, value), dtype=np.float32)
+
+    class FakeAgent:
+        config = types.SimpleNamespace(
+            feature_dim=2, stack_depth=4, temporal_encoder="conv4"
+        )
+
+        def policy_diagnostics(self, state):
+            jump = float(np.mean(state)) * 0.5
+            scores = np.full(10, (1.0 - jump) / 5.0, dtype=np.float64)
+            scores[list(evaluator.JUMP_ACTIONS)] = jump / 5.0
+            return {"action_probabilities": scores}
+
+    connectome = FakeConnectome()
+    agent = FakeAgent()
+    initial = np.zeros((2, 2, 3), dtype=np.uint8)
+    bright = np.full((2, 2, 3), 255, dtype=np.uint8)
+    intervals = [(int(flybrain.FlybrainAction.RIGHT), [bright] * 4)] * 2
+    rows = [
+        {"action_probabilities": dict(zip(
+            [action.name.lower() for action in flybrain.FlybrainAction],
+            agent.policy_diagnostics(
+                np.zeros((4, 2), dtype=np.float32)
+                if index == 0 else np.ones((4, 2), dtype=np.float32)
+            )["action_probabilities"].tolist(),
+            strict=True,
+        ))}
+        for index in range(2)
+    ]
+
+    baseline_error = evaluator._replay_counterfactuals(
+        agent, connectome, initial, intervals, rows
+    )
+
+    assert baseline_error < 1.0e-8
+    assert connectome.visual_ablation == "normal"
+    assert rows[1]["counterfactual"]["normal"]["total_jump_probability"] == pytest.approx(0.5)
+    assert rows[1]["counterfactual"]["all"]["total_jump_probability"] == pytest.approx(0.0)
+
+
+def test_ppo_jump_sensitivity_reports_each_input_frame(monkeypatch):
+    flybrain = _load_flybrain()
+    evaluator = _load_evaluator(flybrain, _load_rollouts())
+    ppo = _load_ppo(flybrain)
+    monkeypatch.setitem(sys.modules, "mario_ppo", ppo)
+    agent = ppo.PPOAgent(ppo.PPOConfig(feature_dim=6), seed=3)
+
+    sensitivity = evaluator._ppo_input_sensitivity(
+        agent, np.ones((4, 6), dtype=np.float32)
+    )
+
+    assert len(sensitivity["jump_probability_gradient_rms_by_frame"]) == 4
+    assert all(np.isfinite(value) for values in sensitivity.values() for value in values)
 
 
 def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):

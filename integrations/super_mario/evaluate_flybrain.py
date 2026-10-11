@@ -9,8 +9,8 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from male_cns import MaleCNS
-from mario_dqn import ActivityStack, FlybrainAction, FlybrainAgent
+from male_cns import VISUAL_ABLATIONS, MaleCNS
+from mario_dqn import ACTION_LEVELS, ActivityStack, FlybrainAction, FlybrainAgent
 from mario_sidecar import nes_actions
 from rollouts import REWARD_COMPONENTS, training_reward
 
@@ -58,6 +58,131 @@ def _atomic_jsonl(path: Path, rows: list[dict]) -> None:
     temporary.replace(path)
 
 
+JUMP_ACTIONS = tuple(index for index, levels in enumerate(ACTION_LEVELS) if levels[2])
+NON_JUMP_ACTIONS = tuple(index for index, levels in enumerate(ACTION_LEVELS) if not levels[2])
+
+
+def _jump_metrics(scores: np.ndarray) -> dict[str, float]:
+    """Report marginal and strongest competing action probabilities."""
+
+    scores = np.asarray(scores, dtype=np.float64)
+    return {
+        "total_jump_probability": float(scores[list(JUMP_ACTIONS)].sum()),
+        "best_jump_probability": float(scores[list(JUMP_ACTIONS)].max()),
+        "best_non_jump_probability": float(scores[list(NON_JUMP_ACTIONS)].max()),
+    }
+
+
+def _ppo_input_sensitivity(agent, state: np.ndarray) -> dict[str, list[float]]:
+    """Local gradient of total jump probability through the PPO readout."""
+
+    from mario_ppo import _factorized_probabilities
+
+    state_tensor = torch.as_tensor(
+        state, dtype=torch.float32, device=agent.device
+    ).unsqueeze(0).detach().requires_grad_(True)
+    logits, _ = agent.network(state_tensor)
+    probabilities = (
+        _factorized_probabilities(logits)
+        if agent.config.policy_mode == "factorized"
+        else torch.softmax(logits, dim=1)
+    )
+    jump_probability = probabilities[:, list(JUMP_ACTIONS)].sum()
+    gradient = torch.autograd.grad(jump_probability, state_tensor)[0][0]
+    gradient = gradient[:, : agent.config.feature_dim]
+    return {
+        "jump_probability_gradient_rms_by_frame": [
+            float(value) for value in gradient.square().mean(dim=1).sqrt().detach().cpu()
+        ],
+        "jump_probability_gradient_max_by_frame": [
+            float(value) for value in gradient.abs().amax(dim=1).detach().cpu()
+        ],
+    }
+
+
+def _replay_counterfactuals(
+    agent,
+    connectome: MaleCNS,
+    initial_frame: np.ndarray,
+    intervals: list[tuple[int, list[np.ndarray]]],
+    decision_rows: list[dict],
+) -> float:
+    """Replay identical frames and actions with each injected channel silenced."""
+
+    from mario_ppo import ControllerTemporalStack
+
+    max_baseline_error = 0.0
+    original_ablation = connectome.visual_ablation
+    try:
+        for ablation in VISUAL_ABLATIONS:
+            connectome.visual_ablation = ablation
+            stack = (
+                ControllerTemporalStack(agent.config.feature_dim, agent.config.stack_depth)
+                if agent.config.temporal_encoder == "controller_gru"
+                else ActivityStack(agent.config.stack_depth)
+            )
+            state = stack.reset(connectome.reset(initial_frame))
+            for row, (action, frames) in zip(decision_rows, intervals, strict=True):
+                scores = np.asarray(
+                    agent.policy_diagnostics(state)["action_probabilities"],
+                    dtype=np.float64,
+                )
+                row.setdefault("counterfactual", {})[ablation] = {
+                    "greedy_action": FlybrainAction(int(scores.argmax())).name.lower(),
+                    **_jump_metrics(scores),
+                }
+                if ablation == "normal":
+                    original = np.asarray(
+                        list(row["action_probabilities"].values()), dtype=np.float64
+                    )
+                    max_baseline_error = max(
+                        max_baseline_error, float(np.max(np.abs(scores - original)))
+                    )
+                activities = []
+                for frame in frames:
+                    activity = connectome.observe(frame)
+                    if agent.config.temporal_encoder == "controller_gru":
+                        activities.append(activity)
+                    else:
+                        stack.append(activity)
+                state = (
+                    stack.append_interval(activities, action)
+                    if agent.config.temporal_encoder == "controller_gru"
+                    else stack.state
+                )
+    finally:
+        connectome.visual_ablation = original_ablation
+    for row in decision_rows:
+        results = row["counterfactual"]
+        baseline = results["normal"]
+        for name, result in results.items():
+            result["delta_jump_probability"] = (
+                result["total_jump_probability"]
+                - baseline["total_jump_probability"]
+            )
+            result["changed_greedy_action"] = (
+                result["greedy_action"] != baseline["greedy_action"]
+            )
+    return max_baseline_error
+
+
+def _counterfactual_summary(decision_rows: list[dict]) -> dict[str, dict[str, float]]:
+    return {
+        name: {
+            "mean_absolute_jump_probability_change": float(np.mean([
+                abs(row["counterfactual"][name]["delta_jump_probability"])
+                for row in decision_rows
+            ])),
+            "greedy_action_change_fraction": float(np.mean([
+                row["counterfactual"][name]["changed_greedy_action"]
+                for row in decision_rows
+            ])),
+        }
+        for name in VISUAL_ABLATIONS
+        if name != "normal"
+    }
+
+
 class ForensicRecorder:
     """Record one emulator episode as synchronized GIF and JSONL traces."""
 
@@ -72,18 +197,52 @@ class ForensicRecorder:
     def add_frame(self, frame: np.ndarray, row: dict, overlay: list[str]) -> None:
         from PIL import Image, ImageDraw
 
-        image = Image.fromarray(np.asarray(frame, dtype=np.uint8)).convert("RGB")
-        draw = ImageDraw.Draw(image)
+        game = Image.fromarray(np.asarray(frame, dtype=np.uint8)).convert("RGB")
         line_height = 11
         overlay_height = line_height * len(overlay) + 4
-        draw.rectangle((0, 0, image.width, overlay_height), fill=(0, 0, 0))
+        image = Image.new("RGB", (game.width, game.height + overlay_height), "black")
+        image.paste(game, (0, 0))
+        draw = ImageDraw.Draw(image)
         for line, text in enumerate(overlay):
-            draw.text((3, 2 + line * line_height), text, fill=(255, 255, 255))
+            draw.text(
+                (3, game.height + 2 + line * line_height),
+                text,
+                fill=(255, 255, 255),
+            )
         self.frames.append(image)
         self.frame_rows.append(row)
 
     def add_decision(self, row: dict) -> None:
         self.decision_rows.append(row)
+
+    def annotate_counterfactuals(self, *, valid: bool) -> None:
+        """Add replay results to each GIF frame after the paired replay finishes."""
+
+        from PIL import Image, ImageDraw
+
+        by_decision = {row["decision"]: row for row in self.decision_rows}
+        annotated = []
+        for image, frame_row in zip(self.frames, self.frame_rows, strict=True):
+            results = by_decision[frame_row["decision"]].get("counterfactual", {})
+            if not results:
+                annotated.append(image)
+                continue
+            lines = [
+                f"cf {name}: Pj={results[name]['total_jump_probability']:.2f} "
+                f"best={results[name]['greedy_action']}"
+                for name in ("normal", "threat", "loom", "small_motion", "target", "all")
+                if name in results
+            ]
+            if not valid:
+                lines.append("REPLAY INVALID: baseline differs")
+            extra_height = len(lines) * 11 + 4
+            canvas = Image.new("RGB", (image.width, image.height + extra_height), "black")
+            canvas.paste(image, (0, 0))
+            draw = ImageDraw.Draw(canvas)
+            for line_number, line in enumerate(lines):
+                draw.text((3, image.height + 2 + line_number * 11), line, fill="white")
+            annotated.append(canvas)
+        self.frames = annotated
 
     def close(self) -> dict[str, str]:
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -138,6 +297,7 @@ def run(args: argparse.Namespace) -> dict:
         dopamine_state=args.dopamine_state,
         dopamine_learning_rate=args.dopamine_learning_rate,
         visual_encoder=getattr(agent.config, "visual_encoder", "column_v1"),
+        visual_ablation=getattr(args, "visual_ablation", "normal"),
     )
     if connectome.feature_dim != agent.config.feature_dim:
         raise ValueError(
@@ -166,6 +326,10 @@ def run(args: argparse.Namespace) -> dict:
     record_dir = getattr(args, "record_dir", None)
     record_episodes = int(getattr(args, "record_episodes", 0))
     record_fps = int(getattr(args, "record_fps", 60))
+    visual_ablation = getattr(args, "visual_ablation", "normal")
+    counterfactual_channels = bool(getattr(args, "counterfactual_channels", False))
+    if counterfactual_channels and (algorithm != "ppo" or visual_ablation != "normal"):
+        raise ValueError("paired channel replay requires normal PPO evaluation")
 
     try:
         for episode_index in range(args.episodes):
@@ -179,6 +343,8 @@ def run(args: argparse.Namespace) -> dict:
                 else ActivityStack(agent.config.stack_depth)
             )
             state = stack.reset(connectome.reset(observation))
+            initial_frame = observation.copy() if counterfactual_channels and episode_index < record_episodes else None
+            replay_intervals: list[tuple[int, list[np.ndarray]]] = []
             current_x = int(reset_info.get("x_pos", 0))
             components = {key: 0.0 for key in REWARD_COMPONENTS}
             raw_total = environment_training_total = legacy_total = 0.0
@@ -189,6 +355,9 @@ def run(args: argparse.Namespace) -> dict:
             max_action_hold = max_jump_hold = 0
             initial_action: int | None = None
             terminal_action: int | None = None
+            previous_jump = False
+            previous_action: int | None = None
+            jump_hold = action_hold = 0
             recorder = (
                 ForensicRecorder(record_dir, episode_index, record_fps)
                 if record_dir is not None and episode_index < record_episodes
@@ -196,6 +365,8 @@ def run(args: argparse.Namespace) -> dict:
             )
 
             for decision in range(1, args.max_decisions_per_episode + 1):
+                visual_before = connectome.visual_stats()
+                retina_before = connectome.retina_stats()
                 policy_diagnostics: dict[str, object] = {}
                 with torch.no_grad():
                     state_t = torch.as_tensor(state, device=agent.device).unsqueeze(0)
@@ -212,6 +383,23 @@ def run(args: argparse.Namespace) -> dict:
                 else:
                     action = agent.act(state, epsilon=args.epsilon)
                     log_probability = value = None
+                jump_metrics = _jump_metrics(action_scores) if algorithm == "ppo" else None
+                sensitivity = (
+                    _ppo_input_sensitivity(agent, state)
+                    if algorithm == "ppo" and recorder is not None
+                    else None
+                )
+                jump_now = bool(ACTION_LEVELS[action][2])
+                jump_pressed_edge = jump_now and not previous_jump
+                jump_released_edge = previous_jump and not jump_now
+                jump_hold = jump_hold + 1 if jump_now else 0
+                action_hold = action_hold + 1 if action == previous_action else 1
+                jump_press_edges += int(jump_pressed_edge)
+                jump_release_edges += int(jump_released_edge)
+                max_action_hold = max(max_action_hold, action_hold)
+                max_jump_hold = max(max_jump_hold, jump_hold)
+                previous_jump = jump_now
+                previous_action = action
                 q_sums += action_scores
                 q_margin_sum += float(
                     np.partition(action_scores, -2)[-1]
@@ -231,6 +419,7 @@ def run(args: argparse.Namespace) -> dict:
                 interval_raw = 0.0
                 interval_components: dict[str, float] = {}
                 interval_activities: list[np.ndarray] = []
+                replay_frames: list[np.ndarray] = []
                 x_before = current_x
                 state_rms = float(np.sqrt(np.mean(np.square(state))))
                 for frame_in_decision in range(1, args.action_repeat + 1):
@@ -250,6 +439,8 @@ def run(args: argparse.Namespace) -> dict:
                         observation,
                         action_sequence=q_observations - 1,
                     )
+                    if initial_frame is not None:
+                        replay_frames.append(observation.copy())
                     if (
                         algorithm == "ppo"
                         and agent.config.temporal_encoder == "controller_gru"
@@ -279,7 +470,14 @@ def run(args: argparse.Namespace) -> dict:
                             "truncated": bool(truncated),
                             "death": bool(death),
                             "completion": bool(completion),
+                            "visual_before_action": visual_before,
+                            "retina_before_action": retina_before,
                             "visual_drive": connectome.visual_stats(),
+                            "retina_measurements": connectome.retina_stats(),
+                            "jump_metrics": jump_metrics,
+                            "jump_pressed_edge": jump_pressed_edge,
+                            "jump_released_edge": jump_released_edge,
+                            "jump_hold_decisions": jump_hold,
                         }
                         recorder.add_frame(
                             observation,
@@ -293,10 +491,37 @@ def run(args: argparse.Namespace) -> dict:
                                     f"action={action_names[action]} x={current_x} "
                                     f"y={frame_row['y']} reward={interval_raw:+.1f}"
                                 ),
+                                (
+                                    f"Pj={jump_metrics['total_jump_probability']:.2f} "
+                                    f"best J/N={jump_metrics['best_jump_probability']:.2f}/"
+                                    f"{jump_metrics['best_non_jump_probability']:.2f}"
+                                    if jump_metrics is not None else "DQN policy"
+                                ),
+                                f"jump edge={int(jump_pressed_edge)}/{int(jump_released_edge)} hold={jump_hold}",
+                                (
+                                    f"pre R T/L/M={visual_before['threat_r']:.2f}/"
+                                    f"{visual_before['loom_r']:.2f}/"
+                                    f"{visual_before['small_motion_r']:.2f} "
+                                    f"shift={retina_before.get('camera_shift_pixels', 0)}"
+                                ),
+                                (
+                                    f"raw R motion/growth="
+                                    f"{retina_before.get('lower_motion_r', 0):.2f}/"
+                                    f"{retina_before.get('dark_growth_r', 0):.2f}"
+                                ),
+                                (
+                                    "grad frames=" + ",".join(
+                                        f"{item:.4f}" for item in
+                                        sensitivity["jump_probability_gradient_rms_by_frame"]
+                                    )
+                                    if sensitivity is not None else ""
+                                ),
                             ],
                         )
                     if terminated or truncated:
                         break
+                if initial_frame is not None:
+                    replay_intervals.append((action, replay_frames))
 
                 for key, component_value in interval_components.items():
                     components[key] += component_value
@@ -313,20 +538,6 @@ def run(args: argparse.Namespace) -> dict:
                 ):
                     next_state = stack.append_interval(interval_activities, action)
                     controller_diagnostics = dict(stack.last_diagnostics)
-                    jump_press_edges += int(
-                        controller_diagnostics["jump_pressed_edge"]
-                    )
-                    jump_release_edges += int(
-                        controller_diagnostics["jump_released_edge"]
-                    )
-                    max_action_hold = max(
-                        max_action_hold,
-                        int(controller_diagnostics["action_hold_decisions"]),
-                    )
-                    max_jump_hold = max(
-                        max_jump_hold,
-                        int(controller_diagnostics["jump_hold_decisions"]),
-                    )
                 else:
                     next_state = stack.state
                     controller_diagnostics = None
@@ -411,6 +622,15 @@ def run(args: argparse.Namespace) -> dict:
                             else None
                         ),
                         "visual_drive": connectome.visual_stats(),
+                        "visual_before_action": visual_before,
+                        "retina_before_action": retina_before,
+                        "retina_after_action": connectome.retina_stats(),
+                        "jump_metrics": jump_metrics,
+                        "jump_pressed_edge": jump_pressed_edge,
+                        "jump_released_edge": jump_released_edge,
+                        "jump_hold_decisions": jump_hold,
+                        "action_hold_decisions": action_hold,
+                        "ppo_input_sensitivity": sensitivity,
                         "state_rms": state_rms,
                         "state_delta_rms": float(
                             np.sqrt(np.mean(np.square(next_state - state)))
@@ -455,6 +675,26 @@ def run(args: argparse.Namespace) -> dict:
             }
             episodes.append(row)
             if recorder is not None:
+                if initial_frame is not None:
+                    baseline_error = _replay_counterfactuals(
+                        agent, connectome, initial_frame, replay_intervals,
+                        recorder.decision_rows,
+                    )
+                    row["counterfactual_baseline_max_probability_error"] = baseline_error
+                    row["counterfactual_replay_valid"] = baseline_error < 1.0e-4
+                    row["counterfactual_summary"] = _counterfactual_summary(
+                        recorder.decision_rows
+                    )
+                    if not row["counterfactual_replay_valid"]:
+                        print(
+                            f"WARNING: episode={episode_index} paired replay differs "
+                            f"from original policy by {baseline_error:.6f}; "
+                            "do not interpret its counterfactuals",
+                            flush=True,
+                        )
+                    recorder.annotate_counterfactuals(
+                        valid=row["counterfactual_replay_valid"]
+                    )
                 forensic_artifacts.append(
                     {"episode": episode_index, **recorder.close()}
                 )
@@ -477,6 +717,7 @@ def run(args: argparse.Namespace) -> dict:
         "learning_enabled": False,
         "dopamine_updates_enabled": False,
         "algorithm": algorithm,
+        "visual_ablation": visual_ablation,
         "visual_encoder": getattr(agent.config, "visual_encoder", "column_v1"),
         "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
         "temporal_depth": agent.config.stack_depth,
@@ -588,6 +829,14 @@ def main() -> None:
     )
     parser.add_argument("--record-fps", type=int, default=60)
     parser.add_argument(
+        "--visual-ablation", choices=VISUAL_ABLATIONS, default="normal",
+        help="silence the named injected visual population throughout a frozen rollout",
+    )
+    parser.add_argument(
+        "--counterfactual-channels", action="store_true",
+        help="replay recorded frames through each masked MaleCNS channel using the original actions",
+    )
+    parser.add_argument(
         "--allow-legacy-reward-contract",
         action="store_true",
         help="evaluation only: load a schema-4 checkpoint without permitting training resume",
@@ -608,6 +857,8 @@ def main() -> None:
         parser.error("episode/decision/action counts must be positive and epsilon in [0, 1]")
     if args.record_episodes and args.record_dir is None:
         parser.error("--record-episodes requires --record-dir")
+    if args.counterfactual_channels and not args.record_episodes:
+        parser.error("--counterfactual-channels requires recorded episodes")
     run(args)
 
 

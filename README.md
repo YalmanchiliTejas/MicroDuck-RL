@@ -385,6 +385,29 @@ MARIO_PPO_ENTROPY_COEFFICIENT=0.01 \
 The fixed channel drives are logged under `retina/*` in TensorBoard and are
 included in recorded evaluation frame traces.
 
+For a frozen retina diagnosis, evaluate the same checkpoint and episode seeds
+with the normal visual injection and four channel masks. The mean policy is
+deterministic; each ablated rollout may diverge after its first changed action.
+The normal rollout can additionally replay its recorded frames and original
+actions through each masked MaleCNS state to compare policy probabilities at
+identical visual moments. The report includes a baseline replay error; a large
+error means the flybrain reset did not reproduce the original neural trace,
+so do not interpret the paired counterfactuals. Recording places diagnostics
+below the unaltered game image in each GIF.
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-viet-retinalite-conv4-nodopamine-6150-v1 \
+MARIO_EVAL_CHECKPOINT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-viet-retinalite-conv4-nodopamine-6150-v1/run/best-clean-ppo.pt" \
+MARIO_EVAL_MODES=mean \
+MARIO_EVAL_ABLATIONS="normal threat loom small_motion all" \
+MARIO_EVAL_COUNTERFACTUAL=1 \
+MARIO_EVAL_EPISODES=5 \
+MARIO_EVAL_RECORD_EPISODES=2 \
+MARIO_EVAL_MAX_DECISIONS=500 \
+FLY_DATA="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-viet-reward-4frame-nodopamine-6150-v1/male-cns" \
+    ./slurm_mario_flybrain_evaluate.sh
+```
+
 Evaluate the resulting checkpoint in both deterministic and sampled modes
 without changing PPO or dopamine state:
 

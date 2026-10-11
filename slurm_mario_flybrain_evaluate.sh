@@ -9,7 +9,7 @@
 #SBATCH --cpus-per-task=16
 #SBATCH --gres=gpu:1
 #SBATCH --mem=48G
-#SBATCH --time=02:00:00
+#SBATCH --time=04:00:00
 #SBATCH --partition=gpu
 
 set -euo pipefail
@@ -72,12 +72,18 @@ ACTION_REPEAT="${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-4}}"
 MODES="${MARIO_EVAL_MODES:-mean sampled}"
 RECORD_EPISODES="${MARIO_EVAL_RECORD_EPISODES:-0}"
 RECORD_FPS="${MARIO_EVAL_RECORD_FPS:-60}"
+ABLATIONS="${MARIO_EVAL_ABLATIONS:-normal}"
+COUNTERFACTUAL="${MARIO_EVAL_COUNTERFACTUAL:-0}"
 if ! [[ "${RECORD_EPISODES}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: MARIO_EVAL_RECORD_EPISODES must be a non-negative integer." >&2
     exit 1
 fi
 if ! [[ "${RECORD_FPS}" =~ ^[1-9][0-9]*$ ]]; then
     echo "ERROR: MARIO_EVAL_RECORD_FPS must be a positive integer." >&2
+    exit 1
+fi
+if [[ "${COUNTERFACTUAL}" != "0" && "${COUNTERFACTUAL}" != "1" ]]; then
+    echo "ERROR: MARIO_EVAL_COUNTERFACTUAL must be 0 or 1." >&2
     exit 1
 fi
 
@@ -90,40 +96,52 @@ else
 fi
 echo "Episodes/mode:   ${EPISODES}"
 echo "Modes:           ${MODES}"
+echo "Visual ablations:${ABLATIONS}"
 echo "Recorded episodes:${RECORD_EPISODES} per mode"
 echo "Learning:        disabled"
 echo "Dopamine update: disabled"
 
 for mode in ${MODES}; do
     case "${mode}" in mean|sampled) ;; *) echo "ERROR: mode must be mean or sampled" >&2; exit 1 ;; esac
-    report="${EVAL_DIR}/frozen-${mode}-${SLURM_JOB_ID}.json"
-    sample_args=()
-    if [[ "${mode}" == "sampled" ]]; then sample_args+=(--sample-actions); fi
-    dopamine_args=()
-    if [[ "${EVAL_DOPAMINE}" == "1" ]]; then
-        dopamine_args+=(--dopamine-state "${DOPAMINE_STATE}")
-    fi
-    record_args=()
-    if [[ "${RECORD_EPISODES}" != "0" ]]; then
-        record_args+=(
-            --record-dir "${EVAL_DIR}/forensics/${SLURM_JOB_ID}-${mode}"
-            --record-episodes "${RECORD_EPISODES}"
-            --record-fps "${RECORD_FPS}"
-        )
-    fi
-    echo "Evaluating mode=${mode}; report=${report}"
-    "${SIDECAR_VENV}/bin/python" \
-        "${REPO_DIR}/integrations/super_mario/evaluate_flybrain.py" \
-        --checkpoint "${CHECKPOINT}" \
-        "${dopamine_args[@]}" \
-        "${record_args[@]}" \
-        --male-cns-data "${FLY_DATA}" \
-        --male-cns-device cpu \
-        --episodes "${EPISODES}" \
-        --max-decisions-per-episode "${MAX_DECISIONS}" \
-        --action-repeat "${ACTION_REPEAT}" \
-        "${sample_args[@]}" \
-        --output "${report}"
+    for ablation in ${ABLATIONS}; do
+        case "${ablation}" in normal|threat|loom|small_motion|target|all) ;; *) echo "ERROR: invalid visual ablation: ${ablation}" >&2; exit 1 ;; esac
+        if [[ "${ablation}" == "normal" ]]; then
+            report="${EVAL_DIR}/frozen-${mode}-${SLURM_JOB_ID}.json"
+        else
+            report="${EVAL_DIR}/frozen-ablation-${ablation}-${mode}-${SLURM_JOB_ID}.json"
+        fi
+        sample_args=()
+        if [[ "${mode}" == "sampled" ]]; then sample_args+=(--sample-actions); fi
+        dopamine_args=()
+        if [[ "${EVAL_DOPAMINE}" == "1" ]]; then
+            dopamine_args+=(--dopamine-state "${DOPAMINE_STATE}")
+        fi
+        record_args=()
+        if [[ "${RECORD_EPISODES}" != "0" ]]; then
+            record_args+=(
+                --record-dir "${EVAL_DIR}/forensics/${SLURM_JOB_ID}-${mode}-${ablation}"
+                --record-episodes "${RECORD_EPISODES}"
+                --record-fps "${RECORD_FPS}"
+            )
+        fi
+        if [[ "${COUNTERFACTUAL}" == "1" && "${ablation}" == "normal" && "${mode}" == "mean" ]]; then
+            record_args+=(--counterfactual-channels)
+        fi
+        echo "Evaluating mode=${mode} ablation=${ablation}; report=${report}"
+        "${SIDECAR_VENV}/bin/python" \
+            "${REPO_DIR}/integrations/super_mario/evaluate_flybrain.py" \
+            --checkpoint "${CHECKPOINT}" \
+            --visual-ablation "${ablation}" \
+            "${dopamine_args[@]}" \
+            "${record_args[@]}" \
+            --male-cns-data "${FLY_DATA}" \
+            --male-cns-device cpu \
+            --episodes "${EPISODES}" \
+            --max-decisions-per-episode "${MAX_DECISIONS}" \
+            --action-repeat "${ACTION_REPEAT}" \
+            "${sample_args[@]}" \
+            --output "${report}"
+    done
 done
 
 echo "Frozen evaluation complete: ${EVAL_DIR}"
