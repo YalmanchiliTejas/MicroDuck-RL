@@ -229,7 +229,7 @@ class ForensicRecorder:
                 continue
             lines = [
                 f"cf {name}: Pj={results[name]['total_jump_probability']:.2f} "
-                f"best={results[name]['greedy_action']}"
+                f"best={''.join(part[0].upper() for part in results[name]['greedy_action'].split('_'))}"
                 for name in ("normal", "threat", "loom", "small_motion", "target", "all")
                 if name in results
             ]
