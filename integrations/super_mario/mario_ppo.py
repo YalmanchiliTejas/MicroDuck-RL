@@ -13,9 +13,10 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 3
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 4
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
+VISUAL_ENCODERS = ("column_v1", "retina_lite_v2")
 FACTORIZED_HEAD_SIZES = (3, 2, 2)
 TEMPORAL_ENCODERS = ("conv4", "controller_gru")
 CONTROLLER_FEATURE_DIM = len(ACTION_LEVELS) + 8
@@ -35,6 +36,7 @@ class PPOConfig:
     stack_depth: int = 4
     num_actions: int = len(ACTION_LEVELS)
     policy_mode: str = "categorical"
+    visual_encoder: str = "column_v1"
     temporal_encoder: str = "conv4"
     controller_feature_dim: int = 0
     gamma: float = 0.99
@@ -69,6 +71,8 @@ class PPOConfig:
             raise ValueError("PPO action count does not match the Mario action space")
         if self.policy_mode not in POLICY_MODES:
             raise ValueError(f"PPO policy mode must be one of {POLICY_MODES}")
+        if self.visual_encoder not in VISUAL_ENCODERS:
+            raise ValueError(f"PPO visual encoder must be one of {VISUAL_ENCODERS}")
         if self.rollout_steps <= 0 or self.minibatch_size <= 0:
             raise ValueError("rollout and minibatch sizes must be positive")
         if self.target_kl <= 0:
@@ -546,6 +550,7 @@ class PPOAgent:
             raise ValueError("unsupported PPO checkpoint or reward contract")
         source_config_values = dict(checkpoint["config"])
         source_config_values.setdefault("policy_mode", "categorical")
+        source_config_values.setdefault("visual_encoder", "column_v1")
         source_config = PPOConfig(**source_config_values)
         target_mode = policy_mode or source_config.policy_mode
         if target_mode not in POLICY_MODES:

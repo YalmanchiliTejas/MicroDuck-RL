@@ -41,6 +41,7 @@ FREEZE_PPO="${MARIO_FREEZE_PPO:-0}"
 FREEZE_DOPAMINE="${MARIO_FREEZE_DOPAMINE:-0}"
 FACTORIZED_PPO="${MARIO_PPO_FACTORIZED:-0}"
 TEMPORAL_CONTROLLER="${MARIO_PPO_TEMPORAL_CONTROLLER:-0}"
+VISUAL_ENCODER="${MARIO_VISUAL_ENCODER:-column_v1}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
 if [[ "${ENABLE_DOPAMINE}" != "0" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -61,6 +62,10 @@ if [[ "${FACTORIZED_PPO}" != "0" && "${FACTORIZED_PPO}" != "1" ]]; then
 fi
 if [[ "${TEMPORAL_CONTROLLER}" != "0" && "${TEMPORAL_CONTROLLER}" != "1" ]]; then
     echo "ERROR: MARIO_PPO_TEMPORAL_CONTROLLER must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" ]]; then
+    echo "ERROR: MARIO_VISUAL_ENCODER must be column_v1 or retina_lite_v2." >&2
     exit 1
 fi
 if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -176,6 +181,7 @@ echo "PPO entropy coef:    ${ENTROPY_COEFFICIENT}"
 echo "PPO target KL:       ${TARGET_KL}"
 echo "PPO factorized:      ${FACTORIZED_PPO}"
 echo "Temporal controller: ${TEMPORAL_CONTROLLER}"
+echo "Visual encoder:      ${VISUAL_ENCODER}"
 if [[ "${TEMPORAL_CONTROLLER}" == "1" ]]; then
     echo "Temporal decisions:  ${MARIO_PPO_TEMPORAL_DECISIONS:-16}"
 fi
@@ -238,6 +244,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --target-kl "${TARGET_KL}" \
     --male-cns-data "${FLY_DATA}" \
     --male-cns-device cpu \
+    --visual-encoder "${VISUAL_ENCODER}" \
     "${dopamine_args[@]}" \
     "${freeze_args[@]}" \
     "${policy_args[@]}" \

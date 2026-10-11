@@ -360,6 +360,31 @@ TensorBoard and episode logs record consecutive-action and jump-hold lengths
 plus jump press/release edges, making another held-button stall directly
 visible instead of hiding it inside the action histogram.
 
+For the connectome-first visual experiment, `retina_lite_v2` replaces the old
+full-height column average with fixed, nonlearned spatial and temporal filters.
+It preserves lower-field obstacle motion, local dark growth, edges, and rough
+left/right position; compensates small horizontal camera scroll; and injects
+only the corresponding LPLC1/LPLC2/LC4/LC10a populations. There is no direct
+retina-to-PPO path. The encoder name is stored in every PPO checkpoint so an
+old checkpoint cannot silently receive a different observation distribution.
+Use it with the original four-frame MaleCNS trace and categorical policy:
+
+```bash
+MARIO_RUN_TAG=malecns-ppo-viet-retinalite-conv4-nodopamine-6150-v1 \
+MARIO_VISUAL_ENCODER=retina_lite_v2 \
+MARIO_PPO_TEMPORAL_CONTROLLER=0 \
+MARIO_PPO_FACTORIZED=0 \
+MARIO_ENABLE_DOPAMINE=0 \
+MARIO_PRETRAIN_TARGET_STEPS=300000 \
+MARIO_PRETRAIN_ACTION_REPEAT=4 \
+MARIO_PRETRAIN_SAVE_EVERY=5000 \
+MARIO_PPO_ENTROPY_COEFFICIENT=0.01 \
+    ./slurm_mario_flybrain_pretrain.sh
+```
+
+The fixed channel drives are logged under `retina/*` in TensorBoard and are
+included in recorded evaluation frame traces.
+
 Evaluate the resulting checkpoint in both deterministic and sampled modes
 without changing PPO or dopamine state:
 

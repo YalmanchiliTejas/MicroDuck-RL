@@ -400,8 +400,48 @@ def test_schema_one_categorical_ppo_checkpoint_still_loads(tmp_path):
     payload = torch.load(checkpoint, weights_only=False)
     payload["schema"] = 1
     payload["config"].pop("policy_mode")
+    payload["config"].pop("visual_encoder")
     torch.save(payload, checkpoint)
-    assert ppo.PPOAgent.load(checkpoint).config.policy_mode == "categorical"
+    restored = ppo.PPOAgent.load(checkpoint)
+    assert restored.config.policy_mode == "categorical"
+    assert restored.config.visual_encoder == "column_v1"
+
+
+def test_retina_lite_visual_contract_round_trips_with_ppo(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    checkpoint = tmp_path / "retina-lite.pt"
+    ppo.PPOAgent(
+        ppo.PPOConfig(feature_dim=6, visual_encoder="retina_lite_v2"), seed=8
+    ).save(checkpoint)
+
+    assert ppo.PPOAgent.load(checkpoint).config.visual_encoder == "retina_lite_v2"
+
+
+def test_retina_lite_preserves_lower_field_and_side_motion():
+    male_cns = _load_male_cns()
+    encoder = male_cns.MaleCNS.__new__(male_cns.MaleCNS)
+    previous = np.ones((100, 120), dtype=np.float32)
+    current = previous.copy()
+    current[65:82, 86:101] = 0.0
+
+    amounts = encoder._retina_lite_amounts(current, previous)
+
+    assert amounts[("small_motion", "R")] > amounts[("small_motion", "L")]
+    assert amounts[("loom", "R")] > amounts[("loom", "L")]
+    assert amounts[("threat", "R")] > amounts[("threat", "L")]
+
+
+def test_retina_lite_suppresses_horizontal_camera_scroll():
+    male_cns = _load_male_cns()
+    rng = np.random.default_rng(4)
+    previous = rng.random((80, 120), dtype=np.float32)
+    current = np.roll(previous, 3, axis=1)
+    current[:, :3] = previous[:, :1]
+
+    aligned = male_cns._align_previous(current, previous)
+
+    assert np.mean(np.abs(current - aligned)) < 1.0e-6
 
 
 def test_ppo_continuation_overrides_are_checkpointed(tmp_path):

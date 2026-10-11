@@ -11,7 +11,7 @@ from pathlib import Path
 
 import numpy as np
 import torch
-from male_cns import MaleCNS
+from male_cns import VISUAL_ENCODERS, MaleCNS
 from mario_dqn import ActivityStack, FlybrainAction
 from mario_ppo import (
     CONTROLLER_FEATURE_DIM,
@@ -127,6 +127,7 @@ def run(args: argparse.Namespace) -> None:
         spike_file=args.spike_file,
         dopamine_state=args.dopamine_state,
         dopamine_learning_rate=args.dopamine_learning_rate,
+        visual_encoder=args.visual_encoder,
     )
     if args.resume is not None:
         requested_policy_mode = "factorized" if args.factorized_policy else None
@@ -141,6 +142,11 @@ def run(args: argparse.Namespace) -> None:
                 "--temporal-controller cannot convert an existing conv4 checkpoint; "
                 "start a fresh run"
             )
+        if agent.config.visual_encoder != args.visual_encoder:
+            raise ValueError(
+                f"checkpoint requires visual encoder {agent.config.visual_encoder!r}, "
+                f"not {args.visual_encoder!r}"
+            )
     else:
         agent = PPOAgent(
             PPOConfig(
@@ -149,6 +155,7 @@ def run(args: argparse.Namespace) -> None:
                 policy_mode=(
                     "factorized" if args.factorized_policy else "categorical"
                 ),
+                visual_encoder=args.visual_encoder,
                 temporal_encoder=(
                     "controller_gru" if args.temporal_controller else "conv4"
                 ),
@@ -171,6 +178,7 @@ def run(args: argparse.Namespace) -> None:
     print(
         "PPO optimizer "
         f"policy={agent.config.policy_mode} "
+        f"visual={agent.config.visual_encoder} "
         f"temporal={agent.config.temporal_encoder} "
         f"history={agent.config.stack_depth} "
         f"lr={agent.config.learning_rate:g} value_coef={agent.config.value_coefficient:g} "
@@ -326,6 +334,8 @@ def run(args: argparse.Namespace) -> None:
             )
             writer.add_scalar("training/x_pos", int(info.get("x_pos", 0)), agent.steps)
             writer.add_scalar("training/action", action, agent.steps)
+            for channel, amount in connectome.visual_stats().items():
+                writer.add_scalar(f"retina/{channel}", amount, agent.steps)
             if not args.freeze_dopamine:
                 connectome.reinforce(
                     agent.prediction_error(
@@ -458,6 +468,12 @@ def main() -> None:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--male-cns-data", type=Path)
+    parser.add_argument(
+        "--visual-encoder",
+        choices=VISUAL_ENCODERS,
+        default="column_v1",
+        help="fixed visual preprocessing contract stored in PPO checkpoints",
+    )
     parser.add_argument("--male-cns-device", choices=("auto", "cpu", "cuda"), default="cpu")
     parser.add_argument("--spike-file", type=Path)
     parser.add_argument("--dopamine-state", type=Path)

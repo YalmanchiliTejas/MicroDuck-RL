@@ -292,6 +292,9 @@ def run(args: argparse.Namespace) -> None:
             spike_file=spike_file,
             dopamine_state=args.dopamine_state,
             dopamine_learning_rate=args.dopamine_learning_rate,
+            visual_encoder=getattr(
+                flybrain.config, "visual_encoder", "column_v1"
+            ),
         )
         if male_cns.feature_dim != flybrain.config.feature_dim:
             raise RuntimeError(
@@ -300,7 +303,8 @@ def run(args: argparse.Namespace) -> None:
             )
         print(
             f"MaleCNS ready: {male_cns.neuron_count:,} neurons; "
-            f"{male_cns.feature_dim:,} descending-neuron readout features",
+            f"{male_cns.feature_dim:,} descending-neuron readout features; "
+            f"visual={male_cns.visual_encoder}",
             flush=True,
         )
         activity_stack = (
@@ -405,6 +409,15 @@ def run(args: argparse.Namespace) -> None:
                         reloaded_flybrain = PPOAgent.load(
                             args.flybrain, device=args.flybrain_device
                         )
+                        if (
+                            reloaded_flybrain.config.visual_encoder
+                            != male_cns.visual_encoder
+                        ):
+                            raise RuntimeError(
+                                "refusing to hot-reload a checkpoint with visual "
+                                f"encoder {reloaded_flybrain.config.visual_encoder!r}; "
+                                f"the live MaleCNS uses {male_cns.visual_encoder!r}"
+                            )
                         reloaded_flybrain.restore_action_sampling_state(sampling_state)
                         flybrain = reloaded_flybrain
                         flybrain_mtime_ns = current_mtime_ns

@@ -137,6 +137,7 @@ def run(args: argparse.Namespace) -> dict:
         seed=args.seed,
         dopamine_state=args.dopamine_state,
         dopamine_learning_rate=args.dopamine_learning_rate,
+        visual_encoder=getattr(agent.config, "visual_encoder", "column_v1"),
     )
     if connectome.feature_dim != agent.config.feature_dim:
         raise ValueError(
@@ -278,6 +279,7 @@ def run(args: argparse.Namespace) -> dict:
                             "truncated": bool(truncated),
                             "death": bool(death),
                             "completion": bool(completion),
+                            "visual_drive": connectome.visual_stats(),
                         }
                         recorder.add_frame(
                             observation,
@@ -408,6 +410,7 @@ def run(args: argparse.Namespace) -> dict:
                             if "run_probabilities" in policy_diagnostics
                             else None
                         ),
+                        "visual_drive": connectome.visual_stats(),
                         "state_rms": state_rms,
                         "state_delta_rms": float(
                             np.sqrt(np.mean(np.square(next_state - state)))
@@ -474,6 +477,7 @@ def run(args: argparse.Namespace) -> dict:
         "learning_enabled": False,
         "dopamine_updates_enabled": False,
         "algorithm": algorithm,
+        "visual_encoder": getattr(agent.config, "visual_encoder", "column_v1"),
         "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
         "temporal_depth": agent.config.stack_depth,
         "controller_feature_dim": getattr(
