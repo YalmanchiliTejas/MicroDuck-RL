@@ -74,6 +74,7 @@ RECORD_EPISODES="${MARIO_EVAL_RECORD_EPISODES:-0}"
 RECORD_FPS="${MARIO_EVAL_RECORD_FPS:-60}"
 ABLATIONS="${MARIO_EVAL_ABLATIONS:-normal}"
 COUNTERFACTUAL="${MARIO_EVAL_COUNTERFACTUAL:-0}"
+RETINA_VIEW="${MARIO_EVAL_RETINA_VIEW:-0}"
 if ! [[ "${RECORD_EPISODES}" =~ ^[0-9]+$ ]]; then
     echo "ERROR: MARIO_EVAL_RECORD_EPISODES must be a non-negative integer." >&2
     exit 1
@@ -84,6 +85,14 @@ if ! [[ "${RECORD_FPS}" =~ ^[1-9][0-9]*$ ]]; then
 fi
 if [[ "${COUNTERFACTUAL}" != "0" && "${COUNTERFACTUAL}" != "1" ]]; then
     echo "ERROR: MARIO_EVAL_COUNTERFACTUAL must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${RETINA_VIEW}" != "0" && "${RETINA_VIEW}" != "1" ]]; then
+    echo "ERROR: MARIO_EVAL_RETINA_VIEW must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${RETINA_VIEW}" == "1" && "${RECORD_EPISODES}" == "0" ]]; then
+    echo "ERROR: MARIO_EVAL_RETINA_VIEW requires MARIO_EVAL_RECORD_EPISODES > 0." >&2
     exit 1
 fi
 
@@ -98,6 +107,7 @@ echo "Episodes/mode:   ${EPISODES}"
 echo "Modes:           ${MODES}"
 echo "Visual ablations:${ABLATIONS}"
 echo "Recorded episodes:${RECORD_EPISODES} per mode"
+echo "Retina view:    ${RETINA_VIEW} (normal ablation only)"
 echo "Learning:        disabled"
 echo "Dopamine update: disabled"
 
@@ -126,6 +136,9 @@ for mode in ${MODES}; do
         fi
         if [[ "${COUNTERFACTUAL}" == "1" && "${ablation}" == "normal" && "${mode}" == "mean" ]]; then
             record_args+=(--counterfactual-channels)
+        fi
+        if [[ "${RETINA_VIEW}" == "1" && "${ablation}" == "normal" ]]; then
+            record_args+=(--retina-view)
         fi
         echo "Evaluating mode=${mode} ablation=${ablation}; report=${report}"
         "${SIDECAR_VENV}/bin/python" \

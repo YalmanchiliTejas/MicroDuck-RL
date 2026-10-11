@@ -36,6 +36,18 @@ def _top_mean(values: np.ndarray, fraction: float = 0.1) -> float:
     return float(np.partition(flat, len(flat) - count)[-count:].mean())
 
 
+def _top_pixels(values: np.ndarray, fraction: float) -> np.ndarray:
+    """Retain the same strongest pixels selected by ``_top_mean`` for display."""
+
+    flat = np.asarray(values, dtype=np.float32).ravel()
+    selected = np.zeros_like(flat)
+    if len(flat):
+        count = max(1, int(round(len(flat) * fraction)))
+        indices = np.argpartition(flat, len(flat) - count)[-count:]
+        selected[indices] = flat[indices]
+    return selected.reshape(values.shape)
+
+
 def _align_previous_with_shift(
     gray: np.ndarray, previous: np.ndarray
 ) -> tuple[np.ndarray, int]:
@@ -243,6 +255,55 @@ class MaleCNS:
                 0.8, 0.04 + 0.18 * local_edges + 0.18 * middle_motion
             )
         return amounts
+
+    def retina_diagnostic(self, frame: np.ndarray) -> dict[str, np.ndarray | int] | None:
+        """Recompute display-only source and contributing-pixel maps, without state writes.
+
+        Call before ``observe(frame)`` so ``previous_gray`` is the same frame used
+        by the live encoder. The four channel maps show the exact top-pixel
+        regions pooled on each side, before a channel ablation is applied.
+        """
+
+        if self.visual_encoder != "retina_lite_v2":
+            return None
+        gray = self._gray(frame)
+        previous = gray if self.previous_gray is None else self.previous_gray
+        aligned, shift = _align_previous_with_shift(gray, previous)
+        motion = np.abs(gray - aligned)
+        growth = np.maximum(aligned - gray, 0.0)
+        edges = np.abs(np.diff(gray, axis=1, prepend=gray[:, :1]))
+        height, width = gray.shape
+        bands = {
+            "middle": slice(int(height * 0.30), int(height * 0.72)),
+            "lower": slice(int(height * 0.58), int(height * 0.92)),
+            "ground": slice(int(height * 0.76), int(height * 0.98)),
+        }
+        channels = {
+            name: np.zeros_like(gray) for name in VISUAL_CHANNELS
+        }
+        for horizontal in (slice(0, width // 2), slice(width // 2, width)):
+            def selected(source: np.ndarray, band: str, fraction: float) -> np.ndarray:
+                result = np.zeros_like(gray)
+                region = (bands[band], horizontal)
+                result[region] = _top_pixels(source[region], fraction)
+                return result
+
+            lower_motion = selected(motion, "lower", 0.08)
+            middle_motion = selected(motion, "middle", 0.08)
+            ground_motion = selected(motion, "ground", 0.06)
+            lower_growth = selected(growth, "lower", 0.08)
+            lower_edges = selected(edges, "lower", 0.08)
+            channels["small_motion"] += 0.15 * lower_motion + 0.85 * middle_motion
+            channels["loom"] += 0.65 * lower_growth + 0.15 * lower_motion
+            channels["threat"] += 0.55 * ground_motion + 0.25 * lower_growth
+            channels["target"] += 0.18 * lower_edges + 0.18 * middle_motion
+        return {
+            "motion": motion,
+            "dark_growth": growth,
+            "edges": edges,
+            **channels,
+            "camera_shift_pixels": shift,
+        }
 
     def _encode(self, frame: np.ndarray) -> tuple[np.ndarray, list[tuple[np.ndarray, float]]]:
         gray = self._gray(frame)

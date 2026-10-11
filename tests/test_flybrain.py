@@ -438,6 +438,26 @@ def test_retina_lite_preserves_lower_field_and_side_motion():
     assert amounts[("threat", "R")] > amounts[("threat", "L")]
 
 
+def test_retina_diagnostic_shows_selected_right_pixels_without_state_change():
+    male_cns = _load_male_cns()
+    encoder = male_cns.MaleCNS.__new__(male_cns.MaleCNS)
+    encoder.visual_encoder = "retina_lite_v2"
+    encoder.previous_gray = np.ones((100, 120), dtype=np.float32)
+    frame = np.full((100, 120, 3), 255, dtype=np.uint8)
+    frame[65:82, 86:101] = 0
+
+    diagnostic = encoder.retina_diagnostic(frame)
+
+    assert diagnostic is not None
+    assert diagnostic["camera_shift_pixels"] == 0
+    assert diagnostic["motion"].shape == (100, 120)
+    assert diagnostic["dark_growth"][70, 90] > 0.0
+    assert diagnostic["threat"][:, 60:].sum() > 0.0
+    assert diagnostic["threat"][:, :60].sum() == 0.0
+    assert diagnostic["target"][:, 60:].sum() > 0.0
+    np.testing.assert_array_equal(encoder.previous_gray, 1.0)
+
+
 def test_retina_lite_suppresses_horizontal_camera_scroll():
     male_cns = _load_male_cns()
     rng = np.random.default_rng(4)
@@ -756,6 +776,42 @@ def test_forensic_recorder_writes_gif_and_synchronized_jsonl(tmp_path):
     assert json.loads((tmp_path / "episode-002-decisions.jsonl").read_text())[
         "action"
     ] == "right"
+
+
+def test_forensic_recorder_writes_opt_in_retina_view_and_timeline(tmp_path):
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    evaluator = _load_evaluator(flybrain, rollouts)
+    recorder = evaluator.ForensicRecorder(
+        tmp_path, episode=0, fps=60, retina_view=True
+    )
+    frame = np.zeros((32, 40, 3), dtype=np.uint8)
+    diagnostic = {
+        name: np.zeros((32, 40), dtype=np.float32)
+        for name in ("motion", "dark_growth", "edges", "small_motion", "loom", "threat", "target")
+    }
+    diagnostic["threat"][20, 30] = 0.2
+    diagnostic["camera_shift_pixels"] = -2
+    visual = {
+        f"{name}_{side}": 0.02
+        for name in ("small_motion", "loom", "threat", "target")
+        for side in ("l", "r")
+    }
+    row = {
+        "episode": 0, "decision": 1, "frame_in_decision": 4,
+        "x": 42, "y": 79, "action": "right_jump", "death": False,
+        "visual_drive": visual, "jump_pressed_edge": True,
+        "jump_released_edge": False, "jump_hold_decisions": 1,
+        "jump_metrics": {"total_jump_probability": 0.62},
+    }
+    recorder.add_frame(frame, row, ["action=right_jump"])
+    recorder.add_retina_frame(frame, diagnostic, row)
+    recorder.add_decision({"decision": 1, "action": "right_jump"})
+
+    artifacts = recorder.close()
+
+    assert Path(artifacts["retina_video"]).is_file()
+    assert Path(artifacts["retina_timeline"]).is_file()
 
 
 def test_paired_replay_uses_same_frames_and_actions_for_channel_masks(monkeypatch):

@@ -188,13 +188,17 @@ def _counterfactual_summary(decision_rows: list[dict]) -> dict[str, dict[str, fl
 class ForensicRecorder:
     """Record one emulator episode as synchronized GIF and JSONL traces."""
 
-    def __init__(self, directory: Path, episode: int, fps: int) -> None:
+    def __init__(
+        self, directory: Path, episode: int, fps: int, *, retina_view: bool = False
+    ) -> None:
         self.directory = directory
         self.episode = episode
         self.fps = fps
         self.frames = []
         self.frame_rows: list[dict] = []
         self.decision_rows: list[dict] = []
+        self.retina_view = retina_view
+        self.retina_frames = []
 
     def add_frame(self, frame: np.ndarray, row: dict, overlay: list[str]) -> None:
         from PIL import Image, ImageDraw
@@ -216,6 +220,134 @@ class ForensicRecorder:
 
     def add_decision(self, row: dict) -> None:
         self.decision_rows.append(row)
+
+    def add_retina_frame(
+        self, frame: np.ndarray, diagnostic: dict, row: dict
+    ) -> None:
+        """One sampled frame per decision; source maps above pooled channel maps."""
+
+        from PIL import Image, ImageDraw
+
+        game = Image.fromarray(np.asarray(frame, dtype=np.uint8)).convert("RGB")
+        width, height = game.size
+        canvas = Image.new("RGB", (4 * width, 2 * (height + 16) + 72), "black")
+        draw = ImageDraw.Draw(canvas)
+        panels = (
+            ("game", None, None),
+            ("motion x4", "motion", (255, 255, 255)),
+            ("dark growth x4", "dark_growth", (255, 255, 255)),
+            ("vertical edges x4", "edges", (255, 255, 255)),
+            ("small-motion contributors x6", "small_motion", (80, 190, 255)),
+            ("loom contributors x6", "loom", (225, 90, 255)),
+            ("threat contributors x6", "threat", (255, 85, 85)),
+            ("target contributors x6", "target", (255, 220, 75)),
+        )
+        for index, (label, key, color) in enumerate(panels):
+            x = (index % 4) * width
+            y = (index // 4) * (height + 16)
+            draw.text((x + 3, y + 2), label, fill="white")
+            if key is None:
+                panel = game
+            else:
+                strength = np.clip(
+                    np.asarray(diagnostic[key], dtype=np.float32)
+                    * (4.0 if index < 4 else 6.0),
+                    0.0, 1.0,
+                )
+                rgb = np.stack([strength * component for component in color], axis=-1)
+                panel = Image.fromarray(rgb.astype(np.uint8), "RGB")
+            canvas.paste(panel, (x, y + 16))
+            if key is not None:
+                draw.line(
+                    (x + width // 2, y + 16, x + width // 2, y + 16 + height),
+                    fill=(95, 95, 95),
+                )
+        base_y = 2 * (height + 16) + 3
+        visual = row["visual_drive"]
+        draw.text(
+            (3, base_y),
+            f"episode={row['episode']} decision={row['decision']} "
+            f"x={row['x']} y={row['y']} chosen={row['action']} "
+            f"shift={diagnostic['camera_shift_pixels']}",
+            fill="white",
+        )
+        draw.text(
+            (3, base_y + 14),
+            "post-action L/R drive " + "  ".join(
+                f"{name}={visual[name + '_l']:.3f}/{visual[name + '_r']:.3f}"
+                for name in ("small_motion", "loom", "threat", "target")
+            ),
+            fill="white",
+        )
+        jump = row["jump_metrics"]
+        draw.text(
+            (3, base_y + 28),
+            f"pre-action P(jump)={jump['total_jump_probability']:.3f} "
+            f"press={int(row['jump_pressed_edge'])} "
+            f"release={int(row['jump_released_edge'])} "
+            f"hold={row['jump_hold_decisions']} death={int(row['death'])}"
+            if jump is not None else f"death={int(row['death'])}",
+            fill="white",
+        )
+        draw.text(
+            (3, base_y + 42),
+            "Channel panels show top pixels pooled per LEFT/RIGHT half; "
+            "target's constant 0.04 baseline is not pictured.",
+            fill="white",
+        )
+        self.retina_frames.append(canvas)
+
+    def _write_retina_timeline(self, path: Path) -> None:
+        from PIL import Image, ImageDraw
+
+        last_by_decision = {row["decision"]: row for row in self.frame_rows}
+        rows = [last_by_decision[index] for index in sorted(last_by_decision)]
+        if not rows:
+            return
+        width, left, right = 1100, 130, 25
+        lane_height = 95
+        image = Image.new("RGB", (width, 5 * lane_height + 30), (15, 17, 25))
+        draw = ImageDraw.Draw(image)
+        plot_width = width - left - right
+        count = len(rows)
+        def px(index: int) -> int:
+            return left + round(index * plot_width / max(1, count - 1))
+
+        for index, row in enumerate(rows):
+            if row["jump_pressed_edge"]:
+                draw.line((px(index), 16, px(index), 5 * lane_height + 15), fill=(72, 35, 35))
+            if row["death"]:
+                draw.line((px(index), 16, px(index), 5 * lane_height + 15), fill=(255, 80, 80), width=2)
+        for lane, name in enumerate(("small_motion", "loom", "threat", "target")):
+            top = 20 + lane * lane_height
+            values = [
+                float(row["visual_drive"][f"{name}_{side}"])
+                for row in rows for side in ("l", "r")
+            ]
+            ceiling = max(0.01, max(values) * 1.05)
+            draw.text((4, top), name, fill="white")
+            draw.text((4, top + 16), f"0..{ceiling:.3f}", fill=(170, 175, 185))
+            draw.line((left, top + 68, width - right, top + 68), fill=(85, 88, 95))
+            for side, color in (("l", (70, 190, 255)), ("r", (255, 195, 70))):
+                points = [
+                    (px(i), top + 68 - round(56 * float(row["visual_drive"][f"{name}_{side}"]) / ceiling))
+                    for i, row in enumerate(rows)
+                ]
+                if len(points) > 1:
+                    draw.line(points, fill=color, width=2)
+        top = 20 + 4 * lane_height
+        max_x = max(1, max(int(row["x"]) for row in rows))
+        draw.text((4, top), f"Mario x 0..{max_x}", fill="white")
+        draw.line((left, top + 68, width - right, top + 68), fill=(85, 88, 95))
+        points = [(px(i), top + 68 - round(56 * int(row["x"]) / max_x)) for i, row in enumerate(rows)]
+        if len(points) > 1:
+            draw.line(points, fill=(160, 235, 150), width=2)
+        draw.text(
+            (left, 5 * lane_height + 12),
+            "cyan=left  amber=right  red vertical=jump press  bright red=death; horizontal=decision",
+            fill="white",
+        )
+        image.save(path)
 
     def annotate_counterfactuals(self, *, valid: bool) -> None:
         """Add replay results to each GIF frame after the paired replay finishes."""
@@ -265,11 +397,24 @@ class ForensicRecorder:
                 optimize=False,
             )
             temporary.replace(animation)
-        return {
+        artifacts = {
             "video": str(animation.resolve()),
             "frame_trace": str(frame_trace.resolve()),
             "decision_trace": str(decision_trace.resolve()),
         }
+        if self.retina_frames:
+            retina_animation = self.directory / f"{stem}-retina.gif"
+            temporary = retina_animation.with_name(f".{retina_animation.name}.tmp.gif")
+            self.retina_frames[0].save(
+                temporary, save_all=True, append_images=self.retina_frames[1:],
+                duration=max(1, round(1000 / self.fps)), loop=0, optimize=False,
+            )
+            temporary.replace(retina_animation)
+            timeline = self.directory / f"{stem}-retina-signals.png"
+            self._write_retina_timeline(timeline)
+            artifacts["retina_video"] = str(retina_animation.resolve())
+            artifacts["retina_timeline"] = str(timeline.resolve())
+        return artifacts
 
 
 def run(args: argparse.Namespace) -> dict:
@@ -306,6 +451,8 @@ def run(args: argparse.Namespace) -> dict:
             f"checkpoint expects {agent.config.feature_dim} features, "
             f"MaleCNS provides {connectome.feature_dim}"
         )
+    if getattr(args, "retina_view", False) and connectome.visual_encoder != "retina_lite_v2":
+        raise ValueError("retina view requires a retina_lite_v2 checkpoint")
 
     action_names = [action.name.lower() for action in FlybrainAction]
     # mario_sidecar.nes_actions and the checkpoint share the FlybrainAction order.
@@ -328,6 +475,7 @@ def run(args: argparse.Namespace) -> dict:
     record_dir = getattr(args, "record_dir", None)
     record_episodes = int(getattr(args, "record_episodes", 0))
     record_fps = int(getattr(args, "record_fps", 60))
+    retina_view = bool(getattr(args, "retina_view", False))
     visual_ablation = getattr(args, "visual_ablation", "normal")
     counterfactual_channels = bool(getattr(args, "counterfactual_channels", False))
     if counterfactual_channels and (algorithm != "ppo" or visual_ablation != "normal"):
@@ -362,7 +510,10 @@ def run(args: argparse.Namespace) -> dict:
             previous_action: int | None = None
             jump_hold = action_hold = 0
             recorder = (
-                ForensicRecorder(record_dir, episode_index, record_fps)
+                ForensicRecorder(
+                    record_dir, episode_index, record_fps,
+                    retina_view=retina_view and visual_ablation == "normal",
+                )
                 if record_dir is not None and episode_index < record_episodes
                 else None
             )
@@ -438,6 +589,12 @@ def run(args: argparse.Namespace) -> dict:
                                 interval_components.get(key, 0.0)
                                 + float(component_value)
                             )
+                    retina_diagnostic = (
+                        connectome.retina_diagnostic(observation)
+                        if recorder is not None and recorder.retina_view
+                        and (frame_in_decision == args.action_repeat or terminated or truncated)
+                        else None
+                    )
                     activity = connectome.observe(
                         observation,
                         action_sequence=q_observations - 1,
@@ -521,6 +678,10 @@ def run(args: argparse.Namespace) -> dict:
                                 ),
                             ],
                         )
+                        if retina_diagnostic is not None:
+                            recorder.add_retina_frame(
+                                observation, retina_diagnostic, frame_row
+                            )
                     if terminated or truncated:
                         break
                 if initial_frame is not None:
@@ -834,6 +995,10 @@ def main() -> None:
     )
     parser.add_argument("--record-fps", type=int, default=60)
     parser.add_argument(
+        "--retina-view", action="store_true",
+        help="record per-decision retina source/contributor GIF and channel timeline",
+    )
+    parser.add_argument(
         "--visual-ablation", choices=VISUAL_ABLATIONS, default="normal",
         help="silence the named injected visual population throughout a frozen rollout",
     )
@@ -864,6 +1029,8 @@ def main() -> None:
         parser.error("--record-episodes requires --record-dir")
     if args.counterfactual_channels and not args.record_episodes:
         parser.error("--counterfactual-channels requires recorded episodes")
+    if args.retina_view and not args.record_episodes:
+        parser.error("--retina-view requires recorded episodes")
     run(args)
 
 
