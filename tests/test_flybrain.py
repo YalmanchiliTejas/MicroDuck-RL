@@ -55,7 +55,10 @@ def _load_evaluator(flybrain, rollouts):
         "rollouts": rollouts,
         "male_cns": types.SimpleNamespace(
             MaleCNS=object,
-            VISUAL_ABLATIONS=("normal", "threat", "loom", "small_motion", "target", "all"),
+            VISUAL_ABLATIONS=(
+                "normal", "threat", "loom", "small_motion", "target",
+                "all", "eye", "all_visual",
+            ),
         ),
         "mario_sidecar": types.SimpleNamespace(nes_actions=list),
     }
@@ -471,6 +474,31 @@ def test_retina_ablation_silences_only_named_injection():
     assert all(not np.array_equal(indices, encoder.visual["threat"]["R"])
                for indices, _ in injected)
 
+    encoder.visual_ablation = "all_visual"
+    eye_drive, injected = encoder._encode(frame)
+    assert not np.any(eye_drive)
+    assert injected == []
+
+
+def test_male_cns_seeded_reset_reproduces_neural_noise():
+    male_cns = _load_male_cns()
+
+    class FakeBrain:
+        def reset(self, seed=None):
+            self.rng = np.random.default_rng(seed)
+
+    encoder = male_cns.MaleCNS.__new__(male_cns.MaleCNS)
+    encoder.brain = FakeBrain()
+    encoder.trace = types.SimpleNamespace(reset=lambda: None)
+    encoder.dopamine = None
+    encoder.observe = lambda _frame: np.asarray([encoder.brain.rng.random()])
+    frame = np.zeros((2, 2, 3), dtype=np.uint8)
+
+    first = encoder.reset(frame, seed=42)
+    second = encoder.reset(frame, seed=42)
+
+    assert np.array_equal(first, second)
+
 
 def test_ppo_continuation_overrides_are_checkpointed(tmp_path):
     flybrain = _load_flybrain()
@@ -740,7 +768,8 @@ def test_paired_replay_uses_same_frames_and_actions_for_channel_masks(monkeypatc
     class FakeConnectome:
         visual_ablation = "normal"
 
-        def reset(self, _frame):
+        def reset(self, _frame, *, seed=None):
+            assert seed == 19
             return np.zeros(2, dtype=np.float32)
 
         def observe(self, frame):
@@ -778,7 +807,7 @@ def test_paired_replay_uses_same_frames_and_actions_for_channel_masks(monkeypatc
     ]
 
     baseline_error = evaluator._replay_counterfactuals(
-        agent, connectome, initial, intervals, rows
+        agent, connectome, initial, intervals, rows, episode_seed=19
     )
 
     assert baseline_error < 1.0e-8

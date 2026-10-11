@@ -106,6 +106,8 @@ def _replay_counterfactuals(
     initial_frame: np.ndarray,
     intervals: list[tuple[int, list[np.ndarray]]],
     decision_rows: list[dict],
+    *,
+    episode_seed: int,
 ) -> float:
     """Replay identical frames and actions with each injected channel silenced."""
 
@@ -121,7 +123,7 @@ def _replay_counterfactuals(
                 if agent.config.temporal_encoder == "controller_gru"
                 else ActivityStack(agent.config.stack_depth)
             )
-            state = stack.reset(connectome.reset(initial_frame))
+            state = stack.reset(connectome.reset(initial_frame, seed=episode_seed))
             for row, (action, frames) in zip(decision_rows, intervals, strict=True):
                 scores = np.asarray(
                     agent.policy_diagnostics(state)["action_probabilities"],
@@ -230,7 +232,7 @@ class ForensicRecorder:
             lines = [
                 f"cf {name}: Pj={results[name]['total_jump_probability']:.2f} "
                 f"best={''.join(part[0].upper() for part in results[name]['greedy_action'].split('_'))}"
-                for name in ("normal", "threat", "loom", "small_motion", "target", "all")
+                for name in VISUAL_ABLATIONS
                 if name in results
             ]
             if not valid:
@@ -342,7 +344,8 @@ def run(args: argparse.Namespace) -> dict:
                 and agent.config.temporal_encoder == "controller_gru"
                 else ActivityStack(agent.config.stack_depth)
             )
-            state = stack.reset(connectome.reset(observation))
+            episode_seed = args.seed + episode_index
+            state = stack.reset(connectome.reset(observation, seed=episode_seed))
             initial_frame = observation.copy() if counterfactual_channels and episode_index < record_episodes else None
             replay_intervals: list[tuple[int, list[np.ndarray]]] = []
             current_x = int(reset_info.get("x_pos", 0))
@@ -655,6 +658,7 @@ def run(args: argparse.Namespace) -> dict:
                 fatal_terminal_action_counts[terminal_action] += 1
             row = {
                 "episode": episode_index,
+                "male_cns_seed": episode_seed,
                 "decisions": decision,
                 "raw_reward": raw_total,
                 "legacy_training_reward": legacy_total,
@@ -678,7 +682,7 @@ def run(args: argparse.Namespace) -> dict:
                 if initial_frame is not None:
                     baseline_error = _replay_counterfactuals(
                         agent, connectome, initial_frame, replay_intervals,
-                        recorder.decision_rows,
+                        recorder.decision_rows, episode_seed=episode_seed,
                     )
                     row["counterfactual_baseline_max_probability_error"] = baseline_error
                     row["counterfactual_replay_valid"] = baseline_error < 1.0e-4
@@ -727,6 +731,7 @@ def run(args: argparse.Namespace) -> dict:
         "mode": "sampled" if args.sample_actions else "mean",
         "epsilon": args.epsilon,
         "seed": args.seed,
+        "male_cns_episode_seed_rule": "evaluation_seed + episode_index",
         "episodes": episodes,
         "forensic_artifacts": forensic_artifacts,
         "summary": {

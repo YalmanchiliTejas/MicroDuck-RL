@@ -21,7 +21,9 @@ VISUAL_CHANNELS = {
     "target": ["LC10a"],
 }
 VISUAL_ENCODERS = ("column_v1", "retina_lite_v2")
-VISUAL_ABLATIONS = ("normal", "threat", "loom", "small_motion", "target", "all")
+VISUAL_ABLATIONS = (
+    "normal", "threat", "loom", "small_motion", "target", "all", "eye", "all_visual"
+)
 
 
 def _top_mean(values: np.ndarray, fraction: float = 0.1) -> float:
@@ -246,6 +248,8 @@ class MaleCNS:
         gray = self._gray(frame)
         previous = gray if self.previous_gray is None else self.previous_gray
         eye_drive = self._eye_drive(gray, previous)
+        if self.visual_ablation in ("eye", "all_visual"):
+            eye_drive.fill(0.0)
 
         inject: list[tuple[np.ndarray, float]] = []
         if self.visual_encoder == "retina_lite_v2":
@@ -278,7 +282,7 @@ class MaleCNS:
         for side in ("L", "R"):
             for name in VISUAL_CHANNELS:
                 amount = encoded[(name, side)]
-                if self.visual_ablation in (name, "all"):
+                if self.visual_ablation in (name, "all", "all_visual"):
                     amount = 0.0
                 self.last_visual_drive[f"{name}_{side.lower()}"] = amount
                 if amount > 0.0:
@@ -345,8 +349,11 @@ class MaleCNS:
         if self.dopamine is not None:
             self.dopamine.save()
 
-    def reset(self, frame: np.ndarray) -> np.ndarray:
-        self.brain.reset()
+    def reset(self, frame: np.ndarray, *, seed: int | None = None) -> np.ndarray:
+        if seed is None:
+            self.brain.reset()
+        else:
+            self.brain.reset(seed=seed)
         self.trace.reset()
         self.previous_gray = None
         if self.dopamine is not None:

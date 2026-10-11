@@ -104,7 +104,7 @@ echo "Dopamine update: disabled"
 for mode in ${MODES}; do
     case "${mode}" in mean|sampled) ;; *) echo "ERROR: mode must be mean or sampled" >&2; exit 1 ;; esac
     for ablation in ${ABLATIONS}; do
-        case "${ablation}" in normal|threat|loom|small_motion|target|all) ;; *) echo "ERROR: invalid visual ablation: ${ablation}" >&2; exit 1 ;; esac
+        case "${ablation}" in normal|threat|loom|small_motion|target|all|eye|all_visual) ;; *) echo "ERROR: invalid visual ablation: ${ablation}" >&2; exit 1 ;; esac
         if [[ "${ablation}" == "normal" ]]; then
             report="${EVAL_DIR}/frozen-${mode}-${SLURM_JOB_ID}.json"
         else
