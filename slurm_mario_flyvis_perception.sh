@@ -78,6 +78,22 @@ MANIFEST="${MARIO_VISION_MANIFEST:-${REPO_DIR}/docs/mario-vision-manifest-schola
 GIF_ROOT="${MARIO_VISION_GIF_ROOT:-${ROOT}/run/evaluations/forensics}"
 MALE_CNS_DATA="${MARIO_VISION_MALE_CNS_DATA:-${FLY_DATA:-${ROOT}/male-cns}}"
 REPORT="${MARIO_VISION_OUTPUT:-${ROOT}/run/evaluations/flyvis-perception-${SLURM_JOB_ID}.json}"
+if [[ "${MARIO_VISION_CONTROLLED:-0}" == "1" ]]; then
+    CONTROL_DIR="${ROOT}/run/evaluations/flyvis-controls-${SLURM_JOB_ID}"
+    "${VENV}/bin/python" \
+        "${REPO_DIR}/integrations/super_mario/mario_controlled_vision.py" \
+        --output "${CONTROL_DIR}" --frames "${MARIO_VISION_CONTROL_FRAMES:-20}"
+    MANIFEST="${CONTROL_DIR}/manifest.json"
+    GIF_ROOT="${CONTROL_DIR}"
+    REPORT="${MARIO_VISION_OUTPUT:-${CONTROL_DIR}/perception.json}"
+    srun "${VENV}/bin/python" \
+        "${REPO_DIR}/integrations/super_mario/flyvis_edge_calibration.py" \
+        --edge-index "${CONTROL_DIR}/edges.json" \
+        --gif-root "${CONTROL_DIR}" \
+        --flyvis-model "${MODEL_DIR}" \
+        --fps "${MARIO_VISION_FPS:-60}" \
+        --output "${CONTROL_DIR}/edge-calibration.json"
+fi
 [[ -f "${MANIFEST}" ]] || { echo "ERROR: manifest missing: ${MANIFEST}" >&2; exit 1; }
 [[ -d "${GIF_ROOT}" ]] || { echo "ERROR: GIF root missing: ${GIF_ROOT}" >&2; exit 1; }
 if [[ ! -f "${MALE_CNS_DATA}/brain.npz" || ! -f "${MALE_CNS_DATA}/weights.npz" ]]; then

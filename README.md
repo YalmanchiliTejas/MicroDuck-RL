@@ -407,12 +407,35 @@ MARIO_EVAL_CHECKPOINT="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-viet-ret
 MARIO_EVAL_MODES=mean \
 MARIO_EVAL_ABLATIONS="normal threat loom small_motion all eye all_visual" \
 MARIO_EVAL_COUNTERFACTUAL=1 \
+MARIO_EVAL_RETINA_VIEW=1 \
 MARIO_EVAL_EPISODES=5 \
 MARIO_EVAL_RECORD_EPISODES=2 \
 MARIO_EVAL_MAX_DECISIONS=500 \
 FLY_DATA="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-viet-reward-4frame-nodopamine-6150-v1/male-cns" \
     ./slurm_mario_flybrain_evaluate.sh
 ```
+
+`MARIO_EVAL_RETINA_VIEW=1` adds `episode-###-retina.gif` (one frame per
+decision) and `episode-###-retina-signals.png` for recorded, normal-ablation
+episodes. The GIF shows the original game frame, camera-aligned motion,
+dark growth, vertical edges, and the actual strongest-pixel regions pooled
+into each of the four injected visual channels. Channel maps are display-scaled
+and omit `target`'s constant 0.04 baseline. The timeline plots left/right
+channel drives and Mario x against jump-press and death events. This is an
+evaluation-only view and does not alter encoder or PPO inputs.
+
+For a new, versioned visual experiment, `MARIO_VISUAL_ENCODER=retina_spatial_v3`
+adds simple Mario-1-1-specific geometry filters to the existing retina-lite
+signals. It estimates Mario's screen position from his red sprite, checks
+brick-like floor presence and pipe-like vertical green spans in near/mid/far
+bins ahead, and routes those signals through MaleCNS photoreceptor drive and
+existing right-side LC4/LPLC2 populations. They are palette-dependent pixel
+filters, **not** object recognition or a CNN. The v3 checkpoint records its
+encoder version; do not resume a v2 checkpoint as v3. With retina recording
+enabled, the v3 GIF adds ground/obstacle panels and the recorder writes
+`episode-###-spatial-signals.png` alongside the existing artifacts. The
+colored channel-contributor panels still show the motion/edge terms; the
+new geometry terms are shown separately in green/orange.
 
 Evaluate the resulting checkpoint in both deterministic and sampled modes
 without changing PPO or dopamine state:
@@ -437,7 +460,8 @@ MARIO_EVAL_RECORD_EPISODES=3 \
     ./slurm_mario_flybrain_evaluate.sh
 ```
 
-Artifacts are written beneath `run/evaluations/forensics/<job>-<mode>/`.
+Artifacts are written beneath
+`run/evaluations/forensics/<job>-<mode>-<ablation>/`.
 
 Evaluation also defaults to the frozen base MaleCNS. To perform the explicit
 modified-connectome ablation, additionally set `MARIO_EVAL_DOPAMINE=1` and

@@ -10,9 +10,256 @@ Replay state:        /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malec
 Mode:                fresh
 flybrain: no brain files in /scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/male-cns; downloading the prebuilt brain (~260 MB, once)
 downloading brain.npz
-  1 / 53 MB  2 / 53 MB  3 / 53 MB  4 / 53 MB  5 / 53 MB  6 / 53 MB  7 / 53 MB  8 / 53 MB  9 / 53 MB  10 / 53 MB  12 / 53 MB  13 / 53 MB  14 / 53 MB  15 / 53 MB  16 / 53 MB  17 / 53 MB  18 / 53 MB  19 / 53 MB  20 / 53 MB  21 / 53 MB  22 / 53 MB  23 / 53 MB  24 / 53 MB  25 / 53 MB  26 / 53 MB  27 / 53 MB  28 / 53 MB  29 / 53 MB  30 / 53 MB  31 / 53 MB  33 / 53 MB  34 / 53 MB  35 / 53 MB  36 / 53 MB  37 / 53 MB  38 / 53 MB  39 / 53 MB  40 / 53 MB  41 / 53 MB  42 / 53 MB  43 / 53 MB  44 / 53 MB  45 / 53 MB  46 / 53 MB  47 / 53 MB  48 / 53 MB  49 / 53 MB  50 / 53 MB  51 / 53 MB  52 / 53 MB  53 / 53 MB
+
+  1 / 53 MB
+  2 / 53 MB
+  3 / 53 MB
+  4 / 53 MB
+  5 / 53 MB
+  6 / 53 MB
+  7 / 53 MB
+  8 / 53 MB
+  9 / 53 MB
+  10 / 53 MB
+  12 / 53 MB
+  13 / 53 MB
+  14 / 53 MB
+  15 / 53 MB
+  16 / 53 MB
+  17 / 53 MB
+  18 / 53 MB
+  19 / 53 MB
+  20 / 53 MB
+  21 / 53 MB
+  22 / 53 MB
+  23 / 53 MB
+  24 / 53 MB
+  25 / 53 MB
+  26 / 53 MB
+  27 / 53 MB
+  28 / 53 MB
+  29 / 53 MB
+  30 / 53 MB
+  31 / 53 MB
+  33 / 53 MB
+  34 / 53 MB
+  35 / 53 MB
+  36 / 53 MB
+  37 / 53 MB
+  38 / 53 MB
+  39 / 53 MB
+  40 / 53 MB
+  41 / 53 MB
+  42 / 53 MB
+  43 / 53 MB
+  44 / 53 MB
+  45 / 53 MB
+  46 / 53 MB
+  47 / 53 MB
+  48 / 53 MB
+  49 / 53 MB
+  50 / 53 MB
+  51 / 53 MB
+  52 / 53 MB
+  53 / 53 MB
 downloading weights.npz
-  1 / 205 MB  2 / 205 MB  3 / 205 MB  4 / 205 MB  5 / 205 MB  6 / 205 MB  7 / 205 MB  8 / 205 MB  9 / 205 MB  10 / 205 MB  12 / 205 MB  13 / 205 MB  14 / 205 MB  15 / 205 MB  16 / 205 MB  17 / 205 MB  18 / 205 MB  19 / 205 MB  20 / 205 MB  21 / 205 MB  22 / 205 MB  23 / 205 MB  24 / 205 MB  25 / 205 MB  26 / 205 MB  27 / 205 MB  28 / 205 MB  29 / 205 MB  30 / 205 MB  31 / 205 MB  33 / 205 MB  34 / 205 MB  35 / 205 MB  36 / 205 MB  37 / 205 MB  38 / 205 MB  39 / 205 MB  40 / 205 MB  41 / 205 MB  42 / 205 MB  43 / 205 MB  44 / 205 MB  45 / 205 MB  46 / 205 MB  47 / 205 MB  48 / 205 MB  49 / 205 MB  50 / 205 MB  51 / 205 MB  52 / 205 MB  53 / 205 MB  55 / 205 MB  56 / 205 MB  57 / 205 MB  58 / 205 MB  59 / 205 MB  60 / 205 MB  61 / 205 MB  62 / 205 MB  63 / 205 MB  64 / 205 MB  65 / 205 MB  66 / 205 MB  67 / 205 MB  68 / 205 MB  69 / 205 MB  70 / 205 MB  71 / 205 MB  72 / 205 MB  73 / 205 MB  74 / 205 MB  75 / 205 MB  77 / 205 MB  78 / 205 MB  79 / 205 MB  80 / 205 MB  81 / 205 MB  82 / 205 MB  83 / 205 MB  84 / 205 MB  85 / 205 MB  86 / 205 MB  87 / 205 MB  88 / 205 MB  89 / 205 MB  90 / 205 MB  91 / 205 MB  92 / 205 MB  93 / 205 MB  94 / 205 MB  95 / 205 MB  96 / 205 MB  98 / 205 MB  99 / 205 MB  100 / 205 MB  101 / 205 MB  102 / 205 MB  103 / 205 MB  104 / 205 MB  105 / 205 MB  106 / 205 MB  107 / 205 MB  108 / 205 MB  109 / 205 MB  110 / 205 MB  111 / 205 MB  112 / 205 MB  113 / 205 MB  114 / 205 MB  115 / 205 MB  116 / 205 MB  117 / 205 MB  118 / 205 MB  120 / 205 MB  121 / 205 MB  122 / 205 MB  123 / 205 MB  124 / 205 MB  125 / 205 MB  126 / 205 MB  127 / 205 MB  128 / 205 MB  129 / 205 MB  130 / 205 MB  131 / 205 MB  132 / 205 MB  133 / 205 MB  134 / 205 MB  135 / 205 MB  136 / 205 MB  137 / 205 MB  138 / 205 MB  139 / 205 MB  141 / 205 MB  142 / 205 MB  143 / 205 MB  144 / 205 MB  145 / 205 MB  146 / 205 MB  147 / 205 MB  148 / 205 MB  149 / 205 MB  150 / 205 MB  151 / 205 MB  152 / 205 MB  153 / 205 MB  154 / 205 MB  155 / 205 MB  156 / 205 MB  157 / 205 MB  158 / 205 MB  159 / 205 MB  160 / 205 MB  161 / 205 MB  163 / 205 MB  164 / 205 MB  165 / 205 MB  166 / 205 MB  167 / 205 MB  168 / 205 MB  169 / 205 MB  170 / 205 MB  171 / 205 MB  172 / 205 MB  173 / 205 MB  174 / 205 MB  175 / 205 MB  176 / 205 MB  177 / 205 MB  178 / 205 MB  179 / 205 MB  180 / 205 MB  181 / 205 MB  182 / 205 MB  184 / 205 MB  185 / 205 MB  186 / 205 MB  187 / 205 MB  188 / 205 MB  189 / 205 MB  190 / 205 MB  191 / 205 MB  192 / 205 MB  193 / 205 MB  194 / 205 MB  195 / 205 MB  196 / 205 MB  197 / 205 MB  198 / 205 MB  199 / 205 MB  200 / 205 MB  201 / 205 MB  202 / 205 MB  203 / 205 MB  204 / 205 MB  205 / 205 MB
+
+  1 / 205 MB
+  2 / 205 MB
+  3 / 205 MB
+  4 / 205 MB
+  5 / 205 MB
+  6 / 205 MB
+  7 / 205 MB
+  8 / 205 MB
+  9 / 205 MB
+  10 / 205 MB
+  12 / 205 MB
+  13 / 205 MB
+  14 / 205 MB
+  15 / 205 MB
+  16 / 205 MB
+  17 / 205 MB
+  18 / 205 MB
+  19 / 205 MB
+  20 / 205 MB
+  21 / 205 MB
+  22 / 205 MB
+  23 / 205 MB
+  24 / 205 MB
+  25 / 205 MB
+  26 / 205 MB
+  27 / 205 MB
+  28 / 205 MB
+  29 / 205 MB
+  30 / 205 MB
+  31 / 205 MB
+  33 / 205 MB
+  34 / 205 MB
+  35 / 205 MB
+  36 / 205 MB
+  37 / 205 MB
+  38 / 205 MB
+  39 / 205 MB
+  40 / 205 MB
+  41 / 205 MB
+  42 / 205 MB
+  43 / 205 MB
+  44 / 205 MB
+  45 / 205 MB
+  46 / 205 MB
+  47 / 205 MB
+  48 / 205 MB
+  49 / 205 MB
+  50 / 205 MB
+  51 / 205 MB
+  52 / 205 MB
+  53 / 205 MB
+  55 / 205 MB
+  56 / 205 MB
+  57 / 205 MB
+  58 / 205 MB
+  59 / 205 MB
+  60 / 205 MB
+  61 / 205 MB
+  62 / 205 MB
+  63 / 205 MB
+  64 / 205 MB
+  65 / 205 MB
+  66 / 205 MB
+  67 / 205 MB
+  68 / 205 MB
+  69 / 205 MB
+  70 / 205 MB
+  71 / 205 MB
+  72 / 205 MB
+  73 / 205 MB
+  74 / 205 MB
+  75 / 205 MB
+  77 / 205 MB
+  78 / 205 MB
+  79 / 205 MB
+  80 / 205 MB
+  81 / 205 MB
+  82 / 205 MB
+  83 / 205 MB
+  84 / 205 MB
+  85 / 205 MB
+  86 / 205 MB
+  87 / 205 MB
+  88 / 205 MB
+  89 / 205 MB
+  90 / 205 MB
+  91 / 205 MB
+  92 / 205 MB
+  93 / 205 MB
+  94 / 205 MB
+  95 / 205 MB
+  96 / 205 MB
+  98 / 205 MB
+  99 / 205 MB
+  100 / 205 MB
+  101 / 205 MB
+  102 / 205 MB
+  103 / 205 MB
+  104 / 205 MB
+  105 / 205 MB
+  106 / 205 MB
+  107 / 205 MB
+  108 / 205 MB
+  109 / 205 MB
+  110 / 205 MB
+  111 / 205 MB
+  112 / 205 MB
+  113 / 205 MB
+  114 / 205 MB
+  115 / 205 MB
+  116 / 205 MB
+  117 / 205 MB
+  118 / 205 MB
+  120 / 205 MB
+  121 / 205 MB
+  122 / 205 MB
+  123 / 205 MB
+  124 / 205 MB
+  125 / 205 MB
+  126 / 205 MB
+  127 / 205 MB
+  128 / 205 MB
+  129 / 205 MB
+  130 / 205 MB
+  131 / 205 MB
+  132 / 205 MB
+  133 / 205 MB
+  134 / 205 MB
+  135 / 205 MB
+  136 / 205 MB
+  137 / 205 MB
+  138 / 205 MB
+  139 / 205 MB
+  141 / 205 MB
+  142 / 205 MB
+  143 / 205 MB
+  144 / 205 MB
+  145 / 205 MB
+  146 / 205 MB
+  147 / 205 MB
+  148 / 205 MB
+  149 / 205 MB
+  150 / 205 MB
+  151 / 205 MB
+  152 / 205 MB
+  153 / 205 MB
+  154 / 205 MB
+  155 / 205 MB
+  156 / 205 MB
+  157 / 205 MB
+  158 / 205 MB
+  159 / 205 MB
+  160 / 205 MB
+  161 / 205 MB
+  163 / 205 MB
+  164 / 205 MB
+  165 / 205 MB
+  166 / 205 MB
+  167 / 205 MB
+  168 / 205 MB
+  169 / 205 MB
+  170 / 205 MB
+  171 / 205 MB
+  172 / 205 MB
+  173 / 205 MB
+  174 / 205 MB
+  175 / 205 MB
+  176 / 205 MB
+  177 / 205 MB
+  178 / 205 MB
+  179 / 205 MB
+  180 / 205 MB
+  181 / 205 MB
+  182 / 205 MB
+  184 / 205 MB
+  185 / 205 MB
+  186 / 205 MB
+  187 / 205 MB
+  188 / 205 MB
+  189 / 205 MB
+  190 / 205 MB
+  191 / 205 MB
+  192 / 205 MB
+  193 / 205 MB
+  194 / 205 MB
+  195 / 205 MB
+  196 / 205 MB
+  197 / 205 MB
+  198 / 205 MB
+  199 / 205 MB
+  200 / 205 MB
+  201 / 205 MB
+  202 / 205 MB
+  203 / 205 MB
+  204 / 205 MB
+  205 / 205 MB
 episode=1 step=132 reward=1183.0 epsilon=0.987 loss=nan dopamine_rpe=+1.000 kc_mbon=0.9874
 episode=2 step=186 reward=694.0 epsilon=0.982 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9803
 episode=3 step=204 reward=149.0 epsilon=0.981 loss=nan dopamine_rpe=-1.000 kc_mbon=0.9785
@@ -1392,3 +1639,6 @@ episode=1354 step=19969 reward=241.0 epsilon=0.050 loss=2.1603 dopamine_rpe=-1.0
 saved=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-online.pt step=20000 env_steps_per_s=6.5
 saved_replay=/scratch/scholar/tyalaman/microduck-rl/mario-flybrain-malecns-dopamine-6150-v2/run/flybrain-replay.npz step=20000 transitions=20000
 Pretraining completed. Reuse MARIO_RUN_TAG=malecns-dopamine-6150-v2 for physical fine-tuning.
+
+
+

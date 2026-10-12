@@ -84,6 +84,36 @@ def test_male_cns_paired_silent_trial(monkeypatch, tmp_path):
     assert calls == [1, 1, 1, 0, 0, 0]
 
 
+def test_male_cns_visual_readout_uses_same_trial(monkeypatch, tmp_path):
+    probe = _probe()
+    (tmp_path / "brain.npz").touch()
+    (tmp_path / "weights.npz").touch()
+
+    class Brain:
+        def __init__(self, **kwargs):
+            self.azimuth = np.zeros(2, dtype=np.float32)
+
+        def cells(self, names, side=None):
+            return np.array([0 if side == "L" else 1])
+
+        def step(self, *, eye_drive, inject):
+            return np.array([sum(value for indices, value in inject)])
+
+    class Trace:
+        def __init__(self, brain, *, idx, tau):
+            pass
+
+        def observe(self, spikes):
+            return spikes.astype(np.float32)
+
+    monkeypatch.setitem(sys.modules, "flybrain", types.SimpleNamespace(FlyBrain=Brain, Trace=Trace))
+    amounts = [{("threat", "R"): 0.2}] * 3
+    descending, visual = probe.male_cns_trace(
+        amounts, data=tmp_path, seed=123, dt=0.02, include_visual=True)
+    assert descending.shape == visual.shape == (3, 1)
+    assert np.allclose(descending, visual)
+
+
 def test_probe_summary_reports_effect_without_claiming_object_identity():
     probe = _probe()
     grid = np.zeros((2, 3, 4), dtype=np.float32)

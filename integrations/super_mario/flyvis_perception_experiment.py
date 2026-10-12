@@ -29,6 +29,7 @@ VISUAL_TYPES = (
     "T5a", "T5b", "T5c", "T5d",
 )
 OBJECT_TYPES = ("floor", "goomba", "pipe", "gap")
+BRIDGE_NAMES = ("small_motion", "loom", "threat", "target")
 
 
 def read_manifest(path: Path, *, gif_root: Path) -> list[dict]:
@@ -135,11 +136,18 @@ def retina_lite_features(frames: np.ndarray) -> np.ndarray:
     for frame in frames:
         gray = MaleCNS._gray(frame)
         amounts = encoder._retina_lite_amounts(gray, gray if previous is None else previous)
-        output.append([amounts[(name, side)] for name in
-                       ("small_motion", "loom", "threat", "target")
+        output.append([amounts[(name, side)] for name in BRIDGE_NAMES
                        for side in ("L", "R")])
         previous = gray
     return summarize_temporal(np.asarray(output, dtype=np.float32))
+
+
+def bridge_features(amounts: list[dict[tuple[str, str], float]]) -> np.ndarray:
+    """The actual eight injected values, in fixed channel/side order."""
+
+    values = np.asarray([[frame[(name, side)] for name in BRIDGE_NAMES
+                          for side in ("L", "R")] for frame in amounts], dtype=np.float32)
+    return summarize_temporal(values)
 
 
 def grouped_classification(samples: list[dict], features: list[np.ndarray]) -> dict:
@@ -250,7 +258,9 @@ def run_experiment(samples: list[dict], *, model_dir: Path, male_cns_data: Path,
     if fps < 50 or max_frames < 2:
         raise ValueError("FlyVis integration needs fps >= 50 and at least two frames")
     runner = FlyVisRunner(model_dir)
-    features = {name: [] for name in ("flyvis_spatial", "raw_pixels", "retina_lite_channels", "male_cns")}
+    features = {name: [] for name in ("flyvis_spatial", "flyvis_motion_grid",
+                                     "bridge_8ch", "male_cns_visual", "male_cns",
+                                     "raw_pixels", "retina_lite_channels")}
     scenes = {}
     for sample in samples:
         frames = load_gif(sample["gif_path"], start=sample["start"], stop=sample["stop"], limit=max_frames)
@@ -258,9 +268,15 @@ def run_experiment(samples: list[dict], *, model_dir: Path, male_cns_data: Path,
         grids = spatial_cell_grids(activity, runner.cell_types, runner.u, runner.v)
         motion = motion_grid(activity, runner.cell_types, runner.u, runner.v)
         amounts = bridge_amounts(motion)
-        driven = male_cns_trace(amounts, data=male_cns_data, seed=seed, dt=1.0 / fps)
-        silent = male_cns_trace(amounts, data=male_cns_data, seed=seed, dt=1.0 / fps, silent=True)
+        driven, visual_driven = male_cns_trace(
+            amounts, data=male_cns_data, seed=seed, dt=1.0 / fps, include_visual=True)
+        silent, visual_silent = male_cns_trace(
+            amounts, data=male_cns_data, seed=seed, dt=1.0 / fps,
+            silent=True, include_visual=True)
         features["flyvis_spatial"].append(summarize_temporal(grids))
+        features["flyvis_motion_grid"].append(summarize_temporal(motion))
+        features["bridge_8ch"].append(bridge_features(amounts))
+        features["male_cns_visual"].append(summarize_temporal(visual_driven - visual_silent))
         features["raw_pixels"].append(pixel_features(frames))
         features["retina_lite_channels"].append(retina_lite_features(frames))
         features["male_cns"].append(summarize_temporal(driven - silent))

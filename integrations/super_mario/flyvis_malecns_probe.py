@@ -175,7 +175,8 @@ def male_cns_trace(
     seed: int,
     dt: float,
     silent: bool = False,
-) -> np.ndarray:
+    include_visual: bool = False,
+) -> np.ndarray | tuple[np.ndarray, np.ndarray]:
     """Run identical-noise MaleCNS trials with or without FlyVis drive."""
 
     from flybrain import FlyBrain, Trace
@@ -192,14 +193,23 @@ def male_cns_trace(
     }
     if any(len(indices) == 0 for indices in targets.values()):
         raise RuntimeError("MaleCNS lacks an expected visual-projection population")
+    visual_trace = None
+    if include_visual:
+        visual_indices = np.unique(np.concatenate(list(targets.values())))
+        visual_trace = Trace(brain, idx=visual_indices, tau=0.12)
     eye_drive = np.zeros_like(brain.azimuth, dtype=np.float32)
     output = []
+    visual_output = []
     for frame in amounts:
         inject = [] if silent else [
             (targets[key], value) for key, value in frame.items() if value > 0
         ]
         spikes = brain.step(eye_drive=eye_drive, inject=inject)
         output.append(trace.observe(spikes).astype(np.float32, copy=True))
+        if visual_trace is not None:
+            visual_output.append(visual_trace.observe(spikes).astype(np.float32, copy=True))
+    if visual_trace is not None:
+        return np.stack(output), np.stack(visual_output)
     return np.stack(output)
 
 

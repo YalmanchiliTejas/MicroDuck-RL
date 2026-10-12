@@ -52,6 +52,17 @@ def test_spatial_grids_keep_cell_type_and_position():
     assert summary.shape == (4 * len(cell_types) * 6 * 8,)
 
 
+def test_bridge_features_keep_eight_distinct_channels():
+    experiment = _module()
+    amounts = [{(name, side): 0.0 for name in experiment.BRIDGE_NAMES
+                for side in ("L", "R")} for _ in range(3)]
+    amounts[-1][("threat", "R")] = 0.5
+    vector = experiment.bridge_features(amounts)
+    assert vector.shape == (32,)
+    assert vector[5] > 0  # mean of threat-R
+    assert vector[16 + 5] == 0.5  # final minus initial
+
+
 def test_grouped_scores_refuse_single_examples():
     experiment = _module()
     pytest.importorskip("sklearn")
