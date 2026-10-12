@@ -1,11 +1,13 @@
 # Frozen FlyVis → MaleCNS visual probe
 
-This is an offline research probe, **not** a new PPO training encoder. It takes
-recorded Mario GIF frames, runs the published pretrained FlyVis model, bins
-T4/T5 motion-cell activity on its visual lattice, and deterministically drives
-four existing MaleCNS visual-projection populations. It compares descending
-neuron traces to a same-seed silent-input control. Scene labels are supplied
-by the investigator; FlyVis does not detect "Goomba", "pipe", or "gap" by name.
+This started as an offline research probe and now also supplies the versioned
+`flyvis_spatial_v1` PPO encoder. The original probe takes recorded Mario GIF
+frames, runs the published pretrained FlyVis model, pools T4/T5 motion-cell
+activity, and deterministically drives four existing MaleCNS visual-projection
+populations. The new spatial path instead retains signed R1/L1/L2 and T4/T5
+cell-type grids and injects them into separate coarse spatial groups of the
+homologous MaleCNS populations. Scene labels are supplied only to the frozen
+measurement; FlyVis does not detect "Goomba", "pipe", or "gap" by name.
 
 The mapping is a **hypothesis**, not a recovered anatomical connection:
 
@@ -45,7 +47,9 @@ The job writes `flyvis-controls-<jobid>/edge-calibration.json`, its generated
 `flyvis_spatial` (signed cell-type 6×8 maps), `flyvis_motion_grid` (pooled
 3×4 motion), `bridge_8ch` (actual injected values), `male_cns_visual`
 (stimulated visual population minus paired silent control), and `male_cns`
-(descending minus silent). Existing raw-pixel and retina-lite baselines remain.
+(old pooled-bridge descending minus silent), and `male_cns_spatial` (new
+spatial-bridge descending minus silent). Existing raw-pixel and retina-lite
+baselines remain.
 All decoding holds out an entire background style; no PPO weights are changed.
 
 Then run the **same frozen probe** on the manually reviewed NES manifest using
@@ -275,3 +279,39 @@ The `manifest` command refuses to overwrite an existing file. If you revise
 labels, choose a new manifest filename so the original experiment remains
 reproducible. The current game level still limits generalization claims: a
 held-out *episode* is not a held-out level or background.
+
+## Online spatial bridge PPO experiment
+
+`flyvis_spatial_v1` keeps an independent 6×8 map for R1, L1, L2, T4a-d, and
+T5a-d. A fixed bridge sends each cell type and spatial bin to the matching
+MaleCNS population and anatomical bin. This is an engineered interface, not a
+claim that the FlyVis and MaleCNS source datasets are neuron-registered. PPO
+still sees only MaleCNS descending-neuron traces. It does not receive FlyVis
+maps, labels, emulator coordinates, color-specific detections, or a GRU.
+
+Mario requires Python 3.13 while FlyVis 1.2.0 requires Python 3.12. The Slurm
+wrappers therefore keep the Mario trainer in its normal sidecar environment
+and run one persistent FlyVis worker through shared memory. The worker retains
+FlyVis state between frames and resets it between episodes.
+
+Start a new categorical `conv4` run; do not resume a checkpoint trained with a
+different visual observation contract:
+
+```bash
+export MARIO_RUN_TAG=malecns-ppo-flyvis-spatial-v1-nodopamine-6150-v1
+export FLY_DATA="$SCRATCH/microduck-rl/mario-flybrain-malecns-ppo-viet-reward-4frame-nodopamine-6150-v1/male-cns"
+
+MARIO_VISUAL_ENCODER=flyvis_spatial_v1 \
+MARIO_ENABLE_DOPAMINE=0 \
+MARIO_PPO_FACTORIZED=0 \
+MARIO_PPO_TEMPORAL_CONTROLLER=0 \
+MARIO_PRETRAIN_TARGET_STEPS=300000 \
+MARIO_PRETRAIN_ACTION_REPEAT=4 \
+MARIO_PRETRAIN_SAVE_EVERY=5000 \
+MARIO_PPO_ENTROPY_COEFFICIENT=0.01 \
+  ./slurm_mario_flybrain_pretrain.sh
+```
+
+For frozen evaluation or ranking of this checkpoint family, set
+`MARIO_ENABLE_FLYVIS=1`. Spatial ablations are named `flyvis_static` (remove
+R1/L1/L2) and `flyvis_motion` (remove T4/T5).

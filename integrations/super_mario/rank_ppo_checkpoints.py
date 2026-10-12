@@ -71,6 +71,9 @@ def main() -> None:
     parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--male-cns-data", type=Path)
+    parser.add_argument("--flyvis-model", type=Path)
+    parser.add_argument("--flyvis-python", type=Path)
+    parser.add_argument("--flyvis-worker", type=Path)
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     parser.add_argument("--reuse-reports", action="store_true")
     args = parser.parse_args()
@@ -109,6 +112,9 @@ def main() -> None:
                     dopamine_state=dopamine_state,
                     dopamine_learning_rate=1.0e-5,
                     male_cns_data=args.male_cns_data,
+                    flyvis_model=args.flyvis_model,
+                    flyvis_python=args.flyvis_python,
+                    flyvis_worker=args.flyvis_worker,
                     male_cns_device="cpu",
                     env="SuperMarioBros-1-1-v0",
                     episodes=args.episodes,

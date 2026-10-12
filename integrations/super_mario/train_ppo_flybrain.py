@@ -128,6 +128,9 @@ def run(args: argparse.Namespace) -> None:
         dopamine_state=args.dopamine_state,
         dopamine_learning_rate=args.dopamine_learning_rate,
         visual_encoder=args.visual_encoder,
+        flyvis_model=args.flyvis_model,
+        flyvis_python=args.flyvis_python,
+        flyvis_worker=args.flyvis_worker,
     )
     if args.resume is not None:
         requested_policy_mode = "factorized" if args.factorized_policy else None
@@ -336,6 +339,8 @@ def run(args: argparse.Namespace) -> None:
             writer.add_scalar("training/action", action, agent.steps)
             for channel, amount in connectome.visual_stats().items():
                 writer.add_scalar(f"retina/{channel}", amount, agent.steps)
+            for measurement, value in connectome.retina_stats().items():
+                writer.add_scalar(f"retina/{measurement}", value, agent.steps)
             if not args.freeze_dopamine:
                 connectome.reinforce(
                     agent.prediction_error(
@@ -447,6 +452,7 @@ def run(args: argparse.Namespace) -> None:
         writer.flush()
         writer.close()
         env.close()
+        connectome.close()
 
 
 def main() -> None:
@@ -468,6 +474,13 @@ def main() -> None:
     parser.add_argument("--device", choices=("auto", "cpu", "cuda", "mps"), default="auto")
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--male-cns-data", type=Path)
+    parser.add_argument(
+        "--flyvis-model",
+        type=Path,
+        help="pretrained FlyVis model directory required by flyvis_spatial_v1",
+    )
+    parser.add_argument("--flyvis-python", type=Path)
+    parser.add_argument("--flyvis-worker", type=Path)
     parser.add_argument(
         "--visual-encoder",
         choices=VISUAL_ENCODERS,
@@ -520,6 +533,15 @@ def main() -> None:
         parser.error("--temporal-decisions must be at least two")
     if args.dopamine_learning_rate <= 0:
         parser.error("--dopamine-learning-rate must be positive")
+    if args.visual_encoder == "flyvis_spatial_v1" and any(
+        value is None for value in (
+            args.flyvis_model, args.flyvis_python, args.flyvis_worker
+        )
+    ):
+        parser.error(
+            "--flyvis-model, --flyvis-python, and --flyvis-worker are required "
+            "by flyvis_spatial_v1"
+        )
     continuation_values = (
         args.continuation_learning_rate,
         args.value_coefficient,

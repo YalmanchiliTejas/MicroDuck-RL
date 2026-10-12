@@ -25,8 +25,13 @@ ROOT="${SCRATCH}/microduck-rl/mario-flybrain-${MARIO_RUN_TAG}"
 RUN_DIR="${ROOT}/run"
 OUTPUT_DIR="${ROOT}/slurm"
 RANK_DOPAMINE="${MARIO_RANK_DOPAMINE:-0}"
+ENABLE_FLYVIS="${MARIO_ENABLE_FLYVIS:-0}"
 if [[ "${RANK_DOPAMINE}" != "0" && "${RANK_DOPAMINE}" != "1" ]]; then
     echo "ERROR: MARIO_RANK_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${ENABLE_FLYVIS}" != "0" && "${ENABLE_FLYVIS}" != "1" ]]; then
+    echo "ERROR: MARIO_ENABLE_FLYVIS must be 0 or 1." >&2
     exit 1
 fi
 if [[ "${RANK_DOPAMINE}" == "1" ]]; then
@@ -63,7 +68,30 @@ SIDECAR_VENV="${ROOT}/sidecar-venv"
 if [[ ! -x "${SIDECAR_VENV}/bin/python" ]]; then
     uv venv --python 3.13 "${SIDECAR_VENV}"
 fi
-uv pip install --python "${SIDECAR_VENV}/bin/python" "${REPO_DIR}/integrations/super_mario"
+uv pip install --python "${SIDECAR_VENV}/bin/python" \
+    "${REPO_DIR}/integrations/super_mario"
+
+FLYVIS_MODEL_ARGS=()
+if [[ "${ENABLE_FLYVIS}" == "1" ]]; then
+    FLYVIS_VENV="${ROOT}/flyvis-venv"
+    if [[ ! -x "${FLYVIS_VENV}/bin/python" ]]; then
+        uv venv --python 3.12 "${FLYVIS_VENV}"
+    fi
+    uv pip install \
+        --torch-backend "${MARIO_FLYVIS_TORCH_BACKEND:-auto}" \
+        --python "${FLYVIS_VENV}/bin/python" flyvis==1.2.0
+    export FLYVIS_ROOT_DIR="${MARIO_FLYVIS_ROOT:-${SCRATCH}/microduck-rl/flyvis-data}"
+    FLYVIS_MODEL="${MARIO_FLYVIS_MODEL:-${FLYVIS_ROOT_DIR}/results/flow/0000/000}"
+    [[ -d "${FLYVIS_MODEL}" ]] || {
+        echo "ERROR: FlyVis model missing: ${FLYVIS_MODEL}" >&2
+        exit 1
+    }
+    FLYVIS_MODEL_ARGS+=(
+        --flyvis-model "${FLYVIS_MODEL}"
+        --flyvis-python "${FLYVIS_VENV}/bin/python"
+        --flyvis-worker "${REPO_DIR}/integrations/super_mario/flyvis_spatial_worker.py"
+    )
+fi
 
 echo "Checkpoint directory: ${RUN_DIR}/checkpoints"
 echo "Episodes per mode:    ${MARIO_RANK_EPISODES:-10}"
@@ -95,6 +123,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --action-repeat "${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-4}}" \
     --seed "${MARIO_EVAL_SEED:-42}" \
     --male-cns-data "${FLY_DATA}" \
+    "${FLYVIS_MODEL_ARGS[@]}" \
     --device "${MARIO_PPO_DEVICE:-auto}" \
     "$@"
 

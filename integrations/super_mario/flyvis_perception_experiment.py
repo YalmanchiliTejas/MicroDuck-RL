@@ -22,6 +22,7 @@ from flyvis_malecns_probe import (
     motion_grid,
     summarize,
 )
+from flyvis_spatial_bridge import build_target_groups, spatial_injections
 
 
 VISUAL_TYPES = (
@@ -150,6 +151,36 @@ def bridge_features(amounts: list[dict[tuple[str, str], float]]) -> np.ndarray:
     return summarize_temporal(values)
 
 
+def spatial_male_cns_trace(
+    grids: np.ndarray,
+    *,
+    data: Path,
+    seed: int,
+    dt: float,
+    silent: bool = False,
+) -> np.ndarray:
+    """Run MaleCNS with the spatial cell-type bridge used by online PPO."""
+
+    from flybrain import FlyBrain, Trace
+
+    values = np.asarray(grids, dtype=np.float32)
+    if values.ndim != 4 or values.shape[1] != len(VISUAL_TYPES):
+        raise ValueError("spatial grids must have shape (frames, 11, rows, columns)")
+    if not (data / "brain.npz").exists() or not (data / "weights.npz").exists():
+        raise FileNotFoundError(f"MaleCNS brain.npz/weights.npz missing in {data}")
+    brain = FlyBrain(data=data, device="cpu", seed=seed, dt=dt)
+    descending = brain.cells(["descending_neuron"])
+    trace = Trace(brain, idx=descending, tau=0.12)
+    targets = build_target_groups(brain, rows=values.shape[2], columns=values.shape[3])
+    eye_drive = np.zeros_like(brain.azimuth, dtype=np.float32)
+    output = []
+    for frame in values:
+        inject = [] if silent else spatial_injections(frame, targets)[0]
+        spikes = brain.step(eye_drive=eye_drive, inject=inject)
+        output.append(trace.observe(spikes).astype(np.float32, copy=True))
+    return np.stack(output)
+
+
 def grouped_classification(samples: list[dict], features: list[np.ndarray]) -> dict:
     """Leave one recording out; refuse folds missing a class in training."""
 
@@ -260,7 +291,8 @@ def run_experiment(samples: list[dict], *, model_dir: Path, male_cns_data: Path,
     runner = FlyVisRunner(model_dir)
     features = {name: [] for name in ("flyvis_spatial", "flyvis_motion_grid",
                                      "bridge_8ch", "male_cns_visual", "male_cns",
-                                     "raw_pixels", "retina_lite_channels")}
+                                     "male_cns_spatial", "raw_pixels",
+                                     "retina_lite_channels")}
     scenes = {}
     for sample in samples:
         frames = load_gif(sample["gif_path"], start=sample["start"], stop=sample["stop"], limit=max_frames)
@@ -273,6 +305,10 @@ def run_experiment(samples: list[dict], *, model_dir: Path, male_cns_data: Path,
         silent, visual_silent = male_cns_trace(
             amounts, data=male_cns_data, seed=seed, dt=1.0 / fps,
             silent=True, include_visual=True)
+        spatial_driven = spatial_male_cns_trace(
+            grids, data=male_cns_data, seed=seed, dt=1.0 / fps)
+        spatial_silent = spatial_male_cns_trace(
+            grids, data=male_cns_data, seed=seed, dt=1.0 / fps, silent=True)
         features["flyvis_spatial"].append(summarize_temporal(grids))
         features["flyvis_motion_grid"].append(summarize_temporal(motion))
         features["bridge_8ch"].append(bridge_features(amounts))
@@ -280,9 +316,15 @@ def run_experiment(samples: list[dict], *, model_dir: Path, male_cns_data: Path,
         features["raw_pixels"].append(pixel_features(frames))
         features["retina_lite_channels"].append(retina_lite_features(frames))
         features["male_cns"].append(summarize_temporal(driven - silent))
+        spatial_difference = spatial_driven - spatial_silent
+        features["male_cns_spatial"].append(summarize_temporal(spatial_difference))
         scenes[sample["id"]] = {"object": sample["object"], "recording_id": sample["recording_id"],
                                 "gif": str(sample["gif_path"]), "source_frame_window":
                                 [sample["start"], sample["stop"]],
+                                "male_cns_spatial_descending_mean_absolute_change_vs_silent":
+                                float(np.mean(np.abs(spatial_difference))),
+                                "male_cns_spatial_descending_rms_change_vs_silent":
+                                float(np.sqrt(np.mean(spatial_difference ** 2))),
                                 **summarize(motion, amounts, driven, silent)}
     evaluations = {}
     for name, vectors in features.items():

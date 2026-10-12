@@ -31,10 +31,15 @@ EVAL_DIR="${RUN_DIR}/evaluations"
 CHECKPOINT="${MARIO_EVAL_CHECKPOINT:-${RUN_DIR}/flybrain-ppo.pt}"
 DOPAMINE_STATE="${MARIO_EVAL_DOPAMINE_STATE:-${RUN_DIR}/dopamine-plasticity.npz}"
 EVAL_DOPAMINE="${MARIO_EVAL_DOPAMINE:-0}"
+ENABLE_FLYVIS="${MARIO_ENABLE_FLYVIS:-0}"
 mkdir -p "${OUTPUT_DIR}" "${EVAL_DIR}"
 
 if [[ "${EVAL_DOPAMINE}" != "0" && "${EVAL_DOPAMINE}" != "1" ]]; then
     echo "ERROR: MARIO_EVAL_DOPAMINE must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${ENABLE_FLYVIS}" != "0" && "${ENABLE_FLYVIS}" != "1" ]]; then
+    echo "ERROR: MARIO_ENABLE_FLYVIS must be 0 or 1." >&2
     exit 1
 fi
 
@@ -64,7 +69,30 @@ SIDECAR_VENV="${ROOT}/sidecar-venv"
 if [[ ! -x "${SIDECAR_VENV}/bin/python" ]]; then
     uv venv --python 3.13 "${SIDECAR_VENV}"
 fi
-uv pip install --python "${SIDECAR_VENV}/bin/python" "${REPO_DIR}/integrations/super_mario"
+uv pip install --python "${SIDECAR_VENV}/bin/python" \
+    "${REPO_DIR}/integrations/super_mario"
+
+FLYVIS_MODEL_ARGS=()
+if [[ "${ENABLE_FLYVIS}" == "1" ]]; then
+    FLYVIS_VENV="${ROOT}/flyvis-venv"
+    if [[ ! -x "${FLYVIS_VENV}/bin/python" ]]; then
+        uv venv --python 3.12 "${FLYVIS_VENV}"
+    fi
+    uv pip install \
+        --torch-backend "${MARIO_FLYVIS_TORCH_BACKEND:-auto}" \
+        --python "${FLYVIS_VENV}/bin/python" flyvis==1.2.0
+    export FLYVIS_ROOT_DIR="${MARIO_FLYVIS_ROOT:-${SCRATCH}/microduck-rl/flyvis-data}"
+    FLYVIS_MODEL="${MARIO_FLYVIS_MODEL:-${FLYVIS_ROOT_DIR}/results/flow/0000/000}"
+    [[ -d "${FLYVIS_MODEL}" ]] || {
+        echo "ERROR: FlyVis model missing: ${FLYVIS_MODEL}" >&2
+        exit 1
+    }
+    FLYVIS_MODEL_ARGS+=(
+        --flyvis-model "${FLYVIS_MODEL}"
+        --flyvis-python "${FLYVIS_VENV}/bin/python"
+        --flyvis-worker "${REPO_DIR}/integrations/super_mario/flyvis_spatial_worker.py"
+    )
+fi
 
 EPISODES="${MARIO_EVAL_EPISODES:-25}"
 SEED="${MARIO_EVAL_SEED:-123}"
@@ -116,7 +144,7 @@ echo "Dopamine update: disabled"
 for mode in ${MODES}; do
     case "${mode}" in mean|sampled) ;; *) echo "ERROR: mode must be mean or sampled" >&2; exit 1 ;; esac
     for ablation in ${ABLATIONS}; do
-        case "${ablation}" in normal|threat|loom|small_motion|target|all|eye|all_visual) ;; *) echo "ERROR: invalid visual ablation: ${ablation}" >&2; exit 1 ;; esac
+        case "${ablation}" in normal|threat|loom|small_motion|target|all|eye|all_visual|flyvis_static|flyvis_motion) ;; *) echo "ERROR: invalid visual ablation: ${ablation}" >&2; exit 1 ;; esac
         if [[ "${ablation}" == "normal" ]]; then
             report="${EVAL_DIR}/frozen-${mode}-${SLURM_JOB_ID}.json"
         else
@@ -150,6 +178,7 @@ for mode in ${MODES}; do
             "${dopamine_args[@]}" \
             "${record_args[@]}" \
             --male-cns-data "${FLY_DATA}" \
+            "${FLYVIS_MODEL_ARGS[@]}" \
             --male-cns-device cpu \
             --episodes "${EPISODES}" \
             --seed "${SEED}" \

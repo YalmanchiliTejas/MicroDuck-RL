@@ -64,8 +64,8 @@ if [[ "${TEMPORAL_CONTROLLER}" != "0" && "${TEMPORAL_CONTROLLER}" != "1" ]]; the
     echo "ERROR: MARIO_PPO_TEMPORAL_CONTROLLER must be 0 or 1." >&2
     exit 1
 fi
-if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" && "${VISUAL_ENCODER}" != "retina_spatial_v3" ]]; then
-    echo "ERROR: MARIO_VISUAL_ENCODER must be column_v1, retina_lite_v2, or retina_spatial_v3." >&2
+if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" && "${VISUAL_ENCODER}" != "retina_spatial_v3" && "${VISUAL_ENCODER}" != "flyvis_spatial_v1" ]]; then
+    echo "ERROR: invalid MARIO_VISUAL_ENCODER: ${VISUAL_ENCODER}" >&2
     exit 1
 fi
 if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then
@@ -137,9 +137,34 @@ SIDECAR_VENV="${SCRATCH_ROOT}/sidecar-venv"
 if [[ ! -x "${SIDECAR_VENV}/bin/python" ]]; then
     uv venv --python 3.13 "${SIDECAR_VENV}"
 fi
-uv pip install \
-    --python "${SIDECAR_VENV}/bin/python" \
+uv pip install --python "${SIDECAR_VENV}/bin/python" \
     "${REPO_DIR}/integrations/super_mario"
+
+FLYVIS_MODEL_ARGS=()
+if [[ "${VISUAL_ENCODER}" == "flyvis_spatial_v1" ]]; then
+    FLYVIS_VENV="${SCRATCH_ROOT}/flyvis-venv"
+    if [[ ! -x "${FLYVIS_VENV}/bin/python" ]]; then
+        uv venv --python 3.12 "${FLYVIS_VENV}"
+    fi
+    uv pip install \
+        --torch-backend "${MARIO_FLYVIS_TORCH_BACKEND:-auto}" \
+        --python "${FLYVIS_VENV}/bin/python" flyvis==1.2.0
+    export FLYVIS_ROOT_DIR="${MARIO_FLYVIS_ROOT:-${SCRATCH}/microduck-rl/flyvis-data}"
+    FLYVIS_MODEL="${MARIO_FLYVIS_MODEL:-${FLYVIS_ROOT_DIR}/results/flow/0000/000}"
+    if [[ ! -d "${FLYVIS_MODEL}" ]]; then
+        echo "FlyVis pretrained model is missing; downloading it under ${FLYVIS_ROOT_DIR}."
+        "${FLYVIS_VENV}/bin/flyvis" download-pretrained
+    fi
+    [[ -d "${FLYVIS_MODEL}" ]] || {
+        echo "ERROR: FlyVis model missing after download: ${FLYVIS_MODEL}" >&2
+        exit 1
+    }
+    FLYVIS_MODEL_ARGS+=(
+        --flyvis-model "${FLYVIS_MODEL}"
+        --flyvis-python "${FLYVIS_VENV}/bin/python"
+        --flyvis-worker "${REPO_DIR}/integrations/super_mario/flyvis_spatial_worker.py"
+    )
+fi
 
 PRETRAIN_STEPS="${MARIO_PRETRAIN_STEPS:-20000}"
 TARGET_STEPS="${MARIO_PRETRAIN_TARGET_STEPS:-}"
@@ -245,6 +270,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --male-cns-data "${FLY_DATA}" \
     --male-cns-device cpu \
     --visual-encoder "${VISUAL_ENCODER}" \
+    "${FLYVIS_MODEL_ARGS[@]}" \
     "${dopamine_args[@]}" \
     "${freeze_args[@]}" \
     "${policy_args[@]}" \

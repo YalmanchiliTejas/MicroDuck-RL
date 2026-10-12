@@ -20,9 +20,15 @@ VISUAL_CHANNELS = {
     "small_motion": ["LPLC1"],
     "target": ["LC10a"],
 }
-VISUAL_ENCODERS = ("column_v1", "retina_lite_v2", "retina_spatial_v3")
+VISUAL_ENCODERS = (
+    "column_v1",
+    "retina_lite_v2",
+    "retina_spatial_v3",
+    "flyvis_spatial_v1",
+)
 VISUAL_ABLATIONS = (
-    "normal", "threat", "loom", "small_motion", "target", "all", "eye", "all_visual"
+    "normal", "threat", "loom", "small_motion", "target", "all", "eye",
+    "all_visual", "flyvis_static", "flyvis_motion",
 )
 
 
@@ -101,6 +107,9 @@ class MaleCNS:
         dopamine_learning_rate: float = 1.0e-5,
         visual_encoder: str = "column_v1",
         visual_ablation: str = "normal",
+        flyvis_model: Path | None = None,
+        flyvis_python: Path | None = None,
+        flyvis_worker: Path | None = None,
     ) -> None:
         if visual_encoder not in VISUAL_ENCODERS:
             raise ValueError(f"visual encoder must be one of {VISUAL_ENCODERS}")
@@ -155,6 +164,23 @@ class MaleCNS:
             for side in ("L", "R")
         }
         self.last_retina_measurements: dict[str, float | int] = {}
+        self.flyvis_bridge = None
+        if self.visual_encoder == "flyvis_spatial_v1":
+            if flyvis_model is None:
+                raise ValueError("flyvis_spatial_v1 requires a FlyVis model directory")
+            if flyvis_python is None or flyvis_worker is None:
+                raise ValueError(
+                    "flyvis_spatial_v1 requires FlyVis Python and worker paths"
+                )
+            from flyvis_spatial_bridge import FlyVisSpatialBridge
+
+            self.flyvis_bridge = FlyVisSpatialBridge(
+                model_dir=flyvis_model,
+                brain=self.brain,
+                dt=float(self.brain.dt),
+                python=flyvis_python,
+                worker_script=flyvis_worker,
+            )
         self.spike_file = Path(spike_file) if spike_file is not None else None
         if self.spike_file is not None:
             self.spike_file.parent.mkdir(parents=True, exist_ok=True)
@@ -361,6 +387,17 @@ class MaleCNS:
     def _encode(self, frame: np.ndarray) -> tuple[np.ndarray, list[tuple[np.ndarray, float]]]:
         gray = self._gray(frame)
         previous = gray if self.previous_gray is None else self.previous_gray
+        if self.visual_encoder == "flyvis_spatial_v1":
+            if self.flyvis_bridge is None:  # defensive: constructor owns this contract
+                raise RuntimeError("FlyVis spatial bridge was not initialized")
+            eye_drive = np.zeros_like(self.brain.azimuth, dtype=np.float32)
+            inject = self.flyvis_bridge.encode(frame, ablation=self.visual_ablation)
+            self.last_retina_measurements = dict(self.flyvis_bridge.last_stats)
+            self.last_visual_drive = {
+                key: 0.0 for key in self.last_visual_drive
+            }
+            self.previous_gray = gray
+            return eye_drive, inject
         eye_drive = self._eye_drive(gray, previous)
         spatial = None
         if self.visual_encoder == "retina_spatial_v3":
@@ -501,6 +538,14 @@ class MaleCNS:
         if self.dopamine is not None:
             self.dopamine.save()
 
+    def close(self) -> None:
+        """Release optional out-of-process visual encoder resources."""
+
+        flyvis_bridge = getattr(self, "flyvis_bridge", None)
+        if flyvis_bridge is not None:
+            flyvis_bridge.close()
+            self.flyvis_bridge = None
+
     def reset(self, frame: np.ndarray, *, seed: int | None = None) -> np.ndarray:
         if seed is None:
             self.brain.reset()
@@ -508,6 +553,9 @@ class MaleCNS:
             self.brain.reset(seed=seed)
         self.trace.reset()
         self.previous_gray = None
+        flyvis_bridge = getattr(self, "flyvis_bridge", None)
+        if flyvis_bridge is not None:
+            flyvis_bridge.reset()
         if self.dopamine is not None:
             self.dopamine.reset_episode()
         return self.observe(frame)

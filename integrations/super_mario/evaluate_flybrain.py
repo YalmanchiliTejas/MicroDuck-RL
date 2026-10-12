@@ -539,6 +539,9 @@ def run(args: argparse.Namespace) -> dict:
         dopamine_learning_rate=args.dopamine_learning_rate,
         visual_encoder=getattr(agent.config, "visual_encoder", "column_v1"),
         visual_ablation=getattr(args, "visual_ablation", "normal"),
+        flyvis_model=getattr(args, "flyvis_model", None),
+        flyvis_python=getattr(args, "flyvis_python", None),
+        flyvis_worker=getattr(args, "flyvis_worker", None),
     )
     if connectome.feature_dim != agent.config.feature_dim:
         raise ValueError(
@@ -968,6 +971,7 @@ def run(args: argparse.Namespace) -> dict:
             )
     finally:
         env.close()
+        connectome.close()
 
     decision_count = max(1, sum(action_counts.values()))
     report = {
@@ -1061,6 +1065,13 @@ def main() -> None:
     parser.add_argument("--checkpoint", type=Path, required=True)
     parser.add_argument("--dopamine-state", type=Path)
     parser.add_argument("--male-cns-data", type=Path)
+    parser.add_argument(
+        "--flyvis-model",
+        type=Path,
+        help="pretrained FlyVis model directory required by flyvis_spatial_v1",
+    )
+    parser.add_argument("--flyvis-python", type=Path)
+    parser.add_argument("--flyvis-worker", type=Path)
     parser.add_argument(
         "--male-cns-device", choices=("auto", "cpu", "cuda"), default="cpu"
     )
