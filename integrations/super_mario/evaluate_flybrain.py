@@ -230,28 +230,39 @@ class ForensicRecorder:
 
         game = Image.fromarray(np.asarray(frame, dtype=np.uint8)).convert("RGB")
         width, height = game.size
-        canvas = Image.new("RGB", (4 * width, 2 * (height + 16) + 72), "black")
-        draw = ImageDraw.Draw(canvas)
-        panels = (
+        spatial = "ground_presence" in diagnostic
+        columns = 5 if spatial else 4
+        panels = [
             ("game", None, None),
             ("motion x4", "motion", (255, 255, 255)),
             ("dark growth x4", "dark_growth", (255, 255, 255)),
             ("vertical edges x4", "edges", (255, 255, 255)),
+        ]
+        if spatial:
+            panels.append(("ground presence", "ground_presence", (80, 235, 130)))
+        panels.extend((
             ("small-motion contributors x6", "small_motion", (80, 190, 255)),
             ("loom contributors x6", "loom", (225, 90, 255)),
             ("threat contributors x6", "threat", (255, 85, 85)),
             ("target contributors x6", "target", (255, 220, 75)),
+        ))
+        if spatial:
+            panels.append(("vertical obstacle height", "obstacle_height", (255, 150, 55)))
+        canvas = Image.new(
+            "RGB", (columns * width, 2 * (height + 16) + (96 if spatial else 72)),
+            "black",
         )
+        draw = ImageDraw.Draw(canvas)
         for index, (label, key, color) in enumerate(panels):
-            x = (index % 4) * width
-            y = (index // 4) * (height + 16)
+            x = (index % columns) * width
+            y = (index // columns) * (height + 16)
             draw.text((x + 3, y + 2), label, fill="white")
             if key is None:
                 panel = game
             else:
                 strength = np.clip(
                     np.asarray(diagnostic[key], dtype=np.float32)
-                    * (4.0 if index < 4 else 6.0),
+                    * (4.0 if key in ("motion", "dark_growth", "edges") else 6.0),
                     0.0, 1.0,
                 )
                 rgb = np.stack([strength * component for component in color], axis=-1)
@@ -291,10 +302,34 @@ class ForensicRecorder:
         )
         draw.text(
             (3, base_y + 42),
-            "Channel panels show top pixels pooled per LEFT/RIGHT half; "
-            "target's constant 0.04 baseline is not pictured.",
+            (
+                "Channel panels show motion/edge contributors; green/orange panels "
+                "show the added spatial inputs."
+                if spatial else
+                "Channel panels show top pixels pooled per LEFT/RIGHT half; "
+                "target's constant 0.04 baseline is not pictured."
+            ),
             fill="white",
         )
+        if spatial:
+            measures = row["retina_measurements"]
+            draw.text(
+                (3, base_y + 56),
+                "gap near/mid/far=" + "/".join(
+                    f"{measures[f'gap_{distance}']:.2f}"
+                    for distance in ("near", "mid", "far")
+                ) + "   obstacle near/mid/far=" + "/".join(
+                    f"{measures[f'obstacle_{distance}']:.2f}"
+                    for distance in ("near", "mid", "far")
+                ) + f"   player screen x={measures['player_screen_x']}",
+                fill="white",
+            )
+            draw.text(
+                (3, base_y + 70),
+                "Green=brick-like floor below; orange=pipe-like green vertical span. "
+                "These are pixel filters, not object labels.",
+                fill="white",
+            )
         self.retina_frames.append(canvas)
 
     def _write_retina_timeline(self, path: Path) -> None:
@@ -345,6 +380,61 @@ class ForensicRecorder:
         draw.text(
             (left, 5 * lane_height + 12),
             "cyan=left  amber=right  red vertical=jump press  bright red=death; horizontal=decision",
+            fill="white",
+        )
+        image.save(path)
+
+    def _write_spatial_timeline(self, path: Path) -> None:
+        from PIL import Image, ImageDraw
+
+        last_by_decision = {row["decision"]: row for row in self.frame_rows}
+        rows = [last_by_decision[index] for index in sorted(last_by_decision)]
+        if not rows or "gap_near" not in rows[0].get("retina_measurements", {}):
+            return
+        width, left, right = 1100, 155, 25
+        image = Image.new("RGB", (width, 350), (15, 17, 25))
+        draw = ImageDraw.Draw(image)
+
+        def px(index: int) -> int:
+            return left + round(index * (width - left - right) / max(1, len(rows) - 1))
+
+        for index, row in enumerate(rows):
+            color = (255, 85, 85) if row["death"] else (75, 40, 40)
+            if row["death"] or row["jump_pressed_edge"]:
+                draw.line((px(index), 15, px(index), 322), fill=color)
+        for lane, name in enumerate(("gap", "obstacle")):
+            top = 25 + lane * 105
+            draw.text((5, top), f"{name} ahead (0..1)", fill="white")
+            draw.line((left, top + 75, width - right, top + 75), fill=(85, 88, 95))
+            for distance, color in (
+                ("near", (255, 110, 95)),
+                ("mid", (255, 205, 80)),
+                ("far", (90, 200, 255)),
+            ):
+                points = [
+                    (
+                        px(index),
+                        top + 75 - round(
+                            65 * float(row["retina_measurements"][f"{name}_{distance}"])
+                        ),
+                    )
+                    for index, row in enumerate(rows)
+                ]
+                if len(points) > 1:
+                    draw.line(points, fill=color, width=2)
+        top = 245
+        maximum_x = max(1, max(int(row["x"]) for row in rows))
+        draw.text((5, top), f"Mario x (0..{maximum_x})", fill="white")
+        draw.line((left, top + 60, width - right, top + 60), fill=(85, 88, 95))
+        points = [
+            (px(index), top + 60 - round(50 * int(row["x"]) / maximum_x))
+            for index, row in enumerate(rows)
+        ]
+        if len(points) > 1:
+            draw.line(points, fill=(150, 235, 150), width=2)
+        draw.text(
+            (left, 328),
+            "red=near  amber=mid  blue=far  dim vertical=jump press  bright vertical=death",
             fill="white",
         )
         image.save(path)
@@ -414,6 +504,10 @@ class ForensicRecorder:
             self._write_retina_timeline(timeline)
             artifacts["retina_video"] = str(retina_animation.resolve())
             artifacts["retina_timeline"] = str(timeline.resolve())
+            if "gap_near" in self.frame_rows[0].get("retina_measurements", {}):
+                spatial_timeline = self.directory / f"{stem}-spatial-signals.png"
+                self._write_spatial_timeline(spatial_timeline)
+                artifacts["spatial_timeline"] = str(spatial_timeline.resolve())
         return artifacts
 
 
@@ -451,8 +545,10 @@ def run(args: argparse.Namespace) -> dict:
             f"checkpoint expects {agent.config.feature_dim} features, "
             f"MaleCNS provides {connectome.feature_dim}"
         )
-    if getattr(args, "retina_view", False) and connectome.visual_encoder != "retina_lite_v2":
-        raise ValueError("retina view requires a retina_lite_v2 checkpoint")
+    if getattr(args, "retina_view", False) and connectome.visual_encoder not in (
+        "retina_lite_v2", "retina_spatial_v3"
+    ):
+        raise ValueError("retina view requires a retina_lite_v2 or retina_spatial_v3 checkpoint")
 
     action_names = [action.name.lower() for action in FlybrainAction]
     # mario_sidecar.nes_actions and the checkpoint share the FlybrainAction order.

@@ -1,0 +1,36 @@
+{
+  "samples": [
+    {
+      "id": "floor-474315-ep000",
+      "object": "floor",
+      "recording_id": "474315-normal-ep000",
+      "gif": "474315-mean-normal/episode-000.gif",
+      "start": 4,
+      "stop": 36
+    },
+    {
+      "id": "goomba-474315-ep000",
+      "object": "goomba",
+      "recording_id": "474315-normal-ep000",
+      "gif": "474315-mean-normal/episode-000.gif",
+      "start": 104,
+      "stop": 136
+    },
+    {
+      "id": "pipe-474315-ep001",
+      "object": "pipe",
+      "recording_id": "474315-normal-ep001",
+      "gif": "474315-mean-normal/episode-001.gif",
+      "start": 244,
+      "stop": 276
+    },
+    {
+      "id": "gap-474315-ep000",
+      "object": "gap",
+      "recording_id": "474315-normal-ep000",
+      "gif": "474315-mean-normal/episode-000.gif",
+      "start": 638,
+      "stop": 670
+    }
+  ]
+}

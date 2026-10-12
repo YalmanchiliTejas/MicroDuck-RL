@@ -458,6 +458,61 @@ def test_retina_diagnostic_shows_selected_right_pixels_without_state_change():
     np.testing.assert_array_equal(encoder.previous_gray, 1.0)
 
 
+def _spatial_mario_frame(*, pipe: bool = False, gap: bool = False):
+    frame = np.full((240, 256, 3), (104, 136, 252), dtype=np.uint8)
+    frame[208:] = (228, 92, 16)
+    frame[188:205, 68:80] = (248, 56, 0)
+    if pipe:
+        frame[150:208, 98:120] = (0, 168, 0)
+    if gap:
+        frame[208:, 140:172] = (104, 136, 252)
+    return frame
+
+
+def test_spatial_retina_detects_pipe_and_gap_at_separate_distances():
+    male_cns = _load_male_cns()
+    frame = _spatial_mario_frame(pipe=True, gap=True)
+
+    spatial = male_cns.MaleCNS._spatial_retina(frame)
+
+    assert 65 <= spatial["player_screen_x"] <= 82
+    assert spatial["obstacle_mid"] > 0.4
+    assert spatial["obstacle_near"] < spatial["obstacle_mid"]
+    assert spatial["gap_far"] > 0.25
+    assert spatial["gap_near"] < 0.1
+    assert spatial["ground_near"] > 0.9
+
+
+def test_spatial_encoder_routes_geometry_through_malecns_visual_drive():
+    male_cns = _load_male_cns()
+    encoder = male_cns.MaleCNS.__new__(male_cns.MaleCNS)
+    encoder.visual_encoder = "retina_spatial_v3"
+    encoder.visual_ablation = "normal"
+    encoder.previous_gray = None
+    encoder.last_visual_drive = {}
+    encoder.last_retina_measurements = {}
+    encoder.brain = types.SimpleNamespace(azimuth=np.linspace(-1, 1, 16))
+    encoder.visual = {
+        name: {side: np.asarray([index], dtype=np.int64) for side in ("L", "R")}
+        for index, name in enumerate(male_cns.VISUAL_CHANNELS)
+    }
+    frame = _spatial_mario_frame(pipe=True, gap=True)
+
+    eye_drive, injected = encoder._encode(frame)
+
+    assert len(injected) > 0
+    assert encoder.visual_stats()["loom_r"] > encoder.visual_stats()["loom_l"]
+    assert encoder.visual_stats()["threat_r"] > encoder.visual_stats()["threat_l"]
+    assert encoder.retina_stats()["gap_far"] > 0.25
+    assert encoder.retina_stats()["obstacle_mid"] > 0.4
+    assert np.any(eye_drive)
+
+    encoder.visual_ablation = "all_visual"
+    eye_drive, injected = encoder._encode(frame)
+    assert not np.any(eye_drive)
+    assert injected == []
+
+
 def test_retina_lite_suppresses_horizontal_camera_scroll():
     male_cns = _load_male_cns()
     rng = np.random.default_rng(4)
@@ -812,6 +867,46 @@ def test_forensic_recorder_writes_opt_in_retina_view_and_timeline(tmp_path):
 
     assert Path(artifacts["retina_video"]).is_file()
     assert Path(artifacts["retina_timeline"]).is_file()
+
+
+def test_forensic_recorder_writes_spatial_retina_timeline(tmp_path):
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    evaluator = _load_evaluator(flybrain, rollouts)
+    recorder = evaluator.ForensicRecorder(
+        tmp_path, episode=1, fps=60, retina_view=True
+    )
+    frame = _spatial_mario_frame(pipe=True, gap=True)
+    male_cns = _load_male_cns()
+    encoder = male_cns.MaleCNS.__new__(male_cns.MaleCNS)
+    encoder.visual_encoder = "retina_spatial_v3"
+    encoder.previous_gray = None
+    diagnostic = encoder.retina_diagnostic(frame)
+    spatial = encoder._spatial_retina(frame)
+    row = {
+        "episode": 1, "decision": 1, "frame_in_decision": 4,
+        "x": 70, "y": 79, "action": "right_jump", "death": False,
+        "visual_drive": {
+            f"{name}_{side}": 0.1
+            for name in ("small_motion", "loom", "threat", "target")
+            for side in ("l", "r")
+        },
+        "retina_measurements": {
+            key: value for key, value in spatial.items()
+            if key not in ("ground_profile", "obstacle_profile")
+        },
+        "jump_pressed_edge": True, "jump_released_edge": False,
+        "jump_hold_decisions": 1,
+        "jump_metrics": {"total_jump_probability": 0.62},
+    }
+    recorder.add_frame(frame, row, ["action=right_jump"])
+    recorder.add_retina_frame(frame, diagnostic, row)
+    recorder.add_decision({"decision": 1, "action": "right_jump"})
+
+    artifacts = recorder.close()
+
+    assert Path(artifacts["retina_video"]).is_file()
+    assert Path(artifacts["spatial_timeline"]).is_file()
 
 
 def test_paired_replay_uses_same_frames_and_actions_for_channel_masks(monkeypatch):

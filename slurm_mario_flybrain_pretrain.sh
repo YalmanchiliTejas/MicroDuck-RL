@@ -64,8 +64,8 @@ if [[ "${TEMPORAL_CONTROLLER}" != "0" && "${TEMPORAL_CONTROLLER}" != "1" ]]; the
     echo "ERROR: MARIO_PPO_TEMPORAL_CONTROLLER must be 0 or 1." >&2
     exit 1
 fi
-if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" ]]; then
-    echo "ERROR: MARIO_VISUAL_ENCODER must be column_v1 or retina_lite_v2." >&2
+if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" && "${VISUAL_ENCODER}" != "retina_spatial_v3" ]]; then
+    echo "ERROR: MARIO_VISUAL_ENCODER must be column_v1, retina_lite_v2, or retina_spatial_v3." >&2
     exit 1
 fi
 if [[ "${FREEZE_PPO}" == "1" && "${ENABLE_DOPAMINE}" != "1" ]]; then

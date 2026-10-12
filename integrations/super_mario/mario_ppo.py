@@ -16,7 +16,7 @@ from torch.nn import functional as F
 PPO_CHECKPOINT_SCHEMA = 4
 SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
-VISUAL_ENCODERS = ("column_v1", "retina_lite_v2")
+VISUAL_ENCODERS = ("column_v1", "retina_lite_v2", "retina_spatial_v3")
 FACTORIZED_HEAD_SIZES = (3, 2, 2)
 TEMPORAL_ENCODERS = ("conv4", "controller_gru")
 CONTROLLER_FEATURE_DIM = len(ACTION_LEVELS) + 8

@@ -20,7 +20,7 @@ VISUAL_CHANNELS = {
     "small_motion": ["LPLC1"],
     "target": ["LC10a"],
 }
-VISUAL_ENCODERS = ("column_v1", "retina_lite_v2")
+VISUAL_ENCODERS = ("column_v1", "retina_lite_v2", "retina_spatial_v3")
 VISUAL_ABLATIONS = (
     "normal", "threat", "loom", "small_motion", "target", "all", "eye", "all_visual"
 )
@@ -178,7 +178,7 @@ class MaleCNS:
     def _eye_drive(self, gray: np.ndarray, previous: np.ndarray) -> np.ndarray:
         """Project a horizontal panorama onto MaleCNS photoreceptor azimuths."""
 
-        if self.visual_encoder == "retina_lite_v2":
+        if self.visual_encoder in ("retina_lite_v2", "retina_spatial_v3"):
             height = gray.shape[0]
             vertical = np.linspace(0.35, 1.65, height, dtype=np.float32)
             vertical[: int(round(height * 0.12))] = 0.0
@@ -256,6 +256,50 @@ class MaleCNS:
             )
         return amounts
 
+    @staticmethod
+    def _spatial_retina(frame: np.ndarray) -> dict[str, np.ndarray | float | int]:
+        """Mario-specific lower-field geometry, measured ahead of the sprite.
+
+        Brick-colored pixels near the bottom indicate traversable floor; green
+        vertical spans indicate pipe-like obstacles. These are deliberately
+        simple palette filters, not semantic object recognition.
+        """
+
+        rgb = np.asarray(frame, dtype=np.uint8)[..., :3]
+        height, width = rgb.shape[:2]
+        red, green, blue = (rgb[..., channel].astype(np.int16) for channel in range(3))
+        # Mario's bright-red clothing is distinct from the darker brick tiles.
+        mario_red = (red > 235) & (green < 85) & (blue < 45)
+        player_rows = slice(int(height * 0.20), int(height * 0.86))
+        red_columns = mario_red[player_rows].sum(axis=0)
+        window = np.convolve(red_columns, np.ones(12), mode="same")
+        player_x = int(np.argmax(window)) if window.max() >= 4 else width // 2
+
+        floor_rows = slice(int(height * 0.88), int(height * 0.97))
+        brick = (red > 160) & (red > green + 30) & (blue < 200)
+        ground = np.clip(brick[floor_rows].mean(axis=0) / 0.35, 0.0, 1.0).astype(np.float32)
+
+        lower_rows = slice(int(height * 0.40), int(height * 0.87))
+        green_solid = (green > 115) & (green > red + 30) & (green > blue + 25)
+        vertical_green = green_solid[lower_rows].sum(axis=0)
+        green_height = vertical_green / max(1.0, height * 0.30)
+        obstacle = np.clip((green_height - 0.25) / 0.75, 0.0, 1.0).astype(np.float32)
+
+        distances = (("near", 4, 20), ("mid", 20, 44), ("far", 44, 76))
+        metrics: dict[str, float | int] = {"player_screen_x": player_x}
+        for name, start, end in distances:
+            section = slice(min(width, player_x + start), min(width, player_x + end))
+            metrics[f"ground_{name}"] = (
+                float(ground[section].mean()) if section.start < section.stop else 0.0
+            )
+            metrics[f"gap_{name}"] = (
+                float(1.0 - ground[section].mean()) if section.start < section.stop else 0.0
+            )
+            metrics[f"obstacle_{name}"] = (
+                float(obstacle[section].max()) if section.start < section.stop else 0.0
+            )
+        return {"ground_profile": ground, "obstacle_profile": obstacle, **metrics}
+
     def retina_diagnostic(self, frame: np.ndarray) -> dict[str, np.ndarray | int] | None:
         """Recompute display-only source and contributing-pixel maps, without state writes.
 
@@ -264,7 +308,7 @@ class MaleCNS:
         regions pooled on each side, before a channel ablation is applied.
         """
 
-        if self.visual_encoder != "retina_lite_v2":
+        if self.visual_encoder not in ("retina_lite_v2", "retina_spatial_v3"):
             return None
         gray = self._gray(frame)
         previous = gray if self.previous_gray is None else self.previous_gray
@@ -297,24 +341,71 @@ class MaleCNS:
             channels["loom"] += 0.65 * lower_growth + 0.15 * lower_motion
             channels["threat"] += 0.55 * ground_motion + 0.25 * lower_growth
             channels["target"] += 0.18 * lower_edges + 0.18 * middle_motion
-        return {
+        diagnostic = {
             "motion": motion,
             "dark_growth": growth,
             "edges": edges,
             **channels,
             "camera_shift_pixels": shift,
         }
+        if self.visual_encoder == "retina_spatial_v3":
+            spatial = self._spatial_retina(frame)
+            ground_map = np.zeros_like(gray)
+            obstacle_map = np.zeros_like(gray)
+            ground_map[int(height * 0.88):int(height * 0.97)] = spatial["ground_profile"]
+            obstacle_map[int(height * 0.40):int(height * 0.87)] = spatial["obstacle_profile"]
+            diagnostic["ground_presence"] = ground_map
+            diagnostic["obstacle_height"] = obstacle_map
+        return diagnostic
 
     def _encode(self, frame: np.ndarray) -> tuple[np.ndarray, list[tuple[np.ndarray, float]]]:
         gray = self._gray(frame)
         previous = gray if self.previous_gray is None else self.previous_gray
         eye_drive = self._eye_drive(gray, previous)
+        spatial = None
+        if self.visual_encoder == "retina_spatial_v3":
+            spatial = self._spatial_retina(frame)
+            azimuth = np.asarray(self.brain.azimuth, dtype=np.float32)
+            valid_eye = np.isfinite(azimuth)
+            screen_x = (azimuth[valid_eye] + 1.0) * 0.5 * (gray.shape[1] - 1)
+            columns = np.arange(gray.shape[1], dtype=np.float32)
+            forward = (
+                (screen_x >= spatial["player_screen_x"] + 4)
+                & (screen_x < spatial["player_screen_x"] + 76)
+            )
+            obstacle_drive = forward * np.interp(
+                screen_x, columns, spatial["obstacle_profile"]
+            )
+            gap_drive = forward * (
+                1.0 - np.interp(screen_x, columns, spatial["ground_profile"])
+            )
+            eye_drive[valid_eye] = np.clip(
+                eye_drive[valid_eye] + 0.45 * obstacle_drive - 0.20 * gap_drive,
+                0.0, 1.0,
+            )
         if self.visual_ablation in ("eye", "all_visual"):
             eye_drive.fill(0.0)
 
         inject: list[tuple[np.ndarray, float]] = []
-        if self.visual_encoder == "retina_lite_v2":
+        if self.visual_encoder in ("retina_lite_v2", "retina_spatial_v3"):
             encoded = self._retina_lite_amounts(gray, previous)
+            if spatial is not None:
+                encoded[("threat", "R")] = min(
+                    0.8, encoded[("threat", "R")]
+                    + 0.32 * spatial["gap_near"]
+                    + 0.16 * spatial["gap_mid"]
+                    + 0.08 * spatial["gap_far"]
+                )
+                encoded[("loom", "R")] = min(
+                    0.8, encoded[("loom", "R")]
+                    + 0.28 * spatial["obstacle_near"]
+                    + 0.14 * spatial["obstacle_mid"]
+                    + 0.07 * spatial["obstacle_far"]
+                )
+                self.last_retina_measurements.update(
+                    {key: value for key, value in spatial.items()
+                     if key not in ("ground_profile", "obstacle_profile")}
+                )
         else:
             self.last_retina_measurements = {}
             motion = np.abs(gray - previous)
