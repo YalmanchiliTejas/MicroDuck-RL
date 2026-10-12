@@ -80,8 +80,18 @@ MALE_CNS_DATA="${MARIO_VISION_MALE_CNS_DATA:-${FLY_DATA:-${ROOT}/male-cns}}"
 REPORT="${MARIO_VISION_OUTPUT:-${ROOT}/run/evaluations/flyvis-perception-${SLURM_JOB_ID}.json}"
 [[ -f "${MANIFEST}" ]] || { echo "ERROR: manifest missing: ${MANIFEST}" >&2; exit 1; }
 [[ -d "${GIF_ROOT}" ]] || { echo "ERROR: GIF root missing: ${GIF_ROOT}" >&2; exit 1; }
+if [[ ! -f "${MALE_CNS_DATA}/brain.npz" || ! -f "${MALE_CNS_DATA}/weights.npz" ]]; then
+    if [[ "${MARIO_VISION_DOWNLOAD_MALE_CNS:-0}" != "1" ]]; then
+        echo "ERROR: MaleCNS data missing in ${MALE_CNS_DATA}." >&2
+        echo "Set FLY_DATA or MARIO_VISION_MALE_CNS_DATA to the data directory used by evaluation." >&2
+        echo "Set MARIO_VISION_DOWNLOAD_MALE_CNS=1 only if a fresh published data copy is intended." >&2
+        exit 1
+    fi
+    echo "MaleCNS data missing; downloading published connectome to ${MALE_CNS_DATA}."
+    "${VENV}/bin/flybrain" download --data "${MALE_CNS_DATA}"
+fi
 [[ -f "${MALE_CNS_DATA}/brain.npz" && -f "${MALE_CNS_DATA}/weights.npz" ]] || {
-    echo "ERROR: MaleCNS brain.npz/weights.npz missing in ${MALE_CNS_DATA}" >&2
+    echo "ERROR: MaleCNS brain.npz/weights.npz still missing in ${MALE_CNS_DATA}" >&2
     exit 1
 }
 

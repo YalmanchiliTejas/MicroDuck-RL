@@ -67,6 +67,7 @@ fi
 uv pip install --python "${SIDECAR_VENV}/bin/python" "${REPO_DIR}/integrations/super_mario"
 
 EPISODES="${MARIO_EVAL_EPISODES:-25}"
+SEED="${MARIO_EVAL_SEED:-123}"
 MAX_DECISIONS="${MARIO_EVAL_MAX_DECISIONS:-300}"
 ACTION_REPEAT="${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-4}}"
 MODES="${MARIO_EVAL_MODES:-mean sampled}"
@@ -104,6 +105,7 @@ else
     echo "Dopamine state:  disabled (frozen base MaleCNS)"
 fi
 echo "Episodes/mode:   ${EPISODES}"
+echo "Evaluation seed: ${SEED}"
 echo "Modes:           ${MODES}"
 echo "Visual ablations:${ABLATIONS}"
 echo "Recorded episodes:${RECORD_EPISODES} per mode"
@@ -150,6 +152,7 @@ for mode in ${MODES}; do
             --male-cns-data "${FLY_DATA}" \
             --male-cns-device cpu \
             --episodes "${EPISODES}" \
+            --seed "${SEED}" \
             --max-decisions-per-episode "${MAX_DECISIONS}" \
             --action-repeat "${ACTION_REPEAT}" \
             "${sample_args[@]}" \
