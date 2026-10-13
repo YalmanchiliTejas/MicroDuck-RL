@@ -485,6 +485,13 @@ class MaleCNS:
     def retina_stats(self) -> dict[str, float | int]:
         return dict(self.last_retina_measurements)
 
+    def flyvis_spatial_activity(self) -> np.ndarray | None:
+        """Return the most recent signed FlyVis maps for evaluation displays."""
+
+        bridge = getattr(self, "flyvis_bridge", None)
+        grids = None if bridge is None else bridge.last_grids
+        return None if grids is None else grids.copy()
+
     def observe(self, frame: np.ndarray, *, action_sequence: int = -1) -> np.ndarray:
         eye_drive, inject = self._encode(frame)
         if self.dopamine is not None:

@@ -41,6 +41,7 @@ FREEZE_PPO="${MARIO_FREEZE_PPO:-0}"
 FREEZE_DOPAMINE="${MARIO_FREEZE_DOPAMINE:-0}"
 FACTORIZED_PPO="${MARIO_PPO_FACTORIZED:-0}"
 TEMPORAL_CONTROLLER="${MARIO_PPO_TEMPORAL_CONTROLLER:-0}"
+EPISODE_GRU="${MARIO_PPO_EPISODE_GRU:-0}"
 VISUAL_ENCODER="${MARIO_VISUAL_ENCODER:-column_v1}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
@@ -62,6 +63,14 @@ if [[ "${FACTORIZED_PPO}" != "0" && "${FACTORIZED_PPO}" != "1" ]]; then
 fi
 if [[ "${TEMPORAL_CONTROLLER}" != "0" && "${TEMPORAL_CONTROLLER}" != "1" ]]; then
     echo "ERROR: MARIO_PPO_TEMPORAL_CONTROLLER must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${EPISODE_GRU}" != "0" && "${EPISODE_GRU}" != "1" ]]; then
+    echo "ERROR: MARIO_PPO_EPISODE_GRU must be 0 or 1." >&2
+    exit 1
+fi
+if [[ "${TEMPORAL_CONTROLLER}" == "1" && "${EPISODE_GRU}" == "1" ]]; then
+    echo "ERROR: choose either MARIO_PPO_TEMPORAL_CONTROLLER or MARIO_PPO_EPISODE_GRU." >&2
     exit 1
 fi
 if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" && "${VISUAL_ENCODER}" != "retina_spatial_v3" && "${VISUAL_ENCODER}" != "flyvis_spatial_v1" ]]; then
@@ -206,9 +215,13 @@ echo "PPO entropy coef:    ${ENTROPY_COEFFICIENT}"
 echo "PPO target KL:       ${TARGET_KL}"
 echo "PPO factorized:      ${FACTORIZED_PPO}"
 echo "Temporal controller: ${TEMPORAL_CONTROLLER}"
+echo "Episode GRU:         ${EPISODE_GRU}"
 echo "Visual encoder:      ${VISUAL_ENCODER}"
 if [[ "${TEMPORAL_CONTROLLER}" == "1" ]]; then
     echo "Temporal decisions:  ${MARIO_PPO_TEMPORAL_DECISIONS:-16}"
+fi
+if [[ "${EPISODE_GRU}" == "1" ]]; then
+    echo "Recurrent sequence:  ${MARIO_PPO_RECURRENT_SEQUENCE_LENGTH:-32} decisions"
 fi
 echo "Checkpoint:          ${CHECKPOINT}"
 echo "Snapshots:           ${SNAPSHOT_DIR}"
@@ -247,6 +260,12 @@ if [[ "${TEMPORAL_CONTROLLER}" == "1" ]]; then
     policy_args+=(
         --temporal-controller
         --temporal-decisions "${MARIO_PPO_TEMPORAL_DECISIONS:-16}"
+    )
+fi
+if [[ "${EPISODE_GRU}" == "1" ]]; then
+    policy_args+=(
+        --episode-gru
+        --recurrent-sequence-length "${MARIO_PPO_RECURRENT_SEQUENCE_LENGTH:-32}"
     )
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then

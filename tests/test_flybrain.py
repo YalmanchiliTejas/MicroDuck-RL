@@ -348,6 +348,122 @@ def test_controller_gru_ppo_checkpoint_round_trip(tmp_path):
     assert all(np.isfinite(value) for value in metrics.values())
 
 
+def test_episode_gru_controller_preserves_each_emulator_frame():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    controller = ppo.EpisodeGRUController(feature_dim=3)
+    initial = controller.reset(np.asarray([1.0, 2.0, 3.0], dtype=np.float32))
+    assert initial.shape == (1, 3 + ppo.CONTROLLER_FEATURE_DIM)
+    assert np.allclose(initial[0, :3], [1.0, 2.0, 3.0])
+
+    right_jump = int(flybrain.FlybrainAction.RIGHT_JUMP)
+    tokens = controller.append_interval(
+        [
+            np.asarray([1.0, 1.0, 1.0], dtype=np.float32),
+            np.asarray([2.0, 2.0, 2.0], dtype=np.float32),
+            np.asarray([3.0, 3.0, 3.0], dtype=np.float32),
+            np.asarray([4.0, 4.0, 4.0], dtype=np.float32),
+        ],
+        right_jump,
+    )
+    assert tokens.shape == (4, 3 + ppo.CONTROLLER_FEATURE_DIM)
+    assert np.allclose(tokens[:, :3], np.arange(1, 5)[:, None])
+    assert controller.last_diagnostics["jump_pressed_edge"]
+    assert controller.last_diagnostics["jump_hold_decisions"] == 1
+
+
+def test_episode_gru_checkpoint_and_recurrent_ppo_update(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    config = ppo.PPOConfig(
+        feature_dim=3,
+        stack_depth=1,
+        temporal_encoder="episode_gru_v1",
+        controller_feature_dim=ppo.CONTROLLER_FEATURE_DIM,
+        recurrent_sequence_length=2,
+        rollout_steps=4,
+        minibatch_size=4,
+        update_epochs=2,
+    )
+    agent = ppo.PPOAgent(config, seed=19)
+    controller = ppo.EpisodeGRUController(feature_dim=3)
+    agent.reset_recurrent()
+    tokens = controller.reset(np.ones(3, dtype=np.float32))
+    token_sequences = []
+    initial_hiddens = []
+    actions = []
+    log_probabilities = []
+    values = []
+    for index in range(4):
+        initial_hiddens.append(agent.observe_recurrent(tokens))
+        action, log_probability, value = agent.act_recurrent()
+        token_sequences.append(tokens)
+        actions.append(action)
+        log_probabilities.append(log_probability)
+        values.append(value)
+        tokens = controller.append_interval(
+            [
+                np.full(3, index + frame + 1, dtype=np.float32)
+                for frame in range(4)
+            ],
+            action,
+        )
+    before = {
+        name: value.detach().clone() for name, value in agent.network.named_parameters()
+    }
+    metrics = agent.update_recurrent(
+        token_sequences=token_sequences,
+        initial_hiddens=np.asarray(initial_hiddens, dtype=np.float32),
+        actions=np.asarray(actions, dtype=np.int64),
+        old_log_probabilities=np.asarray(log_probabilities, dtype=np.float32),
+        returns=np.asarray([1.0, 0.5, -0.5, 2.0], dtype=np.float32),
+        advantages=np.asarray([1.0, 0.5, -0.5, 2.0], dtype=np.float32),
+        dones=np.asarray([0.0, 1.0, 0.0, 1.0], dtype=np.float32),
+    )
+    assert metrics["batch_size"] == 4.0
+    assert metrics["sequence_length"] == 2.0
+    assert all(np.isfinite(value) for value in metrics.values())
+    assert any(
+        not torch.equal(before[name], value)
+        for name, value in agent.network.named_parameters()
+    )
+
+    checkpoint = tmp_path / "episode-gru.pt"
+    agent.save(checkpoint)
+    restored = ppo.PPOAgent.load(checkpoint)
+    assert restored.config.temporal_encoder == "episode_gru_v1"
+    restored.reset_recurrent()
+    restored.observe_recurrent(controller.reset(np.ones(3, dtype=np.float32)))
+    probabilities = restored.policy_diagnostics_recurrent()["action_probabilities"]
+    assert probabilities.sum() == pytest.approx(1.0)
+
+
+def test_episode_gru_memory_persists_until_explicit_reset():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    agent = ppo.PPOAgent(
+        ppo.PPOConfig(
+            feature_dim=3,
+            stack_depth=1,
+            temporal_encoder="episode_gru_v1",
+            controller_feature_dim=ppo.CONTROLLER_FEATURE_DIM,
+        ),
+        seed=23,
+    )
+    controller = ppo.EpisodeGRUController(feature_dim=3)
+    tokens = controller.reset(np.ones(3, dtype=np.float32))
+    agent.reset_recurrent()
+    agent.observe_recurrent(tokens)
+    once = agent.recurrent_hidden()
+    agent.observe_recurrent(tokens)
+    twice = agent.recurrent_hidden()
+    assert not np.allclose(once, twice)
+
+    agent.reset_recurrent()
+    agent.observe_recurrent(tokens)
+    assert np.allclose(agent.recurrent_hidden(), once)
+
+
 def test_factorized_ppo_maps_three_heads_to_ten_action_probabilities():
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
@@ -907,6 +1023,32 @@ def test_forensic_recorder_writes_spatial_retina_timeline(tmp_path):
 
     assert Path(artifacts["retina_video"]).is_file()
     assert Path(artifacts["spatial_timeline"]).is_file()
+
+
+def test_forensic_recorder_writes_opt_in_flyvis_view(tmp_path):
+    flybrain = _load_flybrain()
+    rollouts = _load_rollouts()
+    evaluator = _load_evaluator(flybrain, rollouts)
+    recorder = evaluator.ForensicRecorder(
+        tmp_path, episode=3, fps=12, flyvis_view=True
+    )
+    frame = np.zeros((32, 40, 3), dtype=np.uint8)
+    row = {
+        "episode": 3,
+        "decision": 1,
+        "x": 42,
+        "action": "right_jump",
+        "death": False,
+    }
+    grids = np.zeros((11, 6, 8), dtype=np.float32)
+    grids[3, 2, 5] = 0.7
+    recorder.add_frame(frame, row, ["action=right_jump"])
+    recorder.add_flyvis_frame(frame, grids, row)
+    recorder.add_decision({"decision": 1, "action": "right_jump"})
+
+    artifacts = recorder.close()
+
+    assert Path(artifacts["flyvis_video"]).is_file()
 
 
 def test_paired_replay_uses_same_frames_and_actions_for_channel_masks(monkeypatch):

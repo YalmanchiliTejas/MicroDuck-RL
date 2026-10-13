@@ -217,15 +217,18 @@ class FlyVisSpatialBridge:
             brain, rows=self.rows, columns=self.columns
         )
         self.last_stats: dict[str, float | int] = {}
+        self.last_grids: np.ndarray | None = None
 
     def reset(self) -> None:
         self.worker.reset()
         self.last_stats = {}
+        self.last_grids = None
 
     def encode(
         self, frame: np.ndarray, *, ablation: str = "normal"
     ) -> list[tuple[np.ndarray, float]]:
         grids = self.worker.step(frame)
+        self.last_grids = grids.copy()
         injections, self.last_stats = spatial_injections(
             grids,
             self.target_groups,

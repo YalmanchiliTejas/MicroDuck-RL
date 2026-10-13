@@ -314,4 +314,35 @@ MARIO_PPO_ENTROPY_COEFFICIENT=0.01 \
 
 For frozen evaluation or ranking of this checkpoint family, set
 `MARIO_ENABLE_FLYVIS=1`. Spatial ablations are named `flyvis_static` (remove
-R1/L1/L2) and `flyvis_motion` (remove T4/T5).
+R1/L1/L2) and `flyvis_motion` (remove T4/T5). Recorded evaluation with
+`MARIO_EVAL_FLYVIS_VIEW=1` writes `episode-###-flyvis.gif` alongside each
+annotated gameplay `episode-###.gif`; the display shows all eleven signed 6×8
+FlyVis maps sampled once per PPO decision.
+
+## Episode-persistent recurrent PPO
+
+`episode_gru_v1` replaces the fixed four-trace temporal convolution without
+bypassing MaleCNS. Each emulator frame produces one 1,314-value descending-
+neuron trace. The trace is concatenated with the executed NES action, button
+levels, hold lengths, and jump press/release edges. A trainable projection and
+256-unit GRU consume all frames in order; no action interval is averaged. The
+hidden state persists across decisions and resets only with the environment.
+
+PPO unrolls contiguous 32-decision chunks for truncated backpropagation through
+time. FlyVis, the spatial bridge, and MaleCNS remain frozen; the projection,
+GRU, categorical actor, and critic train jointly. Frozen evaluation supports
+`--reset-gru-every-decision` (or
+`MARIO_EVAL_RESET_GRU_EVERY_DECISION=1`) as the memory ablation.
+
+Use a fresh checkpoint family; `conv4` and legacy `controller_gru` checkpoints
+cannot be converted into `episode_gru_v1`:
+
+```bash
+MARIO_VISUAL_ENCODER=flyvis_spatial_v1 \
+MARIO_PPO_EPISODE_GRU=1 \
+MARIO_PPO_RECURRENT_SEQUENCE_LENGTH=32 \
+MARIO_ENABLE_DOPAMINE=0 \
+MARIO_PPO_FACTORIZED=0 \
+MARIO_PRETRAIN_ACTION_REPEAT=4 \
+./slurm_mario_flybrain_pretrain.sh
+```

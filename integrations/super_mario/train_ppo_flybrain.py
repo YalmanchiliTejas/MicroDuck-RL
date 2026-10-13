@@ -17,6 +17,8 @@ from mario_ppo import (
     CONTROLLER_FEATURE_DIM,
     CONTROLLER_GRU_DEPTH,
     ControllerTemporalStack,
+    EPISODE_GRU_SEQUENCE_LENGTH,
+    EpisodeGRUController,
     PPOAgent,
     PPOConfig,
     generalized_advantage_estimates,
@@ -68,12 +70,22 @@ def _save(
 def _flush(
     agent: PPOAgent,
     rollout: dict[str, list],
-    next_state: np.ndarray,
+    next_state: np.ndarray | None,
     done: bool,
 ) -> dict[str, float] | None:
-    if not rollout["states"]:
+    transition_key = (
+        "token_sequences"
+        if agent.config.temporal_encoder == "episode_gru_v1"
+        else "states"
+    )
+    if not rollout[transition_key]:
         return None
-    next_value = 0.0 if done else agent.value(next_state)
+    if agent.config.temporal_encoder == "episode_gru_v1":
+        next_value = 0.0 if done else agent.recurrent_value()
+    else:
+        if next_state is None:
+            raise ValueError("feed-forward PPO flush requires next state")
+        next_value = 0.0 if done else agent.value(next_state)
     advantages, returns = generalized_advantage_estimates(
         np.asarray(rollout["rewards"], dtype=np.float32),
         np.asarray(rollout["values"], dtype=np.float32),
@@ -82,13 +94,30 @@ def _flush(
         gamma=agent.config.gamma,
         gae_lambda=agent.config.gae_lambda,
     )
-    metrics = agent.update(
-        states=np.asarray(rollout["states"], dtype=np.float32),
-        actions=np.asarray(rollout["actions"], dtype=np.int64),
-        old_log_probabilities=np.asarray(rollout["log_probabilities"], dtype=np.float32),
-        returns=returns,
-        advantages=advantages,
-    )
+    if agent.config.temporal_encoder == "episode_gru_v1":
+        metrics = agent.update_recurrent(
+            token_sequences=rollout["token_sequences"],
+            initial_hiddens=np.asarray(
+                rollout["initial_hiddens"], dtype=np.float32
+            ),
+            actions=np.asarray(rollout["actions"], dtype=np.int64),
+            old_log_probabilities=np.asarray(
+                rollout["log_probabilities"], dtype=np.float32
+            ),
+            returns=returns,
+            advantages=advantages,
+            dones=np.asarray(rollout["dones"], dtype=np.float32),
+        )
+    else:
+        metrics = agent.update(
+            states=np.asarray(rollout["states"], dtype=np.float32),
+            actions=np.asarray(rollout["actions"], dtype=np.int64),
+            old_log_probabilities=np.asarray(
+                rollout["log_probabilities"], dtype=np.float32
+            ),
+            returns=returns,
+            advantages=advantages,
+        )
     for values in rollout.values():
         values.clear()
     return metrics
@@ -99,6 +128,15 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
     for name, metric in metrics.items():
         writer.add_scalar(f"loss/{name}", metric, step)
     writer.flush()
+    recurrent_metrics = ""
+    if "hidden_rms" in metrics:
+        recurrent_metrics = (
+            f" sequence_length={int(metrics['sequence_length'])}"
+            f" hidden_rms={metrics['hidden_rms']:.6f}"
+            f" hidden_max={metrics['hidden_max_abs']:.6f}"
+            f" hidden_saturation={metrics['hidden_saturation_fraction']:.6f}"
+            f" gru_grad={metrics['gru_grad_norm']:.6f}"
+        )
     print(
         "ppo_update "
         f"step={step} "
@@ -110,7 +148,8 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
         f"clip_fraction={metrics['clip_fraction']:.6f} "
         f"batch_size={int(metrics['batch_size'])} "
         f"epochs={int(metrics['epochs_completed'])} "
-        f"early_stop={int(metrics['early_stop'])}",
+        f"early_stop={int(metrics['early_stop'])}"
+        f"{recurrent_metrics}",
         flush=True,
     )
 
@@ -140,10 +179,15 @@ def run(args: argparse.Namespace) -> None:
             policy_mode=requested_policy_mode,
         )
         print(f"resumed PPO={args.resume} step={agent.steps}", flush=True)
-        if args.temporal_controller and agent.config.temporal_encoder != "controller_gru":
+        requested_temporal = (
+            "episode_gru_v1"
+            if args.episode_gru
+            else "controller_gru" if args.temporal_controller else "conv4"
+        )
+        if agent.config.temporal_encoder != requested_temporal:
             raise ValueError(
-                "--temporal-controller cannot convert an existing conv4 checkpoint; "
-                "start a fresh run"
+                f"checkpoint requires temporal encoder "
+                f"{agent.config.temporal_encoder!r}, not {requested_temporal!r}"
             )
         if agent.config.visual_encoder != args.visual_encoder:
             raise ValueError(
@@ -160,14 +204,21 @@ def run(args: argparse.Namespace) -> None:
                 ),
                 visual_encoder=args.visual_encoder,
                 temporal_encoder=(
-                    "controller_gru" if args.temporal_controller else "conv4"
+                    "episode_gru_v1"
+                    if args.episode_gru
+                    else "controller_gru" if args.temporal_controller else "conv4"
                 ),
                 stack_depth=(
-                    args.temporal_decisions if args.temporal_controller else 4
+                    1
+                    if args.episode_gru
+                    else args.temporal_decisions if args.temporal_controller else 4
                 ),
                 controller_feature_dim=(
-                    CONTROLLER_FEATURE_DIM if args.temporal_controller else 0
+                    CONTROLLER_FEATURE_DIM
+                    if args.temporal_controller or args.episode_gru
+                    else 0
                 ),
+                recurrent_sequence_length=args.recurrent_sequence_length,
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -202,12 +253,21 @@ def run(args: argparse.Namespace) -> None:
         nes_actions(),
     )
     observation, _ = env.reset(seed=args.seed + agent.steps)
-    stack = (
-        ControllerTemporalStack(agent.config.feature_dim, agent.config.stack_depth)
-        if agent.config.temporal_encoder == "controller_gru"
-        else ActivityStack(agent.config.stack_depth)
-    )
-    state = stack.reset(connectome.reset(observation))
+    episode_recurrent = agent.config.temporal_encoder == "episode_gru_v1"
+    if episode_recurrent:
+        stack = EpisodeGRUController(agent.config.feature_dim)
+        agent.reset_recurrent()
+        current_tokens = stack.reset(connectome.reset(observation))
+        current_initial_hidden = agent.observe_recurrent(current_tokens)
+        state = None
+    else:
+        stack = (
+            ControllerTemporalStack(agent.config.feature_dim, agent.config.stack_depth)
+            if agent.config.temporal_encoder == "controller_gru"
+            else ActivityStack(agent.config.stack_depth)
+        )
+        state = stack.reset(connectome.reset(observation))
+        current_tokens = current_initial_hidden = None
     writer = SummaryWriter(
         log_dir=str(args.tensorboard_dir),
         purge_step=agent.steps if agent.steps else None,
@@ -221,6 +281,8 @@ def run(args: argparse.Namespace) -> None:
     writer.flush()
     rollout = {
         "states": [],
+        "token_sequences": [],
+        "initial_hiddens": [],
         "actions": [],
         "log_probabilities": [],
         "rewards": [],
@@ -251,7 +313,11 @@ def run(args: argparse.Namespace) -> None:
     signal.signal(signal.SIGTERM, request_stop)
     try:
         while agent.steps < target_steps and not stop:
-            action, log_probability, value = agent.act(state)
+            if episode_recurrent:
+                action, log_probability, value = agent.act_recurrent()
+            else:
+                assert state is not None
+                action, log_probability, value = agent.act(state)
             raw_reward = 0.0
             reward_components: dict[str, float] = {}
             interval_activities: list[np.ndarray] = []
@@ -270,15 +336,26 @@ def run(args: argparse.Namespace) -> None:
                 activity = connectome.observe(
                     observation, action_sequence=agent.steps
                 )
-                if agent.config.temporal_encoder == "controller_gru":
+                if agent.config.temporal_encoder in (
+                    "controller_gru", "episode_gru_v1"
+                ):
                     interval_activities.append(activity)
                 else:
                     stack.append(activity)
                 if terminated or truncated:
                     break
-            if agent.config.temporal_encoder == "controller_gru":
+            if episode_recurrent:
+                next_tokens = stack.append_interval(interval_activities, action)
+                next_initial_hidden = agent.observe_recurrent(next_tokens)
+                next_state = None
+                controller = stack.last_diagnostics
+            elif agent.config.temporal_encoder == "controller_gru":
                 next_state = stack.append_interval(interval_activities, action)
                 controller = stack.last_diagnostics
+            else:
+                next_state = stack.state
+                controller = None
+            if controller is not None:
                 episode_jump_press_edges += int(controller["jump_pressed_edge"])
                 episode_jump_release_edges += int(controller["jump_released_edge"])
                 episode_max_action_hold = max(
@@ -309,14 +386,21 @@ def run(args: argparse.Namespace) -> None:
                     float(controller["jump_released_edge"]),
                     agent.steps,
                 )
-            else:
-                next_state = stack.state
             done = bool(terminated or truncated)
             learning_reward = training_reward(
                 reward_components, raw_reward=raw_reward
             )
             if not args.freeze_ppo:
-                rollout["states"].append(state.copy())
+                if episode_recurrent:
+                    assert current_tokens is not None
+                    assert current_initial_hidden is not None
+                    rollout["token_sequences"].append(current_tokens.copy())
+                    rollout["initial_hiddens"].append(
+                        current_initial_hidden.copy()
+                    )
+                else:
+                    assert state is not None
+                    rollout["states"].append(state.copy())
                 rollout["actions"].append(action)
                 rollout["log_probabilities"].append(log_probability)
                 rollout["rewards"].append(learning_reward)
@@ -342,12 +426,24 @@ def run(args: argparse.Namespace) -> None:
             for measurement, value in connectome.retina_stats().items():
                 writer.add_scalar(f"retina/{measurement}", value, agent.steps)
             if not args.freeze_dopamine:
-                connectome.reinforce(
-                    agent.prediction_error(
+                if episode_recurrent:
+                    next_value = 0.0 if done else agent.recurrent_value()
+                    prediction_error = (
+                        learning_reward + agent.config.gamma * next_value - value
+                    )
+                else:
+                    assert next_state is not None
+                    prediction_error = agent.prediction_error(
                         learning_reward, next_state, done, value=value
                     )
+                connectome.reinforce(
+                    prediction_error
                 )
-            state = next_state
+            if episode_recurrent:
+                current_tokens = next_tokens
+                current_initial_hidden = next_initial_hidden
+            else:
+                state = next_state
 
             # Accumulate across episode boundaries. The stored done mask keeps
             # GAE from bootstrapping through a terminal state, while waiting
@@ -356,8 +452,14 @@ def run(args: argparse.Namespace) -> None:
             if (
                 not args.freeze_ppo
                 and rollout_ready(
-                    len(rollout["states"]), agent.config.rollout_steps
+                    len(
+                        rollout[
+                            "token_sequences" if episode_recurrent else "states"
+                        ]
+                    ),
+                    agent.config.rollout_steps,
                 )
+                and (done if episode_recurrent else True)
             ):
                 metrics = _flush(agent, rollout, state, done)
                 if metrics is not None:
@@ -417,13 +519,21 @@ def run(args: argparse.Namespace) -> None:
                         f" jump_edges={episode_jump_press_edges}/{episode_jump_release_edges} "
                         f"max_action_hold={episode_max_action_hold} "
                         f"max_jump_hold={episode_max_jump_hold}"
-                        if agent.config.temporal_encoder == "controller_gru"
+                        if agent.config.temporal_encoder in (
+                            "controller_gru", "episode_gru_v1"
+                        )
                         else ""
                     ),
                     flush=True,
                 )
                 observation, _ = env.reset()
-                state = stack.reset(connectome.reset(observation))
+                if episode_recurrent:
+                    agent.reset_recurrent()
+                    current_tokens = stack.reset(connectome.reset(observation))
+                    current_initial_hidden = agent.observe_recurrent(current_tokens)
+                    state = None
+                else:
+                    state = stack.reset(connectome.reset(observation))
                 episode_raw_return = 0.0
                 episode_training_return = 0.0
                 episode_decisions = 0
@@ -501,6 +611,20 @@ def main() -> None:
         help="use decision-scale MaleCNS aggregation, controller feedback, and a GRU",
     )
     parser.add_argument(
+        "--episode-gru",
+        action="store_true",
+        help=(
+            "use ordered emulator-frame MaleCNS inputs and persistent recurrent "
+            "memory reset only at episode boundaries"
+        ),
+    )
+    parser.add_argument(
+        "--recurrent-sequence-length",
+        type=int,
+        default=EPISODE_GRU_SEQUENCE_LENGTH,
+        help="decision chunk length for truncated recurrent PPO backpropagation",
+    )
+    parser.add_argument(
         "--temporal-decisions",
         type=int,
         default=CONTROLLER_GRU_DEPTH,
@@ -531,6 +655,10 @@ def main() -> None:
         parser.error("--additional-steps must be positive")
     if args.temporal_decisions < 2:
         parser.error("--temporal-decisions must be at least two")
+    if args.recurrent_sequence_length <= 0:
+        parser.error("--recurrent-sequence-length must be positive")
+    if args.temporal_controller and args.episode_gru:
+        parser.error("--temporal-controller and --episode-gru are mutually exclusive")
     if args.dopamine_learning_rate <= 0:
         parser.error("--dopamine-learning-rate must be positive")
     if args.visual_encoder == "flyvis_spatial_v1" and any(

@@ -100,6 +100,38 @@ def _ppo_input_sensitivity(agent, state: np.ndarray) -> dict[str, list[float]]:
     }
 
 
+def _ppo_recurrent_input_sensitivity(
+    agent, tokens: np.ndarray, initial_hidden: np.ndarray
+) -> dict[str, list[float]]:
+    """Local jump-probability gradient through the current GRU frame tokens."""
+
+    from mario_ppo import EPISODE_GRU_HIDDEN_DIM, _factorized_probabilities
+
+    token_tensor = torch.as_tensor(
+        tokens, dtype=torch.float32, device=agent.device
+    ).unsqueeze(0).detach().requires_grad_(True)
+    hidden_tensor = torch.as_tensor(
+        initial_hidden, dtype=torch.float32, device=agent.device
+    ).view(1, 1, EPISODE_GRU_HIDDEN_DIM)
+    logits, _, _ = agent.network.recurrent_tokens(token_tensor, hidden_tensor)
+    probabilities = (
+        _factorized_probabilities(logits)
+        if agent.config.policy_mode == "factorized"
+        else torch.softmax(logits, dim=1)
+    )
+    jump_probability = probabilities[:, list(JUMP_ACTIONS)].sum()
+    gradient = torch.autograd.grad(jump_probability, token_tensor)[0][0]
+    gradient = gradient[:, : agent.config.feature_dim]
+    return {
+        "jump_probability_gradient_rms_by_frame": [
+            float(value) for value in gradient.square().mean(dim=1).sqrt().detach().cpu()
+        ],
+        "jump_probability_gradient_max_by_frame": [
+            float(value) for value in gradient.abs().amax(dim=1).detach().cpu()
+        ],
+    }
+
+
 def _replay_counterfactuals(
     agent,
     connectome: MaleCNS,
@@ -111,22 +143,40 @@ def _replay_counterfactuals(
 ) -> float:
     """Replay identical frames and actions with each injected channel silenced."""
 
-    from mario_ppo import ControllerTemporalStack
+    from mario_ppo import ControllerTemporalStack, EpisodeGRUController
 
     max_baseline_error = 0.0
     original_ablation = connectome.visual_ablation
     try:
         for ablation in VISUAL_ABLATIONS:
             connectome.visual_ablation = ablation
-            stack = (
-                ControllerTemporalStack(agent.config.feature_dim, agent.config.stack_depth)
-                if agent.config.temporal_encoder == "controller_gru"
-                else ActivityStack(agent.config.stack_depth)
-            )
-            state = stack.reset(connectome.reset(initial_frame, seed=episode_seed))
+            episode_recurrent = agent.config.temporal_encoder == "episode_gru_v1"
+            if episode_recurrent:
+                stack = EpisodeGRUController(agent.config.feature_dim)
+                agent.reset_recurrent()
+                tokens = stack.reset(
+                    connectome.reset(initial_frame, seed=episode_seed)
+                )
+                agent.observe_recurrent(tokens)
+                state = None
+            else:
+                stack = (
+                    ControllerTemporalStack(
+                        agent.config.feature_dim, agent.config.stack_depth
+                    )
+                    if agent.config.temporal_encoder == "controller_gru"
+                    else ActivityStack(agent.config.stack_depth)
+                )
+                state = stack.reset(
+                    connectome.reset(initial_frame, seed=episode_seed)
+                )
             for row, (action, frames) in zip(decision_rows, intervals, strict=True):
                 scores = np.asarray(
-                    agent.policy_diagnostics(state)["action_probabilities"],
+                    (
+                        agent.policy_diagnostics_recurrent()
+                        if episode_recurrent
+                        else agent.policy_diagnostics(state)
+                    )["action_probabilities"],
                     dtype=np.float64,
                 )
                 row.setdefault("counterfactual", {})[ablation] = {
@@ -143,15 +193,20 @@ def _replay_counterfactuals(
                 activities = []
                 for frame in frames:
                     activity = connectome.observe(frame)
-                    if agent.config.temporal_encoder == "controller_gru":
+                    if agent.config.temporal_encoder in (
+                        "controller_gru", "episode_gru_v1"
+                    ):
                         activities.append(activity)
                     else:
                         stack.append(activity)
-                state = (
-                    stack.append_interval(activities, action)
-                    if agent.config.temporal_encoder == "controller_gru"
-                    else stack.state
-                )
+                if episode_recurrent:
+                    agent.observe_recurrent(
+                        stack.append_interval(activities, action)
+                    )
+                elif agent.config.temporal_encoder == "controller_gru":
+                    state = stack.append_interval(activities, action)
+                else:
+                    state = stack.state
     finally:
         connectome.visual_ablation = original_ablation
     for row in decision_rows:
@@ -189,7 +244,8 @@ class ForensicRecorder:
     """Record one emulator episode as synchronized GIF and JSONL traces."""
 
     def __init__(
-        self, directory: Path, episode: int, fps: int, *, retina_view: bool = False
+        self, directory: Path, episode: int, fps: int, *,
+        retina_view: bool = False, flyvis_view: bool = False,
     ) -> None:
         self.directory = directory
         self.episode = episode
@@ -199,6 +255,8 @@ class ForensicRecorder:
         self.decision_rows: list[dict] = []
         self.retina_view = retina_view
         self.retina_frames = []
+        self.flyvis_view = flyvis_view
+        self.flyvis_frames = []
 
     def add_frame(self, frame: np.ndarray, row: dict, overlay: list[str]) -> None:
         from PIL import Image, ImageDraw
@@ -220,6 +278,75 @@ class ForensicRecorder:
 
     def add_decision(self, row: dict) -> None:
         self.decision_rows.append(row)
+
+    def add_flyvis_frame(
+        self, frame: np.ndarray, grids: np.ndarray, row: dict
+    ) -> None:
+        """Render the game beside signed spatial activity for all bridge types."""
+
+        from PIL import Image, ImageDraw
+
+        cell_types = (
+            "R1", "L1", "L2", "T4a", "T4b", "T4c", "T4d",
+            "T5a", "T5b", "T5c", "T5d",
+        )
+        values = np.asarray(grids, dtype=np.float32)
+        if values.shape != (len(cell_types), 6, 8):
+            raise ValueError("FlyVis display requires an 11x6x8 spatial grid")
+        game = Image.fromarray(np.asarray(frame, dtype=np.uint8)).convert("RGB")
+        width, height = game.size
+        label_height = 28
+        canvas = Image.new(
+            "RGB", (4 * width, 3 * (height + label_height)), "black"
+        )
+        draw = ImageDraw.Draw(canvas)
+        canvas.paste(game, (0, label_height))
+        draw.text(
+            (3, 2),
+            f"game  decision={row['decision']} x={row['x']} "
+            f"action={row['action']} death={int(row['death'])}",
+            fill="white",
+        )
+        centers = {"R1": 1.15, "L1": -1.55, "L2": -1.55}
+        scales = {"R1": 0.35, "L1": 0.45, "L2": 0.45}
+        for panel_index, (cell_type, activity) in enumerate(
+            zip(cell_types, values, strict=True), start=1
+        ):
+            column = panel_index % 4
+            row_index = panel_index // 4
+            x = column * width
+            y = row_index * (height + label_height)
+            center = centers.get(cell_type, 0.0)
+            scale = scales.get(cell_type, 0.35)
+            signed = np.tanh((activity - center) / scale)
+            positive = np.clip(signed, 0.0, 1.0)
+            negative = np.clip(-signed, 0.0, 1.0)
+            rgb = np.stack(
+                (255 * positive, 80 * (positive + negative), 255 * negative),
+                axis=-1,
+            ).astype(np.uint8)
+            panel = Image.fromarray(rgb, "RGB").resize(
+                (width, height), Image.Resampling.NEAREST
+            )
+            canvas.paste(panel, (x, y + label_height))
+            draw.text(
+                (x + 3, y + 2),
+                f"{cell_type}  raw={activity.min():+.2f}..{activity.max():+.2f}",
+                fill="white",
+            )
+            draw.text(
+                (x + 3, y + 14),
+                "blue=below rest  red=above rest",
+                fill=(190, 195, 205),
+            )
+            draw.line(
+                (
+                    x + width // 2, y + label_height,
+                    x + width // 2, y + label_height + height,
+                ),
+                fill=(90, 90, 90),
+            )
+        self.flyvis_frames.append(canvas)
 
     def add_retina_frame(
         self, frame: np.ndarray, diagnostic: dict, row: dict
@@ -508,6 +635,21 @@ class ForensicRecorder:
                 spatial_timeline = self.directory / f"{stem}-spatial-signals.png"
                 self._write_spatial_timeline(spatial_timeline)
                 artifacts["spatial_timeline"] = str(spatial_timeline.resolve())
+        if self.flyvis_frames:
+            flyvis_animation = self.directory / f"{stem}-flyvis.gif"
+            temporary = flyvis_animation.with_name(
+                f".{flyvis_animation.name}.tmp.gif"
+            )
+            self.flyvis_frames[0].save(
+                temporary,
+                save_all=True,
+                append_images=self.flyvis_frames[1:],
+                duration=max(1, round(1000 / self.fps)),
+                loop=0,
+                optimize=False,
+            )
+            temporary.replace(flyvis_animation)
+            artifacts["flyvis_video"] = str(flyvis_animation.resolve())
         return artifacts
 
 
@@ -520,7 +662,7 @@ def run(args: argparse.Namespace) -> dict:
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     algorithm = str(payload.get("algorithm", "dqn"))
     if algorithm == "ppo":
-        from mario_ppo import ControllerTemporalStack, PPOAgent
+        from mario_ppo import ControllerTemporalStack, EpisodeGRUController, PPOAgent
 
         agent = PPOAgent.load(args.checkpoint, device=device)
         agent.network.eval()
@@ -552,6 +694,11 @@ def run(args: argparse.Namespace) -> dict:
         "retina_lite_v2", "retina_spatial_v3"
     ):
         raise ValueError("retina view requires a retina_lite_v2 or retina_spatial_v3 checkpoint")
+    if (
+        getattr(args, "flyvis_view", False)
+        and connectome.visual_encoder != "flyvis_spatial_v1"
+    ):
+        raise ValueError("FlyVis view requires a flyvis_spatial_v1 checkpoint")
 
     action_names = [action.name.lower() for action in FlybrainAction]
     # mario_sidecar.nes_actions and the checkpoint share the FlybrainAction order.
@@ -575,6 +722,7 @@ def run(args: argparse.Namespace) -> dict:
     record_episodes = int(getattr(args, "record_episodes", 0))
     record_fps = int(getattr(args, "record_fps", 60))
     retina_view = bool(getattr(args, "retina_view", False))
+    flyvis_view = bool(getattr(args, "flyvis_view", False))
     visual_ablation = getattr(args, "visual_ablation", "normal")
     counterfactual_channels = bool(getattr(args, "counterfactual_channels", False))
     if counterfactual_channels and (algorithm != "ppo" or visual_ablation != "normal"):
@@ -583,16 +731,32 @@ def run(args: argparse.Namespace) -> dict:
     try:
         for episode_index in range(args.episodes):
             observation, reset_info = env.reset(seed=args.seed + episode_index)
-            stack = (
-                ControllerTemporalStack(
-                    agent.config.feature_dim, agent.config.stack_depth
-                )
-                if algorithm == "ppo"
-                and agent.config.temporal_encoder == "controller_gru"
-                else ActivityStack(agent.config.stack_depth)
-            )
             episode_seed = args.seed + episode_index
-            state = stack.reset(connectome.reset(observation, seed=episode_seed))
+            episode_recurrent = (
+                algorithm == "ppo"
+                and agent.config.temporal_encoder == "episode_gru_v1"
+            )
+            if episode_recurrent:
+                stack = EpisodeGRUController(agent.config.feature_dim)
+                agent.reset_recurrent()
+                current_tokens = stack.reset(
+                    connectome.reset(observation, seed=episode_seed)
+                )
+                current_initial_hidden = agent.observe_recurrent(current_tokens)
+                state = agent.recurrent_hidden()
+            else:
+                stack = (
+                    ControllerTemporalStack(
+                        agent.config.feature_dim, agent.config.stack_depth
+                    )
+                    if algorithm == "ppo"
+                    and agent.config.temporal_encoder == "controller_gru"
+                    else ActivityStack(agent.config.stack_depth)
+                )
+                state = stack.reset(
+                    connectome.reset(observation, seed=episode_seed)
+                )
+                current_tokens = current_initial_hidden = None
             initial_frame = observation.copy() if counterfactual_channels and episode_index < record_episodes else None
             replay_intervals: list[tuple[int, list[np.ndarray]]] = []
             current_x = int(reset_info.get("x_pos", 0))
@@ -612,6 +776,7 @@ def run(args: argparse.Namespace) -> dict:
                 ForensicRecorder(
                     record_dir, episode_index, record_fps,
                     retina_view=retina_view and visual_ablation == "normal",
+                    flyvis_view=flyvis_view and visual_ablation == "normal",
                 )
                 if record_dir is not None and episode_index < record_episodes
                 else None
@@ -624,21 +789,36 @@ def run(args: argparse.Namespace) -> dict:
                 with torch.no_grad():
                     state_t = torch.as_tensor(state, device=agent.device).unsqueeze(0)
                     if algorithm == "ppo":
-                        policy_diagnostics = agent.policy_diagnostics(state)
+                        policy_diagnostics = (
+                            agent.policy_diagnostics_recurrent()
+                            if episode_recurrent
+                            else agent.policy_diagnostics(state)
+                        )
                         action_scores = policy_diagnostics["action_probabilities"]
                     else:
                         action_scores = agent.online(state_t)[0].detach().cpu().numpy()
                 greedy_action = int(np.argmax(action_scores))
                 if algorithm == "ppo":
-                    action, log_probability, value = agent.act(
-                        state, deterministic=not args.sample_actions
-                    )
+                    if episode_recurrent:
+                        action, log_probability, value = agent.act_recurrent(
+                            deterministic=not args.sample_actions
+                        )
+                    else:
+                        action, log_probability, value = agent.act(
+                            state, deterministic=not args.sample_actions
+                        )
                 else:
                     action = agent.act(state, epsilon=args.epsilon)
                     log_probability = value = None
                 jump_metrics = _jump_metrics(action_scores) if algorithm == "ppo" else None
                 sensitivity = (
-                    _ppo_input_sensitivity(agent, state)
+                    (
+                        _ppo_recurrent_input_sensitivity(
+                            agent, current_tokens, current_initial_hidden
+                        )
+                        if episode_recurrent
+                        else _ppo_input_sensitivity(agent, state)
+                    )
                     if algorithm == "ppo" and recorder is not None
                     else None
                 )
@@ -702,7 +882,9 @@ def run(args: argparse.Namespace) -> dict:
                         replay_frames.append(observation.copy())
                     if (
                         algorithm == "ppo"
-                        and agent.config.temporal_encoder == "controller_gru"
+                        and agent.config.temporal_encoder in (
+                            "controller_gru", "episode_gru_v1"
+                        )
                     ):
                         interval_activities.append(activity)
                     else:
@@ -781,6 +963,20 @@ def run(args: argparse.Namespace) -> dict:
                             recorder.add_retina_frame(
                                 observation, retina_diagnostic, frame_row
                             )
+                        if (
+                            recorder.flyvis_view
+                            and (
+                                frame_in_decision == args.action_repeat
+                                or terminated
+                                or truncated
+                            )
+                        ):
+                            flyvis_grids = connectome.flyvis_spatial_activity()
+                            if flyvis_grids is None:
+                                raise RuntimeError("FlyVis activity was not recorded")
+                            recorder.add_flyvis_frame(
+                                observation, flyvis_grids, frame_row
+                            )
                     if terminated or truncated:
                         break
                 if initial_frame is not None:
@@ -795,7 +991,25 @@ def run(args: argparse.Namespace) -> dict:
                 legacy_total += _legacy_training_reward(
                     interval_components, interval_raw
                 )
-                if (
+                if episode_recurrent:
+                    next_tokens = stack.append_interval(
+                        interval_activities, action
+                    )
+                    if getattr(args, "reset_gru_every_decision", False):
+                        agent.reset_recurrent()
+                    next_initial_hidden = agent.observe_recurrent(next_tokens)
+                    next_state = agent.recurrent_hidden()
+                    controller_diagnostics = {
+                        **dict(stack.last_diagnostics),
+                        "hidden_rms": float(
+                            np.sqrt(np.mean(np.square(next_state)))
+                        ),
+                        "hidden_max_abs": float(np.max(np.abs(next_state))),
+                        "hidden_saturation_fraction": float(
+                            np.mean(np.abs(next_state) > 0.95)
+                        ),
+                    }
+                elif (
                     algorithm == "ppo"
                     and agent.config.temporal_encoder == "controller_gru"
                 ):
@@ -908,6 +1122,9 @@ def run(args: argparse.Namespace) -> dict:
                     }
                     recorder.add_decision(decision_row)
                 state = next_state
+                if episode_recurrent:
+                    current_tokens = next_tokens
+                    current_initial_hidden = next_initial_hidden
                 if terminated or truncated:
                     break
 
@@ -985,6 +1202,9 @@ def run(args: argparse.Namespace) -> dict:
         "visual_ablation": visual_ablation,
         "visual_encoder": getattr(agent.config, "visual_encoder", "column_v1"),
         "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
+        "reset_gru_every_decision": bool(
+            getattr(args, "reset_gru_every_decision", False)
+        ),
         "temporal_depth": agent.config.stack_depth,
         "controller_feature_dim": getattr(
             agent.config, "controller_feature_dim", 0
@@ -1086,6 +1306,11 @@ def main() -> None:
         action="store_true",
         help="sample a PPO policy instead of using its deterministic argmax",
     )
+    parser.add_argument(
+        "--reset-gru-every-decision",
+        action="store_true",
+        help="evaluation ablation: erase episode GRU memory before each action interval",
+    )
     parser.add_argument("--seed", type=int, default=123)
     parser.add_argument("--first-actions", type=int, default=50)
     parser.add_argument("--output", type=Path)
@@ -1104,6 +1329,10 @@ def main() -> None:
     parser.add_argument(
         "--retina-view", action="store_true",
         help="record per-decision retina source/contributor GIF and channel timeline",
+    )
+    parser.add_argument(
+        "--flyvis-view", action="store_true",
+        help="record per-decision signed spatial FlyVis population maps",
     )
     parser.add_argument(
         "--visual-ablation", choices=VISUAL_ABLATIONS, default="normal",
@@ -1138,6 +1367,12 @@ def main() -> None:
         parser.error("--counterfactual-channels requires recorded episodes")
     if args.retina_view and not args.record_episodes:
         parser.error("--retina-view requires recorded episodes")
+    if args.flyvis_view and not args.record_episodes:
+        parser.error("--flyvis-view requires recorded episodes")
+    payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
+    temporal_encoder = payload.get("config", {}).get("temporal_encoder", "conv4")
+    if args.reset_gru_every_decision and temporal_encoder != "episode_gru_v1":
+        parser.error("--reset-gru-every-decision requires an episode_gru_v1 checkpoint")
     run(args)
 
 
