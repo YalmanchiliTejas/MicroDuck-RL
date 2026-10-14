@@ -464,6 +464,101 @@ def test_episode_gru_memory_persists_until_explicit_reset():
     assert np.allclose(agent.recurrent_hidden(), once)
 
 
+def test_vision_fusion_controller_separates_visual_and_compact_state():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    controller = ppo.VisionFusionGRUController(feature_dim=3)
+    initial = controller.reset(np.asarray([1.0, 2.0, 3.0], dtype=np.float32))
+    assert initial.shape == (1, 3 + ppo.COMPACT_CONTROLLER_FEATURE_DIM)
+    assert np.allclose(initial[0, 3:], 0.0)
+
+    tokens = controller.append_interval(
+        [np.full(3, frame, dtype=np.float32) for frame in range(1, 5)],
+        int(flybrain.FlybrainAction.RIGHT_JUMP),
+    )
+    assert tokens.shape == (4, 3 + ppo.COMPACT_CONTROLLER_FEATURE_DIM)
+    assert np.allclose(tokens[:, :3], np.arange(1, 5)[:, None])
+    assert np.allclose(tokens[:, 3:], tokens[0, 3:])
+    assert controller.last_diagnostics["jump_pressed_edge"]
+
+
+def test_vision_fusion_recurrent_update_logs_auxiliary_and_dependence_metrics(tmp_path):
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    config = ppo.PPOConfig(
+        feature_dim=3,
+        stack_depth=1,
+        visual_encoder="flyvis_spatial_v1",
+        temporal_encoder="vision_fusion_gru_v2",
+        controller_feature_dim=ppo.COMPACT_CONTROLLER_FEATURE_DIM,
+        recurrent_sequence_length=2,
+        rollout_steps=4,
+        minibatch_size=4,
+        update_epochs=1,
+        fusion_gate_warmup_steps=20_000,
+    )
+    agent = ppo.PPOAgent(config, seed=29)
+    controller = ppo.VisionFusionGRUController(feature_dim=3)
+    agent.reset_recurrent()
+    tokens = controller.reset(np.ones(3, dtype=np.float32))
+    token_sequences = []
+    targets = []
+    hiddens = []
+    actions = []
+    log_probabilities = []
+    values = []
+    rng = np.random.default_rng(7)
+    for index in range(4):
+        hiddens.append(agent.observe_recurrent(tokens))
+        action, log_probability, value = agent.act_recurrent()
+        token_sequences.append(tokens)
+        targets.append(
+            rng.normal(size=(len(tokens), ppo.FLYVIS_SPATIAL_TARGET_DIM)).astype(
+                np.float32
+            )
+        )
+        actions.append(action)
+        log_probabilities.append(log_probability)
+        values.append(value)
+        tokens = controller.append_interval(
+            [np.full(3, index + frame + 1, dtype=np.float32) for frame in range(4)],
+            action,
+        )
+    gate_before = agent.network.fusion_gate_logit.detach().clone()
+    metrics = agent.update_recurrent(
+        token_sequences=token_sequences,
+        visual_targets=targets,
+        initial_hiddens=np.asarray(hiddens, dtype=np.float32),
+        actions=np.asarray(actions, dtype=np.int64),
+        old_log_probabilities=np.asarray(log_probabilities, dtype=np.float32),
+        returns=np.asarray([1.0, 0.5, -0.5, 2.0], dtype=np.float32),
+        advantages=np.asarray([1.0, 0.5, -0.5, 2.0], dtype=np.float32),
+        dones=np.asarray([0.0, 1.0, 0.0, 1.0], dtype=np.float32),
+    )
+
+    assert metrics["vision_auxiliary_loss"] > 0
+    assert metrics["vision_zero_kl"] >= 0
+    assert metrics["fusion_vision_weight"] == pytest.approx(0.8)
+    assert metrics["hidden_saturation_fraction"] < 0.5
+    assert torch.equal(gate_before, agent.network.fusion_gate_logit)
+    assert isinstance(agent.network.frame_projection[1], torch.nn.LayerNorm)
+    checkpoint = tmp_path / "vision-fusion.pt"
+    agent.save(checkpoint)
+    restored = ppo.PPOAgent.load(checkpoint)
+    assert restored.config.temporal_encoder == "vision_fusion_gru_v2"
+    assert restored.config.vision_auxiliary_coefficient == pytest.approx(0.1)
+
+
+def test_flyvis_target_normalization_is_finite_and_spatial():
+    flybrain = _load_flybrain()
+    ppo = _load_ppo(flybrain)
+    grids = np.arange(ppo.FLYVIS_SPATIAL_TARGET_DIM, dtype=np.float32).reshape(11, 6, 8)
+    target = ppo.normalize_flyvis_targets(grids)
+    assert target.shape == (ppo.FLYVIS_SPATIAL_TARGET_DIM,)
+    assert np.isfinite(target).all()
+    assert target.std() == pytest.approx(1.0, rel=1.0e-3)
+
+
 def test_factorized_ppo_maps_three_heads_to_ten_action_probabilities():
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)

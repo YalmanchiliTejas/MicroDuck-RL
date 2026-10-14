@@ -13,18 +13,22 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 5
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 6
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
 VISUAL_ENCODERS = (
     "column_v1", "retina_lite_v2", "retina_spatial_v3", "flyvis_spatial_v1"
 )
 FACTORIZED_HEAD_SIZES = (3, 2, 2)
-TEMPORAL_ENCODERS = ("conv4", "controller_gru", "episode_gru_v1")
+TEMPORAL_ENCODERS = (
+    "conv4", "controller_gru", "episode_gru_v1", "vision_fusion_gru_v2"
+)
 CONTROLLER_FEATURE_DIM = len(ACTION_LEVELS) + 8
+COMPACT_CONTROLLER_FEATURE_DIM = 8
 CONTROLLER_GRU_DEPTH = 16
 EPISODE_GRU_SEQUENCE_LENGTH = 32
 EPISODE_GRU_HIDDEN_DIM = 256
+FLYVIS_SPATIAL_TARGET_DIM = 11 * 6 * 8
 HOLD_DURATION_SCALE = 32.0
 
 
@@ -55,6 +59,9 @@ class PPOConfig:
     grad_clip_norm: float = 0.5
     target_kl: float = 0.02
     recurrent_sequence_length: int = EPISODE_GRU_SEQUENCE_LENGTH
+    vision_auxiliary_coefficient: float = 0.1
+    hidden_saturation_coefficient: float = 0.01
+    fusion_gate_warmup_steps: int = 20_000
 
     def __post_init__(self) -> None:
         if self.feature_dim <= 0:
@@ -80,6 +87,15 @@ class PPOConfig:
                 "episode_gru_v1 requires one live recurrent state and the "
                 "versioned controller feature layout"
             )
+        elif self.temporal_encoder == "vision_fusion_gru_v2" and (
+            self.stack_depth != 1
+            or self.controller_feature_dim != COMPACT_CONTROLLER_FEATURE_DIM
+            or self.visual_encoder != "flyvis_spatial_v1"
+        ):
+            raise ValueError(
+                "vision_fusion_gru_v2 requires flyvis_spatial_v1, one live "
+                "recurrent state, and the compact controller layout"
+            )
         if self.num_actions != len(ACTION_LEVELS):
             raise ValueError("PPO action count does not match the Mario action space")
         if self.policy_mode not in POLICY_MODES:
@@ -92,6 +108,12 @@ class PPOConfig:
             raise ValueError("target_kl must be positive")
         if self.recurrent_sequence_length <= 0:
             raise ValueError("recurrent sequence length must be positive")
+        if self.vision_auxiliary_coefficient < 0:
+            raise ValueError("vision auxiliary coefficient cannot be negative")
+        if self.hidden_saturation_coefficient < 0:
+            raise ValueError("hidden saturation coefficient cannot be negative")
+        if self.fusion_gate_warmup_steps < 0:
+            raise ValueError("fusion gate warmup cannot be negative")
 
 
 class ActorCritic(nn.Module):
@@ -100,20 +122,46 @@ class ActorCritic(nn.Module):
     def __init__(self, config: PPOConfig) -> None:
         super().__init__()
         self.stack_depth = config.stack_depth
+        self.feature_dim = config.feature_dim
+        self.controller_feature_dim = config.controller_feature_dim
         input_dim = config.feature_dim + config.controller_feature_dim
-        self.frame_projection = nn.Sequential(nn.Linear(input_dim, 256), nn.ReLU())
         self.temporal_encoder = config.temporal_encoder
+        if config.temporal_encoder == "vision_fusion_gru_v2":
+            self.frame_projection = nn.Sequential(
+                nn.Linear(config.feature_dim, 256),
+                nn.LayerNorm(256),
+                nn.SiLU(),
+            )
+            self.temporal = nn.GRU(
+                256, EPISODE_GRU_HIDDEN_DIM, batch_first=True
+            )
+            self.controller_projection = nn.Sequential(
+                nn.Linear(COMPACT_CONTROLLER_FEATURE_DIM, 128),
+                nn.LayerNorm(128),
+                nn.SiLU(),
+            )
+            # alpha = 0.5 + 0.45 * sigmoid(logit); logit=log(2) gives 0.8.
+            self.fusion_gate_logit = nn.Parameter(torch.tensor(float(np.log(2.0))))
+            self.shared = nn.Sequential(nn.Linear(256 + 128, 512), nn.SiLU())
+            self.vision_decoder = nn.Linear(EPISODE_GRU_HIDDEN_DIM, FLYVIS_SPATIAL_TARGET_DIM)
+        else:
+            self.frame_projection = nn.Sequential(
+                nn.Linear(input_dim, 256), nn.ReLU()
+            )
         if config.temporal_encoder in ("controller_gru", "episode_gru_v1"):
             self.temporal = nn.GRU(
                 256, EPISODE_GRU_HIDDEN_DIM, batch_first=True
             )
             encoded_dim = EPISODE_GRU_HIDDEN_DIM
-        else:
+        elif config.temporal_encoder == "conv4":
             self.temporal = nn.Sequential(
                 nn.Conv1d(256, 256, kernel_size=2), nn.ReLU(), nn.Flatten()
             )
             encoded_dim = 256 * (config.stack_depth - 1)
-        self.shared = nn.Sequential(nn.Linear(encoded_dim, 512), nn.ReLU())
+        else:
+            encoded_dim = EPISODE_GRU_HIDDEN_DIM
+        if config.temporal_encoder != "vision_fusion_gru_v2":
+            self.shared = nn.Sequential(nn.Linear(encoded_dim, 512), nn.ReLU())
         self.policy_mode = config.policy_mode
         if config.policy_mode == "factorized":
             self.direction_policy = nn.Linear(512, FACTORIZED_HEAD_SIZES[0])
@@ -124,9 +172,9 @@ class ActorCritic(nn.Module):
         self.value = nn.Linear(512, 1)
 
     def forward(self, activity: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        if self.temporal_encoder == "episode_gru_v1":
+        if self.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
             raise ValueError(
-                "episode_gru_v1 must be evaluated with recurrent_tokens()"
+                "episode recurrent policies must be evaluated with recurrent_tokens()"
             )
         if activity.ndim != 3 or activity.shape[1] != self.stack_depth:
             raise ValueError(
@@ -174,25 +222,64 @@ class ActorCritic(nn.Module):
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         """Advance the episode GRU through ordered emulator-frame tokens."""
 
-        if self.temporal_encoder != "episode_gru_v1":
-            raise ValueError("recurrent_tokens requires episode_gru_v1")
-        if tokens.ndim != 3 or tokens.shape[2] != self.frame_projection[0].in_features:
+        logits, value, next_hidden, _ = self.recurrent_tokens_aux(tokens, hidden)
+        return logits, value, next_hidden
+
+    def recurrent_tokens_aux(
+        self,
+        tokens: torch.Tensor,
+        hidden: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None]:
+        """Advance a recurrent policy and optionally decode its vision latent."""
+
+        if self.temporal_encoder not in ("episode_gru_v1", "vision_fusion_gru_v2"):
+            raise ValueError("recurrent_tokens requires an episode recurrent policy")
+        expected = self.feature_dim + self.controller_feature_dim
+        if tokens.ndim != 3 or tokens.shape[2] != expected:
             raise ValueError(
                 "recurrent tokens must have shape (batch, frames, input_features)"
             )
-        projected = self.frame_projection(tokens.float())
+        if self.temporal_encoder == "vision_fusion_gru_v2":
+            projected = self.frame_projection(tokens[:, :, : self.feature_dim].float())
+        else:
+            projected = self.frame_projection(tokens.float())
         features, next_hidden = self.temporal(projected, hidden)
-        logits, value = self._heads(features[:, -1])
-        return logits, value, next_hidden
+        vision = features[:, -1]
+        if self.temporal_encoder == "vision_fusion_gru_v2":
+            controller = self.controller_projection(
+                tokens[:, -1, self.feature_dim :].float()
+            )
+            alpha = self.fusion_vision_weight()
+            fused = torch.cat((alpha * vision, (1.0 - alpha) * controller), dim=1)
+            logits, value = self._heads(fused)
+            reconstruction = self.vision_decoder(vision)
+        else:
+            logits, value = self._heads(vision)
+            reconstruction = None
+        return logits, value, next_hidden, reconstruction
 
     def recurrent_heads(
-        self, hidden: torch.Tensor
+        self, hidden: torch.Tensor, controller_state: torch.Tensor | None = None
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Read actor and critic heads from a previously advanced GRU state."""
 
         if hidden.ndim != 3 or hidden.shape[:2] != (1, 1):
             raise ValueError("recurrent hidden state must have shape (1, 1, hidden)")
-        return self._heads(hidden[-1])
+        vision = hidden[-1]
+        if self.temporal_encoder == "vision_fusion_gru_v2":
+            if controller_state is None:
+                raise ValueError("vision fusion heads require controller state")
+            if controller_state.ndim == 1:
+                controller_state = controller_state.unsqueeze(0)
+            controller = self.controller_projection(controller_state.float())
+            alpha = self.fusion_vision_weight()
+            vision = torch.cat((alpha * vision, (1.0 - alpha) * controller), dim=1)
+        return self._heads(vision)
+
+    def fusion_vision_weight(self) -> torch.Tensor:
+        if self.temporal_encoder != "vision_fusion_gru_v2":
+            return torch.ones((), device=next(self.parameters()).device)
+        return 0.5 + 0.45 * torch.sigmoid(self.fusion_gate_logit)
 
 
 class ControllerTemporalStack:
@@ -393,6 +480,91 @@ class EpisodeGRUController:
         return value
 
 
+class VisionFusionGRUController:
+    """Keep visual recurrence separate from a compact current controller state."""
+
+    def __init__(self, feature_dim: int) -> None:
+        self.feature_dim = int(feature_dim)
+        self.previous_action: int | None = None
+        self.action_hold_decisions = 0
+        self.jump_hold_decisions = 0
+        self.last_diagnostics: dict[str, int | bool] = {}
+
+    def _activity(self, activity: np.ndarray) -> np.ndarray:
+        value = np.asarray(activity, dtype=np.float32)
+        if value.shape != (self.feature_dim,):
+            raise ValueError(
+                f"MaleCNS activity must have shape ({self.feature_dim},), got {value.shape}"
+            )
+        return value
+
+    def reset(self, activity: np.ndarray) -> np.ndarray:
+        self.previous_action = None
+        self.action_hold_decisions = 0
+        self.jump_hold_decisions = 0
+        self.last_diagnostics = {
+            "action_hold_decisions": 0,
+            "jump_hold_decisions": 0,
+            "jump_pressed_edge": False,
+            "jump_released_edge": False,
+        }
+        controller = np.zeros(COMPACT_CONTROLLER_FEATURE_DIM, dtype=np.float32)
+        return np.concatenate((self._activity(activity), controller))[None, :]
+
+    def append_interval(
+        self, activities: list[np.ndarray] | tuple[np.ndarray, ...], action: int
+    ) -> np.ndarray:
+        if not activities:
+            raise ValueError("an action interval must contain MaleCNS activity")
+        action = int(action)
+        if not 0 <= action < len(ACTION_LEVELS):
+            raise ValueError(f"invalid controller action: {action}")
+        previous_jump = (
+            False if self.previous_action is None
+            else bool(ACTION_LEVELS[self.previous_action][2])
+        )
+        left, right, jump, run = ACTION_LEVELS[action]
+        self.action_hold_decisions = (
+            self.action_hold_decisions + 1 if action == self.previous_action else 1
+        )
+        self.jump_hold_decisions = self.jump_hold_decisions + 1 if jump else 0
+        pressed = bool(jump and not previous_jump)
+        released = bool(previous_jump and not jump)
+        controller = np.asarray(
+            (
+                left, right, jump, run,
+                pressed, released,
+                min(self.jump_hold_decisions / HOLD_DURATION_SCALE, 1.0),
+                min(self.action_hold_decisions / HOLD_DURATION_SCALE, 1.0),
+            ),
+            dtype=np.float32,
+        )
+        tokens = np.stack(
+            [np.concatenate((self._activity(value), controller)) for value in activities]
+        )
+        self.previous_action = action
+        self.last_diagnostics = {
+            "action_hold_decisions": self.action_hold_decisions,
+            "jump_hold_decisions": self.jump_hold_decisions,
+            "jump_pressed_edge": pressed,
+            "jump_released_edge": released,
+        }
+        return tokens
+
+
+def normalize_flyvis_targets(grids: np.ndarray) -> np.ndarray:
+    """Normalize each FlyVis cell-type map while retaining its spatial pattern."""
+
+    values = np.asarray(grids, dtype=np.float32)
+    if values.shape != (11, 6, 8):
+        raise ValueError(f"FlyVis targets must have shape (11, 6, 8), got {values.shape}")
+    flat = values.reshape(11, -1)
+    normalized = (flat - flat.mean(axis=1, keepdims=True)) / (
+        flat.std(axis=1, keepdims=True) + 1.0e-4
+    )
+    return np.clip(normalized, -5.0, 5.0).reshape(-1).astype(np.float32)
+
+
 def _factorized_probabilities(logits: torch.Tensor) -> torch.Tensor:
     """Map direction/jump/run head logits onto the stable ten-action contract."""
 
@@ -455,12 +627,13 @@ class PPOAgent:
         self.steps = 0
         self.updates = 0
         self._recurrent_hidden: torch.Tensor | None = None
+        self._recurrent_controller: torch.Tensor | None = None
 
     def act(
         self, state: np.ndarray, *, deterministic: bool = False
     ) -> tuple[int, float, float]:
-        if self.config.temporal_encoder == "episode_gru_v1":
-            raise ValueError("episode_gru_v1 must use act_recurrent()")
+        if self.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
+            raise ValueError("episode recurrent policies must use act_recurrent()")
         with torch.no_grad():
             state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
             logits, value = self.network(state_t)
@@ -475,13 +648,14 @@ class PPOAgent:
     def reset_recurrent(self) -> None:
         """Reset live episode memory; call only at an environment reset."""
 
-        if self.config.temporal_encoder != "episode_gru_v1":
-            raise ValueError("reset_recurrent requires episode_gru_v1")
+        if self.config.temporal_encoder not in ("episode_gru_v1", "vision_fusion_gru_v2"):
+            raise ValueError("reset_recurrent requires an episode recurrent policy")
         self._recurrent_hidden = torch.zeros(
             (1, 1, EPISODE_GRU_HIDDEN_DIM),
             dtype=torch.float32,
             device=self.device,
         )
+        self._recurrent_controller = None
 
     def observe_recurrent(self, tokens: np.ndarray) -> np.ndarray:
         """Advance live memory through ordered frame tokens.
@@ -490,8 +664,8 @@ class PPOAgent:
         rollout datum needed to replay a contiguous PPO sequence.
         """
 
-        if self.config.temporal_encoder != "episode_gru_v1":
-            raise ValueError("observe_recurrent requires episode_gru_v1")
+        if self.config.temporal_encoder not in ("episode_gru_v1", "vision_fusion_gru_v2"):
+            raise ValueError("observe_recurrent requires an episode recurrent policy")
         if self._recurrent_hidden is None:
             raise RuntimeError("recurrent memory has not been reset")
         initial = self._recurrent_hidden.detach().cpu().numpy()[0, 0].copy()
@@ -503,6 +677,8 @@ class PPOAgent:
                 token_t, self._recurrent_hidden
             )
         self._recurrent_hidden = hidden.detach()
+        if self.config.temporal_encoder == "vision_fusion_gru_v2":
+            self._recurrent_controller = token_t[:, -1, self.config.feature_dim :].detach()
         return initial
 
     def recurrent_hidden(self) -> np.ndarray:
@@ -528,12 +704,14 @@ class PPOAgent:
         return action, log_probability, float(diagnostics["value"])
 
     def policy_diagnostics_recurrent(self) -> dict[str, object]:
-        if self.config.temporal_encoder != "episode_gru_v1":
+        if self.config.temporal_encoder not in ("episode_gru_v1", "vision_fusion_gru_v2"):
             raise ValueError("recurrent diagnostics require episode_gru_v1")
         if self._recurrent_hidden is None:
             raise RuntimeError("recurrent memory has not been reset")
         with torch.no_grad():
-            logits, value = self.network.recurrent_heads(self._recurrent_hidden)
+            logits, value = self.network.recurrent_heads(
+                self._recurrent_hidden, self._recurrent_controller
+            )
             action_probabilities = self._action_probabilities(logits)[0]
             diagnostics: dict[str, object] = {
                 "action_probabilities": action_probabilities.cpu().numpy(),
@@ -544,6 +722,10 @@ class PPOAgent:
                     (self._recurrent_hidden.abs() > 0.95).float().mean().item()
                 ),
             }
+            if self.config.temporal_encoder == "vision_fusion_gru_v2":
+                diagnostics["fusion_vision_weight"] = float(
+                    self.network.fusion_vision_weight().item()
+                )
             if self.config.policy_mode == "factorized":
                 direction, jump, run = (
                     torch.softmax(head, dim=1)[0].cpu().numpy()
@@ -572,7 +754,7 @@ class PPOAgent:
     def policy_diagnostics(self, state: np.ndarray) -> dict[str, object]:
         """Expose frozen-policy probabilities and value for rollout forensics."""
 
-        if self.config.temporal_encoder == "episode_gru_v1":
+        if self.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
             raise ValueError(
                 "episode_gru_v1 must use policy_diagnostics_recurrent()"
             )
@@ -598,7 +780,7 @@ class PPOAgent:
             return diagnostics
 
     def value(self, state: np.ndarray) -> float:
-        if self.config.temporal_encoder == "episode_gru_v1":
+        if self.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
             raise ValueError("episode_gru_v1 must use recurrent_value()")
         with torch.no_grad():
             state_t = torch.as_tensor(state, device=self.device).unsqueeze(0)
@@ -664,8 +846,8 @@ class PPOAgent:
         returns: np.ndarray,
         advantages: np.ndarray,
     ) -> dict[str, float]:
-        if self.config.temporal_encoder == "episode_gru_v1":
-            raise ValueError("episode_gru_v1 must use update_recurrent()")
+        if self.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
+            raise ValueError("episode recurrent policies must use update_recurrent()")
         cfg = self.config
         if not len(states):
             raise ValueError("PPO update requires at least one transition")
@@ -778,11 +960,12 @@ class PPOAgent:
         returns: np.ndarray,
         advantages: np.ndarray,
         dones: np.ndarray,
+        visual_targets: list[np.ndarray] | None = None,
     ) -> dict[str, float]:
         """Train episode memory on contiguous decision sequences with BPTT."""
 
-        if self.config.temporal_encoder != "episode_gru_v1":
-            raise ValueError("update_recurrent requires episode_gru_v1")
+        if self.config.temporal_encoder not in ("episode_gru_v1", "vision_fusion_gru_v2"):
+            raise ValueError("update_recurrent requires an episode recurrent policy")
         count = len(token_sequences)
         if not count:
             raise ValueError("recurrent PPO update requires transitions")
@@ -798,6 +981,21 @@ class PPOAgent:
                     f"recurrent token groups must have shape (frames, {input_dim})"
                 )
             tokens.append(array)
+        targets: list[np.ndarray] | None = None
+        if self.config.temporal_encoder == "vision_fusion_gru_v2":
+            if visual_targets is None or len(visual_targets) != count:
+                raise ValueError(
+                    "vision fusion PPO requires one visual target group per transition"
+                )
+            targets = []
+            for token_group, value in zip(tokens, visual_targets, strict=True):
+                array = np.asarray(value, dtype=np.float32)
+                if array.shape != (len(token_group), FLYVIS_SPATIAL_TARGET_DIM):
+                    raise ValueError(
+                        "visual target groups must match token frames and have "
+                        f"{FLYVIS_SPATIAL_TARGET_DIM} features"
+                    )
+                targets.append(array)
         initial_hiddens = np.asarray(initial_hiddens, dtype=np.float32)
         if initial_hiddens.shape != (count, EPISODE_GRU_HIDDEN_DIM):
             raise ValueError(
@@ -834,6 +1032,13 @@ class PPOAgent:
             "hidden_rms": 0.0,
             "hidden_max_abs": 0.0,
             "hidden_saturation_fraction": 0.0,
+            "hidden_saturation_loss": 0.0,
+            "vision_auxiliary_loss": 0.0,
+            "vision_zero_kl": 0.0,
+            "vision_zero_greedy_change_fraction": 0.0,
+            "fusion_vision_weight": 0.0,
+            "controller_grad_norm": 0.0,
+            "vision_decoder_grad_norm": 0.0,
         }
         minibatches = 0
         epochs_completed = 0
@@ -847,6 +1052,9 @@ class PPOAgent:
                 value_parts = []
                 index_parts = []
                 hidden_parts = []
+                reconstruction_parts = []
+                target_parts = []
+                zero_logits_parts = []
                 for chunk_index in order[batch_start : batch_start + chunks_per_batch]:
                     start, stop = chunks[int(chunk_index)]
                     hidden = torch.as_tensor(
@@ -858,13 +1066,26 @@ class PPOAgent:
                         token_t = torch.as_tensor(
                             tokens[index], device=self.device
                         ).unsqueeze(0)
-                        logits, value, hidden = self.network.recurrent_tokens(
+                        hidden_before = hidden
+                        logits, value, hidden, reconstruction = self.network.recurrent_tokens_aux(
                             token_t, hidden
                         )
                         logits_parts.append(logits)
                         value_parts.append(value)
                         index_parts.append(index)
                         hidden_parts.append(hidden[-1])
+                        if reconstruction is not None:
+                            assert targets is not None
+                            reconstruction_parts.append(reconstruction)
+                            target_parts.append(torch.as_tensor(
+                                targets[index][-1], device=self.device
+                            ).unsqueeze(0))
+                            zero_tokens = token_t.clone()
+                            zero_tokens[:, :, : self.config.feature_dim] = 0.0
+                            zero_logits, _, _, _ = self.network.recurrent_tokens_aux(
+                                zero_tokens, hidden_before
+                            )
+                            zero_logits_parts.append(zero_logits)
                 indices = torch.as_tensor(
                     index_parts, device=self.device, dtype=torch.long
                 )
@@ -899,10 +1120,33 @@ class PPOAgent:
                 else:
                     zero = entropy.detach() * 0.0
                     direction_entropy = jump_entropy = run_entropy = zero
+                hidden_values = torch.cat(hidden_parts, dim=0)
+                saturation_loss = F.relu(hidden_values.abs() - 0.9).square().mean()
+                if reconstruction_parts:
+                    reconstructions = torch.cat(reconstruction_parts, dim=0)
+                    target_t = torch.cat(target_parts, dim=0)
+                    vision_auxiliary_loss = F.mse_loss(reconstructions, target_t)
+                    zero_logits = torch.cat(zero_logits_parts, dim=0)
+                    zero_probabilities = self._action_probabilities(zero_logits)
+                    vision_zero_kl = (
+                        probabilities.detach()
+                        * (
+                            log_probs.detach()
+                            - torch.log(zero_probabilities.clamp_min(1.0e-12))
+                        )
+                    ).sum(dim=1).mean()
+                    greedy_change = (
+                        probabilities.argmax(dim=1) != zero_probabilities.argmax(dim=1)
+                    ).float().mean()
+                else:
+                    zero = entropy.detach() * 0.0
+                    vision_auxiliary_loss = vision_zero_kl = greedy_change = zero
                 loss = (
                     policy_loss
                     + self.config.value_coefficient * value_loss
                     - self.config.entropy_coefficient * entropy
+                    + self.config.vision_auxiliary_coefficient * vision_auxiliary_loss
+                    + self.config.hidden_saturation_coefficient * saturation_loss
                 )
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
@@ -922,11 +1166,22 @@ class PPOAgent:
                     self.network.frame_projection.parameters()
                 )
                 gru_grad = gradient_norm(self.network.temporal.parameters())
+                controller_grad = gradient_norm(
+                    getattr(self.network, "controller_projection", nn.Sequential()).parameters()
+                )
+                decoder_grad = gradient_norm(
+                    getattr(self.network, "vision_decoder", nn.Sequential()).parameters()
+                )
+                if (
+                    self.config.temporal_encoder == "vision_fusion_gru_v2"
+                    and self.steps < self.config.fusion_gate_warmup_steps
+                ):
+                    self.network.fusion_gate_logit.grad = None
                 nn.utils.clip_grad_norm_(
                     self.network.parameters(), self.config.grad_clip_norm
                 )
                 self.optimizer.step()
-                hidden_values = torch.cat(hidden_parts, dim=0).detach()
+                hidden_values = hidden_values.detach()
                 batch_metrics = {
                     "loss": loss,
                     "policy_loss": policy_loss,
@@ -945,6 +1200,13 @@ class PPOAgent:
                     "hidden_saturation_fraction": (
                         (hidden_values.abs() > 0.95).float().mean()
                     ),
+                    "hidden_saturation_loss": saturation_loss,
+                    "vision_auxiliary_loss": vision_auxiliary_loss,
+                    "vision_zero_kl": vision_zero_kl,
+                    "vision_zero_greedy_change_fraction": greedy_change,
+                    "fusion_vision_weight": self.network.fusion_vision_weight().detach(),
+                    "controller_grad_norm": controller_grad,
+                    "vision_decoder_grad_norm": decoder_grad,
                 }
                 for key, value in batch_metrics.items():
                     totals[key] += float(value.item())

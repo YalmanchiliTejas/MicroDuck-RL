@@ -346,3 +346,30 @@ MARIO_PPO_FACTORIZED=0 \
 MARIO_PRETRAIN_ACTION_REPEAT=4 \
 ./slurm_mario_flybrain_pretrain.sh
 ```
+
+## Normalized visual fusion GRU
+
+`vision_fusion_gru_v2` is the corrected recurrent architecture. MaleCNS
+descending activity is projected to 256 values, LayerNorm-normalized, and sent
+through a visual-only 256-unit GRU. Eight compact controller values (four
+button levels, jump press/release edges, and two hold lengths) use a separate
+128-unit state branch. A constrained scalar gate starts at 80% vision, remains
+fixed for the first 20,000 decisions, and then learns within the range
+50%–95% vision before the two branches are fused for the actor and critic.
+
+An auxiliary decoder reconstructs the normalized signed 11×6×8 FlyVis spatial
+grid from the visual hidden state. Its default coefficient is 0.1. Training
+also logs real-versus-zero-vision policy KL, greedy-action flip fraction, gate
+weight, branch gradient norms, and hidden saturation. The KL is diagnostic and
+is not itself optimized.
+
+```bash
+MARIO_VISUAL_ENCODER=flyvis_spatial_v1 \
+MARIO_PPO_VISION_FUSION_GRU=1 \
+MARIO_PPO_VISION_AUXILIARY_COEFFICIENT=0.1 \
+MARIO_PPO_HIDDEN_SATURATION_COEFFICIENT=0.01 \
+MARIO_PPO_FUSION_GATE_WARMUP_STEPS=20000 \
+MARIO_PPO_RECURRENT_SEQUENCE_LENGTH=32 \
+MARIO_ENABLE_DOPAMINE=0 \
+./slurm_mario_flybrain_pretrain.sh
+```

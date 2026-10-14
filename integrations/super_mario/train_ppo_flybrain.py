@@ -15,14 +15,17 @@ from male_cns import VISUAL_ENCODERS, MaleCNS
 from mario_dqn import ActivityStack, FlybrainAction
 from mario_ppo import (
     CONTROLLER_FEATURE_DIM,
+    COMPACT_CONTROLLER_FEATURE_DIM,
     CONTROLLER_GRU_DEPTH,
     ControllerTemporalStack,
     EPISODE_GRU_SEQUENCE_LENGTH,
     EpisodeGRUController,
+    VisionFusionGRUController,
     PPOAgent,
     PPOConfig,
     generalized_advantage_estimates,
     rollout_ready,
+    normalize_flyvis_targets,
 )
 from mario_sidecar import nes_actions
 from reward_contract import REWARD_CONTRACT
@@ -75,12 +78,12 @@ def _flush(
 ) -> dict[str, float] | None:
     transition_key = (
         "token_sequences"
-        if agent.config.temporal_encoder == "episode_gru_v1"
+        if agent.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2")
         else "states"
     )
     if not rollout[transition_key]:
         return None
-    if agent.config.temporal_encoder == "episode_gru_v1":
+    if agent.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
         next_value = 0.0 if done else agent.recurrent_value()
     else:
         if next_state is None:
@@ -94,7 +97,7 @@ def _flush(
         gamma=agent.config.gamma,
         gae_lambda=agent.config.gae_lambda,
     )
-    if agent.config.temporal_encoder == "episode_gru_v1":
+    if agent.config.temporal_encoder in ("episode_gru_v1", "vision_fusion_gru_v2"):
         metrics = agent.update_recurrent(
             token_sequences=rollout["token_sequences"],
             initial_hiddens=np.asarray(
@@ -107,6 +110,11 @@ def _flush(
             returns=returns,
             advantages=advantages,
             dones=np.asarray(rollout["dones"], dtype=np.float32),
+            visual_targets=(
+                rollout["visual_targets"]
+                if agent.config.temporal_encoder == "vision_fusion_gru_v2"
+                else None
+            ),
         )
     else:
         metrics = agent.update(
@@ -137,6 +145,13 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
             f" hidden_saturation={metrics['hidden_saturation_fraction']:.6f}"
             f" gru_grad={metrics['gru_grad_norm']:.6f}"
         )
+        if "vision_auxiliary_loss" in metrics:
+            recurrent_metrics += (
+                f" vision_aux={metrics['vision_auxiliary_loss']:.6f}"
+                f" vision_kl={metrics['vision_zero_kl']:.6f}"
+                f" vision_flip={metrics['vision_zero_greedy_change_fraction']:.6f}"
+                f" fusion_vision={metrics['fusion_vision_weight']:.6f}"
+            )
     print(
         "ppo_update "
         f"step={step} "
@@ -180,8 +195,9 @@ def run(args: argparse.Namespace) -> None:
         )
         print(f"resumed PPO={args.resume} step={agent.steps}", flush=True)
         requested_temporal = (
-            "episode_gru_v1"
-            if args.episode_gru
+            "vision_fusion_gru_v2"
+            if args.vision_fusion_gru
+            else "episode_gru_v1" if args.episode_gru
             else "controller_gru" if args.temporal_controller else "conv4"
         )
         if agent.config.temporal_encoder != requested_temporal:
@@ -204,21 +220,27 @@ def run(args: argparse.Namespace) -> None:
                 ),
                 visual_encoder=args.visual_encoder,
                 temporal_encoder=(
-                    "episode_gru_v1"
-                    if args.episode_gru
+                    "vision_fusion_gru_v2"
+                    if args.vision_fusion_gru
+                    else "episode_gru_v1" if args.episode_gru
                     else "controller_gru" if args.temporal_controller else "conv4"
                 ),
                 stack_depth=(
                     1
-                    if args.episode_gru
+                    if args.episode_gru or args.vision_fusion_gru
                     else args.temporal_decisions if args.temporal_controller else 4
                 ),
                 controller_feature_dim=(
-                    CONTROLLER_FEATURE_DIM
+                    COMPACT_CONTROLLER_FEATURE_DIM
+                    if args.vision_fusion_gru
+                    else CONTROLLER_FEATURE_DIM
                     if args.temporal_controller or args.episode_gru
                     else 0
                 ),
                 recurrent_sequence_length=args.recurrent_sequence_length,
+                vision_auxiliary_coefficient=args.vision_auxiliary_coefficient,
+                hidden_saturation_coefficient=args.hidden_saturation_coefficient,
+                fusion_gate_warmup_steps=args.fusion_gate_warmup_steps,
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -237,7 +259,10 @@ def run(args: argparse.Namespace) -> None:
         f"history={agent.config.stack_depth} "
         f"lr={agent.config.learning_rate:g} value_coef={agent.config.value_coefficient:g} "
         f"entropy_coef={agent.config.entropy_coefficient:g} "
-        f"target_kl={agent.config.target_kl:g}",
+        f"target_kl={agent.config.target_kl:g} "
+        f"vision_aux={agent.config.vision_auxiliary_coefficient:g} "
+        f"saturation_coef={agent.config.hidden_saturation_coefficient:g} "
+        f"gate_warmup={agent.config.fusion_gate_warmup_steps}",
         flush=True,
     )
     if agent.config.feature_dim != connectome.feature_dim:
@@ -253,11 +278,24 @@ def run(args: argparse.Namespace) -> None:
         nes_actions(),
     )
     observation, _ = env.reset(seed=args.seed + agent.steps)
-    episode_recurrent = agent.config.temporal_encoder == "episode_gru_v1"
+    episode_recurrent = agent.config.temporal_encoder in (
+        "episode_gru_v1", "vision_fusion_gru_v2"
+    )
     if episode_recurrent:
-        stack = EpisodeGRUController(agent.config.feature_dim)
+        stack = (
+            VisionFusionGRUController(agent.config.feature_dim)
+            if agent.config.temporal_encoder == "vision_fusion_gru_v2"
+            else EpisodeGRUController(agent.config.feature_dim)
+        )
         agent.reset_recurrent()
         current_tokens = stack.reset(connectome.reset(observation))
+        if agent.config.temporal_encoder == "vision_fusion_gru_v2":
+            grids = connectome.flyvis_spatial_activity()
+            if grids is None:
+                raise RuntimeError("vision fusion GRU requires FlyVis spatial targets")
+            current_visual_targets = normalize_flyvis_targets(grids)[None, :]
+        else:
+            current_visual_targets = None
         current_initial_hidden = agent.observe_recurrent(current_tokens)
         state = None
     else:
@@ -283,6 +321,7 @@ def run(args: argparse.Namespace) -> None:
         "states": [],
         "token_sequences": [],
         "initial_hiddens": [],
+        "visual_targets": [],
         "actions": [],
         "log_probabilities": [],
         "rewards": [],
@@ -321,6 +360,7 @@ def run(args: argparse.Namespace) -> None:
             raw_reward = 0.0
             reward_components: dict[str, float] = {}
             interval_activities: list[np.ndarray] = []
+            interval_visual_targets: list[np.ndarray] = []
             terminated = truncated = False
             info: dict = {}
             for _ in range(args.action_repeat):
@@ -337,15 +377,25 @@ def run(args: argparse.Namespace) -> None:
                     observation, action_sequence=agent.steps
                 )
                 if agent.config.temporal_encoder in (
-                    "controller_gru", "episode_gru_v1"
+                    "controller_gru", "episode_gru_v1", "vision_fusion_gru_v2"
                 ):
                     interval_activities.append(activity)
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2":
+                        grids = connectome.flyvis_spatial_activity()
+                        if grids is None:
+                            raise RuntimeError("FlyVis target missing after observation")
+                        interval_visual_targets.append(normalize_flyvis_targets(grids))
                 else:
                     stack.append(activity)
                 if terminated or truncated:
                     break
             if episode_recurrent:
                 next_tokens = stack.append_interval(interval_activities, action)
+                next_visual_targets = (
+                    np.stack(interval_visual_targets)
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2"
+                    else None
+                )
                 next_initial_hidden = agent.observe_recurrent(next_tokens)
                 next_state = None
                 controller = stack.last_diagnostics
@@ -398,6 +448,11 @@ def run(args: argparse.Namespace) -> None:
                     rollout["initial_hiddens"].append(
                         current_initial_hidden.copy()
                     )
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2":
+                        assert current_visual_targets is not None
+                        rollout["visual_targets"].append(
+                            current_visual_targets.copy()
+                        )
                 else:
                     assert state is not None
                     rollout["states"].append(state.copy())
@@ -442,6 +497,7 @@ def run(args: argparse.Namespace) -> None:
             if episode_recurrent:
                 current_tokens = next_tokens
                 current_initial_hidden = next_initial_hidden
+                current_visual_targets = next_visual_targets
             else:
                 state = next_state
 
@@ -520,7 +576,7 @@ def run(args: argparse.Namespace) -> None:
                         f"max_action_hold={episode_max_action_hold} "
                         f"max_jump_hold={episode_max_jump_hold}"
                         if agent.config.temporal_encoder in (
-                            "controller_gru", "episode_gru_v1"
+                            "controller_gru", "episode_gru_v1", "vision_fusion_gru_v2"
                         )
                         else ""
                     ),
@@ -530,6 +586,13 @@ def run(args: argparse.Namespace) -> None:
                 if episode_recurrent:
                     agent.reset_recurrent()
                     current_tokens = stack.reset(connectome.reset(observation))
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2":
+                        grids = connectome.flyvis_spatial_activity()
+                        if grids is None:
+                            raise RuntimeError("FlyVis target missing after reset")
+                        current_visual_targets = normalize_flyvis_targets(grids)[None, :]
+                    else:
+                        current_visual_targets = None
                     current_initial_hidden = agent.observe_recurrent(current_tokens)
                     state = None
                 else:
@@ -619,6 +682,21 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--vision-fusion-gru",
+        action="store_true",
+        help=(
+            "use normalized visual-only recurrent memory, compact controller "
+            "fusion, and FlyVis spatial reconstruction"
+        ),
+    )
+    parser.add_argument(
+        "--vision-auxiliary-coefficient", type=float, default=0.1
+    )
+    parser.add_argument(
+        "--hidden-saturation-coefficient", type=float, default=0.01
+    )
+    parser.add_argument("--fusion-gate-warmup-steps", type=int, default=20_000)
+    parser.add_argument(
         "--recurrent-sequence-length",
         type=int,
         default=EPISODE_GRU_SEQUENCE_LENGTH,
@@ -657,8 +735,17 @@ def main() -> None:
         parser.error("--temporal-decisions must be at least two")
     if args.recurrent_sequence_length <= 0:
         parser.error("--recurrent-sequence-length must be positive")
-    if args.temporal_controller and args.episode_gru:
-        parser.error("--temporal-controller and --episode-gru are mutually exclusive")
+    recurrent_modes = sum(
+        (args.temporal_controller, args.episode_gru, args.vision_fusion_gru)
+    )
+    if recurrent_modes > 1:
+        parser.error("choose only one temporal controller architecture")
+    if args.vision_fusion_gru and args.visual_encoder != "flyvis_spatial_v1":
+        parser.error("--vision-fusion-gru requires --visual-encoder flyvis_spatial_v1")
+    if args.vision_auxiliary_coefficient < 0 or args.hidden_saturation_coefficient < 0:
+        parser.error("auxiliary and saturation coefficients cannot be negative")
+    if args.fusion_gate_warmup_steps < 0:
+        parser.error("fusion gate warmup cannot be negative")
     if args.dopamine_learning_rate <= 0:
         parser.error("--dopamine-learning-rate must be positive")
     if args.visual_encoder == "flyvis_spatial_v1" and any(

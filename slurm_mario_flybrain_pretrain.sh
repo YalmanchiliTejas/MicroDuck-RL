@@ -42,6 +42,7 @@ FREEZE_DOPAMINE="${MARIO_FREEZE_DOPAMINE:-0}"
 FACTORIZED_PPO="${MARIO_PPO_FACTORIZED:-0}"
 TEMPORAL_CONTROLLER="${MARIO_PPO_TEMPORAL_CONTROLLER:-0}"
 EPISODE_GRU="${MARIO_PPO_EPISODE_GRU:-0}"
+VISION_FUSION_GRU="${MARIO_PPO_VISION_FUSION_GRU:-0}"
 VISUAL_ENCODER="${MARIO_VISUAL_ENCODER:-column_v1}"
 mkdir -p "${OUTPUT_DIR}" "${RUN_DIR}"
 
@@ -69,8 +70,16 @@ if [[ "${EPISODE_GRU}" != "0" && "${EPISODE_GRU}" != "1" ]]; then
     echo "ERROR: MARIO_PPO_EPISODE_GRU must be 0 or 1." >&2
     exit 1
 fi
-if [[ "${TEMPORAL_CONTROLLER}" == "1" && "${EPISODE_GRU}" == "1" ]]; then
-    echo "ERROR: choose either MARIO_PPO_TEMPORAL_CONTROLLER or MARIO_PPO_EPISODE_GRU." >&2
+if [[ "${VISION_FUSION_GRU}" != "0" && "${VISION_FUSION_GRU}" != "1" ]]; then
+    echo "ERROR: MARIO_PPO_VISION_FUSION_GRU must be 0 or 1." >&2
+    exit 1
+fi
+if (( TEMPORAL_CONTROLLER + EPISODE_GRU + VISION_FUSION_GRU > 1 )); then
+    echo "ERROR: choose only one PPO temporal architecture." >&2
+    exit 1
+fi
+if [[ "${VISION_FUSION_GRU}" == "1" && "${VISUAL_ENCODER}" != "flyvis_spatial_v1" ]]; then
+    echo "ERROR: MARIO_PPO_VISION_FUSION_GRU=1 requires flyvis_spatial_v1." >&2
     exit 1
 fi
 if [[ "${VISUAL_ENCODER}" != "column_v1" && "${VISUAL_ENCODER}" != "retina_lite_v2" && "${VISUAL_ENCODER}" != "retina_spatial_v3" && "${VISUAL_ENCODER}" != "flyvis_spatial_v1" ]]; then
@@ -216,11 +225,12 @@ echo "PPO target KL:       ${TARGET_KL}"
 echo "PPO factorized:      ${FACTORIZED_PPO}"
 echo "Temporal controller: ${TEMPORAL_CONTROLLER}"
 echo "Episode GRU:         ${EPISODE_GRU}"
+echo "Vision fusion GRU:  ${VISION_FUSION_GRU}"
 echo "Visual encoder:      ${VISUAL_ENCODER}"
 if [[ "${TEMPORAL_CONTROLLER}" == "1" ]]; then
     echo "Temporal decisions:  ${MARIO_PPO_TEMPORAL_DECISIONS:-16}"
 fi
-if [[ "${EPISODE_GRU}" == "1" ]]; then
+if [[ "${EPISODE_GRU}" == "1" || "${VISION_FUSION_GRU}" == "1" ]]; then
     echo "Recurrent sequence:  ${MARIO_PPO_RECURRENT_SEQUENCE_LENGTH:-32} decisions"
 fi
 echo "Checkpoint:          ${CHECKPOINT}"
@@ -266,6 +276,15 @@ if [[ "${EPISODE_GRU}" == "1" ]]; then
     policy_args+=(
         --episode-gru
         --recurrent-sequence-length "${MARIO_PPO_RECURRENT_SEQUENCE_LENGTH:-32}"
+    )
+fi
+if [[ "${VISION_FUSION_GRU}" == "1" ]]; then
+    policy_args+=(
+        --vision-fusion-gru
+        --recurrent-sequence-length "${MARIO_PPO_RECURRENT_SEQUENCE_LENGTH:-32}"
+        --vision-auxiliary-coefficient "${MARIO_PPO_VISION_AUXILIARY_COEFFICIENT:-0.1}"
+        --hidden-saturation-coefficient "${MARIO_PPO_HIDDEN_SATURATION_COEFFICIENT:-0.01}"
+        --fusion-gate-warmup-steps "${MARIO_PPO_FUSION_GATE_WARMUP_STEPS:-20000}"
     )
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then

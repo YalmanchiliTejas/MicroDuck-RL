@@ -153,16 +153,24 @@ def _replay_counterfactuals(
 ) -> float:
     """Replay identical frames and actions with each injected channel silenced."""
 
-    from mario_ppo import ControllerTemporalStack, EpisodeGRUController
+    from mario_ppo import (
+        ControllerTemporalStack, EpisodeGRUController, VisionFusionGRUController
+    )
 
     max_baseline_error = 0.0
     original_ablation = connectome.visual_ablation
     try:
         for ablation in VISUAL_ABLATIONS:
             connectome.visual_ablation = ablation
-            episode_recurrent = agent.config.temporal_encoder == "episode_gru_v1"
+            episode_recurrent = agent.config.temporal_encoder in (
+                "episode_gru_v1", "vision_fusion_gru_v2"
+            )
             if episode_recurrent:
-                stack = EpisodeGRUController(agent.config.feature_dim)
+                stack = (
+                    VisionFusionGRUController(agent.config.feature_dim)
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2"
+                    else EpisodeGRUController(agent.config.feature_dim)
+                )
                 agent.reset_recurrent()
                 tokens = stack.reset(
                     connectome.reset(initial_frame, seed=episode_seed)
@@ -204,7 +212,7 @@ def _replay_counterfactuals(
                 for frame in frames:
                     activity = connectome.observe(frame)
                     if agent.config.temporal_encoder in (
-                        "controller_gru", "episode_gru_v1"
+                        "controller_gru", "episode_gru_v1", "vision_fusion_gru_v2"
                     ):
                         activities.append(activity)
                     else:
@@ -672,7 +680,10 @@ def run(args: argparse.Namespace) -> dict:
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     algorithm = str(payload.get("algorithm", "dqn"))
     if algorithm == "ppo":
-        from mario_ppo import ControllerTemporalStack, EpisodeGRUController, PPOAgent
+        from mario_ppo import (
+            ControllerTemporalStack, EpisodeGRUController, PPOAgent,
+            VisionFusionGRUController,
+        )
 
         agent = PPOAgent.load(args.checkpoint, device=device)
         agent.network.eval()
@@ -744,10 +755,16 @@ def run(args: argparse.Namespace) -> dict:
             episode_seed = args.seed + episode_index
             episode_recurrent = (
                 algorithm == "ppo"
-                and agent.config.temporal_encoder == "episode_gru_v1"
+                and agent.config.temporal_encoder in (
+                    "episode_gru_v1", "vision_fusion_gru_v2"
+                )
             )
             if episode_recurrent:
-                stack = EpisodeGRUController(agent.config.feature_dim)
+                stack = (
+                    VisionFusionGRUController(agent.config.feature_dim)
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2"
+                    else EpisodeGRUController(agent.config.feature_dim)
+                )
                 agent.reset_recurrent()
                 current_tokens = stack.reset(
                     connectome.reset(observation, seed=episode_seed)
@@ -893,7 +910,7 @@ def run(args: argparse.Namespace) -> dict:
                     if (
                         algorithm == "ppo"
                         and agent.config.temporal_encoder in (
-                            "controller_gru", "episode_gru_v1"
+                            "controller_gru", "episode_gru_v1", "vision_fusion_gru_v2"
                         )
                     ):
                         interval_activities.append(activity)
@@ -1019,6 +1036,10 @@ def run(args: argparse.Namespace) -> dict:
                             np.mean(np.abs(next_state) > 0.95)
                         ),
                     }
+                    if agent.config.temporal_encoder == "vision_fusion_gru_v2":
+                        controller_diagnostics["fusion_vision_weight"] = float(
+                            agent.network.fusion_vision_weight().item()
+                        )
                 elif (
                     algorithm == "ppo"
                     and agent.config.temporal_encoder == "controller_gru"
@@ -1381,8 +1402,10 @@ def main() -> None:
         parser.error("--flyvis-view requires recorded episodes")
     payload = torch.load(args.checkpoint, map_location="cpu", weights_only=False)
     temporal_encoder = payload.get("config", {}).get("temporal_encoder", "conv4")
-    if args.reset_gru_every_decision and temporal_encoder != "episode_gru_v1":
-        parser.error("--reset-gru-every-decision requires an episode_gru_v1 checkpoint")
+    if args.reset_gru_every_decision and temporal_encoder not in (
+        "episode_gru_v1", "vision_fusion_gru_v2"
+    ):
+        parser.error("--reset-gru-every-decision requires an episode recurrent checkpoint")
     run(args)
 
 
