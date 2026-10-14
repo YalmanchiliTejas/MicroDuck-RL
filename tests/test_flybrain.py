@@ -1124,6 +1124,35 @@ def test_ppo_jump_sensitivity_reports_each_input_frame(monkeypatch):
     assert all(np.isfinite(value) for values in sensitivity.values() for value in values)
 
 
+def test_episode_gru_sensitivity_restores_evaluation_mode(monkeypatch):
+    flybrain = _load_flybrain()
+    evaluator = _load_evaluator(flybrain, _load_rollouts())
+    ppo = _load_ppo(flybrain)
+    monkeypatch.setitem(sys.modules, "mario_ppo", ppo)
+    agent = ppo.PPOAgent(
+        ppo.PPOConfig(
+            feature_dim=6,
+            stack_depth=1,
+            temporal_encoder="episode_gru_v1",
+            controller_feature_dim=ppo.CONTROLLER_FEATURE_DIM,
+        ),
+        seed=5,
+    )
+    agent.network.eval()
+    tokens = np.ones(
+        (4, 6 + ppo.CONTROLLER_FEATURE_DIM), dtype=np.float32
+    )
+    initial_hidden = np.zeros(ppo.EPISODE_GRU_HIDDEN_DIM, dtype=np.float32)
+
+    sensitivity = evaluator._ppo_recurrent_input_sensitivity(
+        agent, tokens, initial_hidden
+    )
+
+    assert not agent.network.training
+    assert len(sensitivity["jump_probability_gradient_rms_by_frame"]) == 4
+    assert all(np.isfinite(value) for values in sensitivity.values() for value in values)
+
+
 def test_dopamine_uses_anatomical_pam_ppl1_gates_and_persists(tmp_path):
     dopamine = _load_dopamine()
 

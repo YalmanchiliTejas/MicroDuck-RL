@@ -113,14 +113,24 @@ def _ppo_recurrent_input_sensitivity(
     hidden_tensor = torch.as_tensor(
         initial_hidden, dtype=torch.float32, device=agent.device
     ).view(1, 1, EPISODE_GRU_HIDDEN_DIM)
-    logits, _, _ = agent.network.recurrent_tokens(token_tensor, hidden_tensor)
-    probabilities = (
-        _factorized_probabilities(logits)
-        if agent.config.policy_mode == "factorized"
-        else torch.softmax(logits, dim=1)
-    )
-    jump_probability = probabilities[:, list(JUMP_ACTIONS)].sum()
-    gradient = torch.autograd.grad(jump_probability, token_tensor)[0][0]
+    # cuDNN intentionally disables RNN backward while a module is in eval mode.
+    # This diagnostic needs an input gradient, but it must not change policy
+    # parameters or leave evaluation behavior enabled as training. A one-layer
+    # GRU has no dropout, so toggling the execution mode does not change its
+    # forward result.
+    was_training = agent.network.training
+    agent.network.train(True)
+    try:
+        logits, _, _ = agent.network.recurrent_tokens(token_tensor, hidden_tensor)
+        probabilities = (
+            _factorized_probabilities(logits)
+            if agent.config.policy_mode == "factorized"
+            else torch.softmax(logits, dim=1)
+        )
+        jump_probability = probabilities[:, list(JUMP_ACTIONS)].sum()
+        gradient = torch.autograd.grad(jump_probability, token_tensor)[0][0]
+    finally:
+        agent.network.train(was_training)
     gradient = gradient[:, : agent.config.feature_dim]
     return {
         "jump_probability_gradient_rms_by_frame": [
