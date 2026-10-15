@@ -119,6 +119,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --best-output "${BEST}" \
     "${dopamine_args[@]}" \
     --episodes "${MARIO_RANK_EPISODES:-10}" \
+    --max-checkpoints "${MARIO_RANK_MAX_CHECKPOINTS:-0}" \
     --max-decisions "${MARIO_EVAL_MAX_DECISIONS:-300}" \
     --action-repeat "${MARIO_EVAL_ACTION_REPEAT:-${MARIO_PRETRAIN_ACTION_REPEAT:-4}}" \
     --seed "${MARIO_EVAL_SEED:-42}" \

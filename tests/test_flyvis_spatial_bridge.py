@@ -62,6 +62,20 @@ def test_bridge_preserves_static_and_directional_cell_types():
     assert bridge.FLYVIS_TO_MALE_CNS["R1"] == "R1-6"
 
 
+def test_policy_readout_retains_positions_and_ablates_both_feature_groups():
+    bridge = _bridge()
+    grid = np.arange(528, dtype=np.float32).reshape(11, 6, 8) / 528 - 0.5
+    normal = bridge.policy_spatial_features(grid).reshape(11, 6, 8)
+    np.testing.assert_allclose(normal, np.tanh(grid))
+    assert np.count_nonzero(bridge.policy_spatial_features(grid, "all_visual")) == 0
+    static_off = bridge.policy_spatial_features(grid, "flyvis_static").reshape(11, 6, 8)
+    motion_off = bridge.policy_spatial_features(grid, "flyvis_motion").reshape(11, 6, 8)
+    assert np.count_nonzero(static_off[:3]) == 0
+    np.testing.assert_array_equal(static_off[3:], normal[3:])
+    assert np.count_nonzero(motion_off[3:]) == 0
+    np.testing.assert_array_equal(motion_off[:3], normal[:3])
+
+
 def test_spatial_injections_preserve_bins_and_support_stage_ablations():
     bridge = _bridge()
     grids = np.zeros((len(bridge.FLYVIS_TO_MALE_CNS), 2, 4), dtype=np.float32)

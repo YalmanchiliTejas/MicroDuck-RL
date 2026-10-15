@@ -32,6 +32,22 @@ STATIC_TYPES = ("R1", "L1", "L2")
 MOTION_TYPES = tuple(name for name in FLYVIS_TO_MALE_CNS if name.startswith(("T4", "T5")))
 
 
+def policy_spatial_features(grids: np.ndarray, ablation: str = "normal") -> np.ndarray:
+    """Signed retinotopic input; ablations affect the direct and brain paths alike."""
+    values = np.asarray(grids, dtype=np.float32)
+    if values.shape != (11, 6, 8) or not np.isfinite(values).all():
+        raise ValueError("policy FlyVis grid must be finite with shape (11, 6, 8)")
+    values = np.tanh(values).copy()
+    if ablation in ("all", "all_visual"):
+        values.fill(0)
+    else:
+        disabled = STATIC_TYPES if ablation == "flyvis_static" else MOTION_TYPES if ablation == "flyvis_motion" else ()
+        for index, name in enumerate(FLYVIS_TO_MALE_CNS):
+            if name in disabled:
+                values[index] = 0
+    return values.reshape(-1)
+
+
 def canonical_pca(points: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Return a deterministic two-dimensional basis for anatomical positions."""
 

@@ -648,6 +648,49 @@ def test_flyvis_target_normalization_is_finite_and_spatial():
     assert target.std() == pytest.approx(1.0, rel=1.0e-3)
 
 
+def test_spatial_readout_ppo_learns_opposite_actions_from_visual_input(tmp_path):
+    """Toy visual control contract; this is not an emulator completion test."""
+    ppo = _load_ppo(_load_flybrain())
+    config = ppo.PPOConfig(
+        feature_dim=3 + 528, stack_depth=1, controller_feature_dim=8,
+        visual_encoder="flyvis_spatial_v1", temporal_encoder="vision_fusion_gru_v2",
+        stabilized_vision_gru=True, spatial_readout=True,
+        learning_rate=1e-3, recurrent_sequence_length=1,
+        minibatch_size=32, update_epochs=2, vision_auxiliary_coefficient=0,
+        fusion_gate_warmup_steps=0, value_coefficient=0.5,
+    )
+    agent = ppo.PPOAgent(config, seed=73)
+    generator = torch.Generator().manual_seed(17)
+    tokens = torch.zeros(32, 1, 539)
+    tokens[:16, :, 3:267] = 0.8
+    tokens[16:, :, 267:531] = 0.8
+    expected = torch.tensor([2] * 16 + [5] * 16)
+    for _ in range(35):
+        with torch.no_grad():
+            logits, values, _ = agent.network.recurrent_tokens(tokens)
+            probabilities = logits.softmax(-1)
+            actions = torch.multinomial(probabilities, 1, generator=generator).squeeze(1)
+            rewards = (actions == expected).float() * 2 - 1
+            logs = probabilities.gather(1, actions[:, None]).log().squeeze(1)
+        metrics = agent.update_recurrent(
+            token_sequences=list(tokens.numpy()), initial_hiddens=np.zeros((32, 256), np.float32),
+            actions=actions.numpy(), old_log_probabilities=logs.numpy(),
+            returns=rewards.numpy(), advantages=(rewards - values).numpy(),
+            dones=np.ones(32, np.float32), visual_targets=[np.zeros((1, 528), np.float32)] * 32,
+        )
+    with torch.no_grad():
+        predictions = agent.network.recurrent_tokens(tokens)[0].argmax(-1)
+    assert (predictions == expected).float().mean() >= 0.9
+    assert metrics["spatial_projection_grad_norm"] > 0
+    assert metrics["value_loss"] == pytest.approx(metrics["value_loss_unscaled"])
+    path = tmp_path / "spatial-readout.pt"
+    agent.save(path)
+    restored = ppo.PPOAgent.load(path)
+    assert restored.config.spatial_readout
+    with torch.no_grad():
+        assert torch.allclose(agent.network.recurrent_tokens(tokens)[0], restored.network.recurrent_tokens(tokens)[0])
+
+
 def test_factorized_ppo_maps_three_heads_to_ten_action_probabilities():
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
@@ -1058,6 +1101,33 @@ def test_male_cns_backend_uses_real_step_and_only_descending_trace(tmp_path, mon
     assert row["population"] == "MaleCNS descending_neuron"
     assert row["neuron_ids"] == [4]
     assert row["all_spikes"] == 2
+
+
+@pytest.mark.parametrize("readout, expected_dt", [(False, 0.001), (True, 1 / 60)])
+def test_new_spatial_readout_uses_video_clock_preserving_legacy(tmp_path, monkeypatch, readout, expected_dt):
+    class Brain:
+        dt = 0.001
+        def __init__(self, **kwargs):
+            pass
+        def cells(self, names, side=None):
+            return np.array([0, 1])
+    class Bridge:
+        def __init__(self, **kwargs):
+            self.dt = kwargs["dt"]
+        def close(self):
+            pass
+    monkeypatch.setitem(sys.modules, "flybrain", types.SimpleNamespace(
+        FlyBrain=Brain, Trace=lambda *a, **k: None))
+    monkeypatch.setitem(sys.modules, "flyvis_spatial_bridge", types.SimpleNamespace(FlyVisSpatialBridge=Bridge))
+    male_cns = _load_male_cns()
+    backend = male_cns.MaleCNS(
+        visual_encoder="flyvis_spatial_v1", spatial_readout=readout,
+        flyvis_model=tmp_path, flyvis_python=tmp_path, flyvis_worker=tmp_path,
+    )
+    assert backend.feature_dim == 2 + (528 if readout else 0)
+    assert backend.flyvis_frame_dt == pytest.approx(expected_dt)
+    backend.close()
+    assert backend.flyvis_frame_dt == pytest.approx(expected_dt)
 
 
 def test_reward_packet_preserves_action_sequence_components_and_terminal():

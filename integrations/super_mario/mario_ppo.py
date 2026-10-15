@@ -13,8 +13,8 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 7
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 8
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
 VISUAL_ENCODERS = (
     "column_v1", "retina_lite_v2", "retina_spatial_v3", "flyvis_spatial_v1"
@@ -63,8 +63,11 @@ class PPOConfig:
     hidden_saturation_coefficient: float = 0.01
     fusion_gate_warmup_steps: int = 20_000
     stabilized_vision_gru: bool = False
+    spatial_readout: bool = False
 
     def __post_init__(self) -> None:
+        if self.spatial_readout and (not self.stabilized_vision_gru or self.feature_dim <= FLYVIS_SPATIAL_TARGET_DIM):
+            raise ValueError("spatial readout requires stabilized vision GRU and descending + 528 spatial features")
         if self.stabilized_vision_gru and self.temporal_encoder != "vision_fusion_gru_v2":
             raise ValueError("stabilized vision GRU requires vision_fusion_gru_v2")
         if self.feature_dim <= 0:
@@ -159,9 +162,10 @@ class ActorCritic(nn.Module):
         input_dim = config.feature_dim + config.controller_feature_dim
         self.temporal_encoder = config.temporal_encoder
         self.stabilized_vision_gru = config.stabilized_vision_gru
+        self.spatial_readout = config.spatial_readout
         if config.temporal_encoder == "vision_fusion_gru_v2":
             self.frame_projection = nn.Sequential(
-                nn.Linear(config.feature_dim, 256),
+                nn.Linear(config.feature_dim - (FLYVIS_SPATIAL_TARGET_DIM if config.spatial_readout else 0), 256),
                 nn.LayerNorm(256),
                 nn.SiLU(),
             )
@@ -182,9 +186,16 @@ class ActorCritic(nn.Module):
             )
             # alpha = 0.5 + 0.45 * sigmoid(logit); logit=log(2) gives 0.8.
             initial_logit = np.log(1.0 / 5.0) if config.stabilized_vision_gru else np.log(2.0)
+            if config.spatial_readout:
+                initial_logit = 0.0
             self.fusion_gate_logit = nn.Parameter(torch.tensor(float(initial_logit)))
             self.shared = nn.Sequential(nn.Linear(256 + 128, 512), nn.SiLU())
             self.vision_decoder = nn.Linear(EPISODE_GRU_HIDDEN_DIM, FLYVIS_SPATIAL_TARGET_DIM)
+            if config.spatial_readout:
+                self.spatial_projection = nn.Sequential(
+                    nn.Linear(FLYVIS_SPATIAL_TARGET_DIM, 256),
+                    nn.LayerNorm(256), nn.SiLU(),
+                )
         else:
             self.frame_projection = nn.Sequential(
                 nn.Linear(input_dim, 256), nn.ReLU()
@@ -281,7 +292,12 @@ class ActorCritic(nn.Module):
                 "recurrent tokens must have shape (batch, frames, input_features)"
             )
         if self.temporal_encoder == "vision_fusion_gru_v2":
-            projected = self.frame_projection(tokens[:, :, : self.feature_dim].float())
+            visual = tokens[:, :, : self.feature_dim].float()
+            if self.spatial_readout:
+                projected = self.frame_projection(visual[:, :, :-FLYVIS_SPATIAL_TARGET_DIM])
+                projected = projected + self.spatial_projection(visual[:, :, -FLYVIS_SPATIAL_TARGET_DIM:])
+            else:
+                projected = self.frame_projection(visual)
         else:
             projected = self.frame_projection(tokens.float())
         if self.stabilized_vision_gru:
@@ -1096,6 +1112,8 @@ class PPOAgent:
             "fusion_vision_weight": 0.0,
             "controller_grad_norm": 0.0,
             "vision_decoder_grad_norm": 0.0,
+            "value_explained_variance": 0.0,
+            "spatial_projection_grad_norm": 0.0,
         }
         if self.config.stabilized_vision_gru:
             totals.update({name: 0.0 for name in (
@@ -1108,6 +1126,7 @@ class PPOAgent:
         for _ in range(self.config.update_epochs):
             epoch_kl = 0.0
             epoch_minibatches = 0
+            stop_update = False
             order = self._minibatch_rng.permutation(len(chunks))
             for batch_start in range(0, len(chunks), chunks_per_batch):
                 logits_parts = []
@@ -1194,6 +1213,10 @@ class PPOAgent:
                     zero = entropy.detach() * 0.0
                     direction_entropy = jump_entropy = run_entropy = zero
                 hidden_values = torch.cat(hidden_parts, dim=0)
+                if self.config.spatial_readout:
+                    # Train values in the same units as returns. Dividing only
+                    # the loss by return variance suppresses critic gradients.
+                    value_loss = value_loss_unscaled
                 if self.config.stabilized_vision_gru:
                     # Penalize every frame's RMS; averaging across the batch first
                     # could hide saturated frames among quieter ones.
@@ -1227,6 +1250,9 @@ class PPOAgent:
                     + self.config.vision_auxiliary_coefficient * vision_auxiliary_loss
                     + self.config.hidden_saturation_coefficient * saturation_loss
                 )
+                if self.config.spatial_readout and approx_kl.detach().item() > 1.5 * self.config.target_kl:
+                    stop_update = True
+                    break
                 self.optimizer.zero_grad(set_to_none=True)
                 loss.backward()
                 def gradient_norm(parameters) -> torch.Tensor:
@@ -1287,6 +1313,13 @@ class PPOAgent:
                     "fusion_vision_weight": self.network.fusion_vision_weight().detach(),
                     "controller_grad_norm": controller_grad,
                     "vision_decoder_grad_norm": decoder_grad,
+                    "spatial_projection_grad_norm": gradient_norm(
+                        getattr(self.network, "spatial_projection", nn.Sequential()).parameters()
+                    ),
+                    "value_explained_variance": 1.0 - (
+                        (returns_t[indices] - values.detach()).var(unbiased=False)
+                        / returns_t[indices].var(unbiased=False).clamp_min(1.0e-8)
+                    ),
                 }
                 if gate_parts:
                     batch_metrics.update({
@@ -1299,7 +1332,7 @@ class PPOAgent:
                 epoch_minibatches += 1
                 minibatches += 1
             epochs_completed += 1
-            if epoch_kl / max(1, epoch_minibatches) > 1.5 * self.config.target_kl:
+            if stop_update or epoch_kl / max(1, epoch_minibatches) > 1.5 * self.config.target_kl:
                 break
         self.updates += 1
         metrics = {
@@ -1308,7 +1341,7 @@ class PPOAgent:
         metrics["batch_size"] = float(count)
         metrics["sequence_length"] = float(sequence_length)
         metrics["epochs_completed"] = float(epochs_completed)
-        metrics["early_stop"] = float(epochs_completed < self.config.update_epochs)
+        metrics["early_stop"] = float(stop_update or epochs_completed < self.config.update_epochs)
         return metrics
 
     def save(self, path: str | Path) -> None:

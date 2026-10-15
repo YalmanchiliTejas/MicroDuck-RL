@@ -295,6 +295,9 @@ if [[ "${VISION_FUSION_GRU}" == "1" ]]; then
     if [[ "${MARIO_PPO_STABILIZED_VISION_GRU:-0}" == "1" ]]; then
         policy_args+=(--stabilized-vision-gru)
     fi
+    if [[ "${MARIO_PPO_SPATIAL_READOUT:-0}" == "1" ]]; then
+        policy_args+=(--spatial-readout)
+    fi
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
     freeze_args+=(--freeze-dopamine)
@@ -306,6 +309,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     --action-repeat "${ACTION_REPEAT}" \
     --save-every "${SAVE_EVERY}" \
     --rollout-steps "${MARIO_PPO_ROLLOUT_STEPS:-256}" \
+    --max-episode-decisions "${MARIO_PRETRAIN_MAX_EPISODE_DECISIONS:-3000}" \
     --output "${CHECKPOINT}" \
     --snapshot-dir "${SNAPSHOT_DIR}" \
     --tensorboard-dir "${TENSORBOARD_DIR}" \
@@ -324,4 +328,4 @@ srun "${SIDECAR_VENV}/bin/python" \
     "${resume_args[@]}" \
     2>&1 | tee "${OUTPUT_DIR}/pretrain-${SLURM_JOB_ID}.log"
 
-echo "Pretraining completed. Reuse MARIO_RUN_TAG=${MARIO_RUN_TAG} for physical fine-tuning."
+echo "Pretraining finished for MARIO_RUN_TAG=${MARIO_RUN_TAG}. Rank and evaluate in NES before considering deployment."

@@ -110,10 +110,14 @@ class MaleCNS:
         flyvis_model: Path | None = None,
         flyvis_python: Path | None = None,
         flyvis_worker: Path | None = None,
+        spatial_readout: bool = False,
     ) -> None:
         if visual_encoder not in VISUAL_ENCODERS:
             raise ValueError(f"visual encoder must be one of {VISUAL_ENCODERS}")
         self.visual_encoder = visual_encoder
+        self.spatial_readout = spatial_readout
+        if spatial_readout and visual_encoder != "flyvis_spatial_v1":
+            raise ValueError("spatial readout requires FlyVis")
         if visual_ablation not in VISUAL_ABLATIONS:
             raise ValueError(f"visual ablation must be one of {VISUAL_ABLATIONS}")
         self.visual_ablation = visual_ablation
@@ -165,6 +169,7 @@ class MaleCNS:
         }
         self.last_retina_measurements: dict[str, float | int] = {}
         self.flyvis_bridge = None
+        self.flyvis_frame_dt = None
         if self.visual_encoder == "flyvis_spatial_v1":
             if flyvis_model is None:
                 raise ValueError("flyvis_spatial_v1 requires a FlyVis model directory")
@@ -177,17 +182,21 @@ class MaleCNS:
             self.flyvis_bridge = FlyVisSpatialBridge(
                 model_dir=flyvis_model,
                 brain=self.brain,
-                dt=float(self.brain.dt),
+                # One observe() call consumes one NES frame. FlyVis integrates
+                # visual time, not the unrelated MaleCNS LIF solver timestep.
+                # Preserve the old clock for existing checkpoints.
+                dt=1.0 / 60.0 if spatial_readout else float(self.brain.dt),
                 python=flyvis_python,
                 worker_script=flyvis_worker,
             )
+            self.flyvis_frame_dt = self.flyvis_bridge.dt
         self.spike_file = Path(spike_file) if spike_file is not None else None
         if self.spike_file is not None:
             self.spike_file.parent.mkdir(parents=True, exist_ok=True)
 
     @property
     def feature_dim(self) -> int:
-        return int(len(self.descending))
+        return int(len(self.descending)) + (528 if getattr(self, "spatial_readout", False) else 0)
 
     @property
     def neuron_count(self) -> int:
@@ -529,6 +538,12 @@ class MaleCNS:
             with self.spike_file.open("a", encoding="utf-8") as output:
                 for row in rows:
                     output.write(json.dumps(row, separators=(",", ":")) + "\n")
+        if getattr(self, "spatial_readout", False):
+            from flyvis_spatial_bridge import policy_spatial_features
+
+            activity = np.concatenate((activity, policy_spatial_features(
+                self.flyvis_spatial_activity(), self.visual_ablation
+            )))
         return activity.copy()
 
     def reinforce(self, prediction_error: float) -> float | None:

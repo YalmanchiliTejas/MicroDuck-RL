@@ -705,6 +705,7 @@ def run(args: argparse.Namespace) -> dict:
         flyvis_model=getattr(args, "flyvis_model", None),
         flyvis_python=getattr(args, "flyvis_python", None),
         flyvis_worker=getattr(args, "flyvis_worker", None),
+        spatial_readout=getattr(agent.config, "spatial_readout", False),
     )
     if connectome.feature_dim != agent.config.feature_dim:
         raise ValueError(
@@ -1247,6 +1248,8 @@ def run(args: argparse.Namespace) -> dict:
         "visual_encoder": getattr(agent.config, "visual_encoder", "column_v1"),
         "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
         "stabilized_vision_gru": getattr(agent.config, "stabilized_vision_gru", False),
+        "spatial_readout": getattr(agent.config, "spatial_readout", False),
+        "flyvis_frame_dt": getattr(connectome, "flyvis_frame_dt", None),
         "reset_gru_every_decision": bool(
             getattr(args, "reset_gru_every_decision", False)
         ),

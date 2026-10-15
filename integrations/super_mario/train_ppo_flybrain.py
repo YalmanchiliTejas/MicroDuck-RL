@@ -152,6 +152,11 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
                 f" vision_flip={metrics['vision_zero_greedy_change_fraction']:.6f}"
                 f" fusion_vision={metrics['fusion_vision_weight']:.6f}"
             )
+        if "value_explained_variance" in metrics:
+            recurrent_metrics += (
+                f" value_ev={metrics['value_explained_variance']:.6f}"
+                f" spatial_grad={metrics['spatial_projection_grad_norm']:.6f}"
+            )
         if "update_gate_mean" in metrics:
             recurrent_metrics += (
                 f" update_gate={metrics['update_gate_mean']:.6f}"
@@ -193,6 +198,7 @@ def run(args: argparse.Namespace) -> None:
         flyvis_model=args.flyvis_model,
         flyvis_python=args.flyvis_python,
         flyvis_worker=args.flyvis_worker,
+        spatial_readout=args.spatial_readout,
     )
     if args.resume is not None:
         requested_policy_mode = "factorized" if args.factorized_policy else None
@@ -220,6 +226,8 @@ def run(args: argparse.Namespace) -> None:
             )
         if args.stabilized_vision_gru and not agent.config.stabilized_vision_gru:
             raise ValueError("stabilized vision GRU requires a fresh run or a stabilized checkpoint")
+        if agent.config.spatial_readout != args.spatial_readout:
+            raise ValueError("spatial readout setting differs from checkpoint; use a fresh run")
     else:
         agent = PPOAgent(
             PPOConfig(
@@ -252,6 +260,7 @@ def run(args: argparse.Namespace) -> None:
                 hidden_saturation_coefficient=args.hidden_saturation_coefficient,
                 fusion_gate_warmup_steps=args.fusion_gate_warmup_steps,
                 stabilized_vision_gru=args.stabilized_vision_gru,
+                spatial_readout=args.spatial_readout,
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -273,7 +282,8 @@ def run(args: argparse.Namespace) -> None:
         f"target_kl={agent.config.target_kl:g} "
         f"vision_aux={agent.config.vision_auxiliary_coefficient:g} "
         f"saturation_coef={agent.config.hidden_saturation_coefficient:g} "
-        f"gate_warmup={agent.config.fusion_gate_warmup_steps}",
+        f"gate_warmup={agent.config.fusion_gate_warmup_steps} "
+        f"spatial_readout={int(agent.config.spatial_readout)}",
         flush=True,
     )
     if agent.config.feature_dim != connectome.feature_dim:
@@ -447,6 +457,8 @@ def run(args: argparse.Namespace) -> None:
                     float(controller["jump_released_edge"]),
                     agent.steps,
                 )
+            if episode_decisions + 1 >= args.max_episode_decisions and not terminated:
+                truncated = True
             done = bool(terminated or truncated)
             learning_reward = training_reward(
                 reward_components, raw_reward=raw_reward
@@ -469,7 +481,14 @@ def run(args: argparse.Namespace) -> None:
                     rollout["states"].append(state.copy())
                 rollout["actions"].append(action)
                 rollout["log_probabilities"].append(log_probability)
-                rollout["rewards"].append(learning_reward)
+                # Time limits end a sequence but are not deaths. Bootstrap the
+                # terminal observation, then cut GAE across the reset boundary.
+                bootstrap = 0.0
+                if truncated and not terminated:
+                    bootstrap = agent.config.gamma * (
+                        agent.recurrent_value() if episode_recurrent else agent.value(next_state)
+                    )
+                rollout["rewards"].append(learning_reward + bootstrap)
                 rollout["dones"].append(done)
                 rollout["values"].append(value)
             agent.steps += 1
@@ -650,6 +669,9 @@ def main() -> None:
     )
     parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--rollout-steps", type=int, default=256)
+    parser.add_argument("--max-episode-decisions", type=int, default=3000)
+    parser.add_argument("--spatial-readout", action="store_true",
+                        help="preserve signed FlyVis positions alongside MaleCNS input; fresh checkpoint")
     parser.add_argument("--save-every", type=int, default=5_000)
     parser.add_argument("--output", type=Path, default=Path("flybrain-ppo.pt"))
     parser.add_argument("--snapshot-dir", type=Path)
@@ -763,6 +785,10 @@ def main() -> None:
         parser.error("--vision-fusion-gru requires --visual-encoder flyvis_spatial_v1")
     if args.stabilized_vision_gru and not args.vision_fusion_gru:
         parser.error("--stabilized-vision-gru requires --vision-fusion-gru")
+    if args.spatial_readout and not args.stabilized_vision_gru:
+        parser.error("--spatial-readout requires --stabilized-vision-gru")
+    if args.max_episode_decisions <= 0:
+        parser.error("--max-episode-decisions must be positive")
     if args.vision_auxiliary_coefficient < 0 or args.hidden_saturation_coefficient < 0:
         parser.error("auxiliary and saturation coefficients cannot be negative")
     if args.fusion_gate_warmup_steps < 0:

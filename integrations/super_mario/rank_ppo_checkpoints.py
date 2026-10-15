@@ -39,6 +39,16 @@ def _normalized(values: list[float]) -> list[float]:
     return [(value - low) / (high - low) for value in values]
 
 
+def completion_first_key(row: dict) -> tuple:
+    """Success outranks progress; randomness and standing still earn no credit."""
+    mean, sampled = row["modes"]["mean"], row["modes"]["sampled"]
+    return (
+        row["completion_rate"], mean["completion_rate"],
+        min(mean["mean_max_x"], sampled["mean_max_x"]),
+        row["mean_max_x"], row["mean_raw_reward"], row["step"],
+    )
+
+
 def _atomic_json(path: Path, payload: dict) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     temporary = path.with_name(f".{path.name}.tmp")
@@ -67,6 +77,8 @@ def main() -> None:
     )
     parser.add_argument("--best-dopamine-output", type=Path)
     parser.add_argument("--episodes", type=int, default=10)
+    parser.add_argument("--max-checkpoints", type=int, default=0,
+                        help="0 ranks all; otherwise sample evenly across saved steps including endpoints")
     parser.add_argument("--max-decisions", type=int, default=300)
     parser.add_argument("--action-repeat", type=int, default=4)
     parser.add_argument("--seed", type=int, default=42)
@@ -79,12 +91,19 @@ def main() -> None:
     args = parser.parse_args()
     if args.episodes <= 0 or args.max_decisions <= 0 or args.action_repeat <= 0:
         parser.error("evaluation counts must be positive")
+    if args.max_checkpoints < 0:
+        parser.error("max-checkpoints cannot be negative")
     if args.best_dopamine_output is not None and args.dopamine_checkpoint_dir is None:
         parser.error("--best-dopamine-output requires --dopamine-checkpoint-dir")
 
     checkpoints = sorted(args.checkpoint_dir.glob(args.pattern), key=_step)
     if not checkpoints:
         parser.error(f"no checkpoints matching {args.checkpoint_dir / args.pattern}")
+    if args.max_checkpoints and len(checkpoints) > args.max_checkpoints:
+        indices = np.linspace(0, len(checkpoints) - 1, args.max_checkpoints, dtype=int)
+        if args.max_checkpoints == 1:
+            indices = [len(checkpoints) - 1]
+        checkpoints = [checkpoints[index] for index in indices]
     args.reports_dir.mkdir(parents=True, exist_ok=True)
     rows: list[dict] = []
     for checkpoint in checkpoints:
@@ -159,32 +178,21 @@ def main() -> None:
             }
         )
 
-    reward_scores = _normalized([row["mean_raw_reward"] for row in rows])
-    progress_scores = _normalized([row["mean_max_x"] for row in rows])
-    for row, reward_score, progress_score in zip(
-        rows, reward_scores, progress_scores, strict=True
-    ):
-        row["score"] = (
-            0.30 * reward_score
-            + 0.30 * progress_score
-            + 0.20 * row["completion_rate"]
-            + 0.10 * row["survival"]
-            + 0.10 * row["sampled_action_entropy"]
-        )
-    rows.sort(key=lambda row: (row["score"], row["step"]), reverse=True)
+    for row in rows:
+        row["score"] = row["completion_rate"]
+        row["selection_key"] = list(completion_first_key(row))
+    rows.sort(key=completion_first_key, reverse=True)
     result = {
         "recommended_checkpoint": rows[0]["checkpoint"],
         "recommended_dopamine_state": rows[0]["dopamine_state"],
         "scoring": {
-            "relative_mean_raw_reward": 0.30,
-            "relative_mean_max_x": 0.30,
-            "completion_rate": 0.20,
-            "survival": 0.10,
-            "sampled_action_entropy": 0.10,
-            "note": "Reward/progress are min-max normalized within this checkpoint set.",
+            "method": "completion-first-lexicographic-v1",
+            "priority": ["completion_rate", "mean_mode_completion_rate", "worst_mode_mean_max_x", "mean_max_x", "mean_raw_reward", "step"],
+            "note": "score displays completion rate; selection_key determines order. Entropy and survival duration are diagnostics only.",
         },
         "evaluation": {
             "episodes_per_mode": args.episodes,
+            "checkpoints_evaluated": len(checkpoints),
             "modes": ["mean", "sampled"],
             "seed": args.seed,
             "action_repeat": args.action_repeat,

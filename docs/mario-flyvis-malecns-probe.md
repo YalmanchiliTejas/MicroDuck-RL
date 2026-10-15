@@ -405,3 +405,62 @@ health before continuing the same run with
 `bash scripts/train_mario_stable_vision.sh 300000`. These scripts submit Slurm
 jobs; they do not guarantee gameplay improvement. Compare normal, zero-vision,
 and reset-memory evaluations and watch recorded rollouts before accepting a run.
+
+### Direct spatial readout experiment (checkpoint schema 8)
+
+The stabilized GRU eliminated saturation in the recorded pilot, but the mean
+policy still died at x≈312 with and without visual input. That result does not
+identify a single causal failure. The previous network received only MaleCNS
+descending activity; the FlyVis spatial tensor appeared only as an auxiliary
+training target. `spatial_readout=True` now preserves both representations:
+
+- MaleCNS descending activity passes through its own trainable projection.
+- The signed 11×6×8 FlyVis grid is bounded with tanh, flattened without pooling,
+  and passed through a separate trainable projection.
+- Their projected features are added, bounded, and passed through the stabilized
+  GRU. The existing compact button-history branch remains available to PPO.
+
+This is an explicit bypass of the frozen connectome bottleneck. A successful
+run would demonstrate the combined controller, not prove that MaleCNS is
+necessary. `all_visual`, `flyvis_static`, and `flyvis_motion` mask the direct
+readout as well as the brain injections, preventing ablation leakage. Existing
+checkpoints have `spatial_readout=False` and retain their original architecture.
+
+The new readout uses a FlyVis integration interval of 1/60 second per observed
+NES frame. Previously the worker used `brain.dt`, coupling visual time to the
+MaleCNS LIF solver timestep. Legacy checkpoints retain that old clock. The
+evaluation records `flyvis_frame_dt`; MaleCNS itself still advances one solver
+step per observation, so its biological time is not matched to emulator time.
+
+For this recipe the critic uses unscaled MSE in return units, coefficient 0.5,
+and learning rate 0.00025. The older recipe divided critic MSE by return variance
+and then multiplied by 0.05, potentially suppressing value learning. KL stopping
+now checks before applying another minibatch update. Truncated episodes
+bootstrap the terminal observation while cutting GAE across resets. The
+auxiliary coefficient is 0.01, the recurrent saturation coefficient is 0.3,
+and fusion starts evenly weighted. These choices require emulator validation.
+
+Set `FLY_DATA` and run:
+
+```bash
+bash scripts/run_mario_spatial_readout.sh 300000
+```
+
+This submits Slurm jobs using `afterok` dependencies: a 2,000-decision
+smoke run with a health check, continuation in chunks of at most 100,000
+decisions to the requested total, checkpoint ranking, and recorded frozen
+mean/sampled evaluation. It uses a
+new default run tag `malecns-ppo-spatialreadout-v4-nodopamine-6150-v1` and refuses
+to overwrite an existing run. Override `MARIO_READOUT_RUN_TAG` for another seed
+or experiment. `MARIO_PIPELINE_DRY_RUN=1` prints submissions without submitting.
+Each job requests four hours; if a stage fails, downstream jobs do not run.
+
+Ranking evaluates up to six evenly spaced checkpoints (including the last)
+with three episodes per mode, then uses completion first, deterministic completion, worst-mode
+progress, average progress, reward and checkpoint step. Entropy and survival
+duration are diagnostics only. Ranking seed is 42; final evaluation seed is
+123 with 25 episodes per mode. Evaluation allows 3,000 decisions and records three episodes per mode
+with FlyVis GIFs. The final completion-verdict JSON counts episode completion
+flags. Zero completions gives exit code 2, even if the GRU health passed.
+This makes lack of task success explicit; it does not guarantee completion or
+automatically launch additional experiments.
