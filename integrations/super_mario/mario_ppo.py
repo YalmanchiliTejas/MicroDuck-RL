@@ -13,8 +13,8 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 8
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 9
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
 VISUAL_ENCODERS = (
     "column_v1", "retina_lite_v2", "retina_spatial_v3", "flyvis_spatial_v1"
@@ -64,8 +64,13 @@ class PPOConfig:
     fusion_gate_warmup_steps: int = 20_000
     stabilized_vision_gru: bool = False
     spatial_readout: bool = False
+    bounded_jump_actions: bool = False
 
     def __post_init__(self) -> None:
+        if self.bounded_jump_actions and (
+            self.temporal_encoder != "vision_fusion_gru_v2" or self.policy_mode != "categorical"
+        ):
+            raise ValueError("bounded jump actions require categorical vision_fusion_gru_v2")
         if self.spatial_readout and (not self.stabilized_vision_gru or self.feature_dim <= FLYVIS_SPATIAL_TARGET_DIM):
             raise ValueError("spatial readout requires stabilized vision GRU and descending + 528 spatial features")
         if self.stabilized_vision_gru and self.temporal_encoder != "vision_fusion_gru_v2":
@@ -1022,6 +1027,36 @@ class PPOAgent:
         metrics["early_stop"] = float(epochs_completed < cfg.update_epochs)
         return metrics
 
+    @torch.no_grad()
+    def check_recurrent_replay(self, tokens, initial_hiddens, actions, old_log_probabilities, dones):
+        """Before any optimizer step, replay the same chunks used by BPTT.
+
+        A mismatch is a correctness failure, not a learning-rate diagnostic.
+        No dropout or running-stat layers are used by these recurrent policies.
+        """
+        max_error = 0.0
+        was_training = self.network.training
+        self.network.eval()
+        try:
+            for start in range(0, len(tokens), self.config.recurrent_sequence_length):
+                hidden = torch.as_tensor(initial_hiddens[start], device=self.device).view(1, 1, -1)
+                for index in range(start, min(start + self.config.recurrent_sequence_length, len(tokens))):
+                    if index > start and dones[index - 1] >= 0.5:
+                        hidden = torch.zeros_like(hidden)
+                    token = torch.as_tensor(tokens[index], device=self.device).unsqueeze(0)
+                    logits, _, hidden, _ = self.network.recurrent_tokens_aux(token, hidden)
+                    logp = self._action_probabilities(logits)[0, int(actions[index])].clamp_min(1e-12).log().item()
+                    error = abs(logp - float(old_log_probabilities[index]))
+                    if not np.isfinite(error) or error > 1e-4:
+                        raise RuntimeError(
+                            f"Pre-update PPO replay mismatch at transition {index}: "
+                            f"log_probability_error={error:.8g}. Refusing optimizer update."
+                        )
+                    max_error = max(max_error, error)
+        finally:
+            self.network.train(was_training)
+        return max_error
+
     def update_recurrent(
         self,
         *,
@@ -1075,6 +1110,11 @@ class PPOAgent:
                 f"({count}, {EPISODE_GRU_HIDDEN_DIM})"
             )
         advantages = np.asarray(advantages, dtype=np.float32)
+        replay_error = None
+        if self.config.bounded_jump_actions:
+            replay_error = self.check_recurrent_replay(
+                tokens, initial_hiddens, actions, old_log_probabilities, dones
+            )
         advantages = (advantages - advantages.mean()) / (advantages.std() + 1.0e-8)
         actions_t = torch.as_tensor(actions, device=self.device, dtype=torch.long)
         old_log_t = torch.as_tensor(old_log_probabilities, device=self.device)
@@ -1340,6 +1380,8 @@ class PPOAgent:
         }
         metrics["batch_size"] = float(count)
         metrics["sequence_length"] = float(sequence_length)
+        if replay_error is not None:
+            metrics["replay_max_log_probability_error"] = replay_error
         metrics["epochs_completed"] = float(epochs_completed)
         metrics["early_stop"] = float(stop_update or epochs_completed < self.config.update_epochs)
         return metrics

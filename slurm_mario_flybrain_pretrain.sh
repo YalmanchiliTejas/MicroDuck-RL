@@ -298,6 +298,9 @@ if [[ "${VISION_FUSION_GRU}" == "1" ]]; then
     if [[ "${MARIO_PPO_SPATIAL_READOUT:-0}" == "1" ]]; then
         policy_args+=(--spatial-readout)
     fi
+    if [[ "${MARIO_PPO_BOUNDED_JUMP_ACTIONS:-0}" == "1" ]]; then
+        policy_args+=(--bounded-jump-actions)
+    fi
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
     freeze_args+=(--freeze-dopamine)

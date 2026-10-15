@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import shutil
 import signal
+import sys
 import time
 from collections import Counter, deque
 from pathlib import Path
@@ -28,6 +29,7 @@ from mario_ppo import (
     normalize_flyvis_targets,
 )
 from mario_sidecar import nes_actions
+from mario_action_macros import MACRO_FRAMES, action_frames, append_executed_frames
 from reward_contract import REWARD_CONTRACT
 from rollouts import REWARD_COMPONENTS, training_reward
 from torch.utils.tensorboard import SummaryWriter
@@ -137,8 +139,10 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
         writer.add_scalar(f"loss/{name}", metric, step)
     writer.flush()
     recurrent_metrics = ""
+    if "replay_max_log_probability_error" in metrics:
+        recurrent_metrics += f" replay_error={metrics['replay_max_log_probability_error']:.8g}"
     if "hidden_rms" in metrics:
-        recurrent_metrics = (
+        recurrent_metrics += (
             f" sequence_length={int(metrics['sequence_length'])}"
             f" hidden_rms={metrics['hidden_rms']:.6f}"
             f" hidden_max={metrics['hidden_max_abs']:.6f}"
@@ -228,6 +232,8 @@ def run(args: argparse.Namespace) -> None:
             raise ValueError("stabilized vision GRU requires a fresh run or a stabilized checkpoint")
         if agent.config.spatial_readout != args.spatial_readout:
             raise ValueError("spatial readout setting differs from checkpoint; use a fresh run")
+        if agent.config.bounded_jump_actions != args.bounded_jump_actions:
+            raise ValueError("action semantics differ from checkpoint; use a fresh run")
     else:
         agent = PPOAgent(
             PPOConfig(
@@ -261,6 +267,7 @@ def run(args: argparse.Namespace) -> None:
                 fusion_gate_warmup_steps=args.fusion_gate_warmup_steps,
                 stabilized_vision_gru=args.stabilized_vision_gru,
                 spatial_readout=args.spatial_readout,
+                bounded_jump_actions=args.bounded_jump_actions,
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -283,7 +290,9 @@ def run(args: argparse.Namespace) -> None:
         f"vision_aux={agent.config.vision_auxiliary_coefficient:g} "
         f"saturation_coef={agent.config.hidden_saturation_coefficient:g} "
         f"gate_warmup={agent.config.fusion_gate_warmup_steps} "
-        f"spatial_readout={int(agent.config.spatial_readout)}",
+        f"spatial_readout={int(agent.config.spatial_readout)} "
+        f"bounded_jump_actions={int(agent.config.bounded_jump_actions)} "
+        f"hold_counter_units={'frames' if agent.config.bounded_jump_actions else 'decisions'}",
         flush=True,
     )
     if agent.config.feature_dim != connectome.feature_dim:
@@ -332,7 +341,7 @@ def run(args: argparse.Namespace) -> None:
         purge_step=agent.steps if agent.steps else None,
     )
     writer.add_text("training/reward_contract", REWARD_CONTRACT, 0)
-    writer.add_scalar("training/action_repeat", args.action_repeat, agent.steps)
+    writer.add_scalar("training/action_repeat", MACRO_FRAMES if agent.config.bounded_jump_actions else args.action_repeat, agent.steps)
     writer.add_scalar("training/ppo_frozen", float(args.freeze_ppo), agent.steps)
     writer.add_scalar(
         "training/dopamine_frozen", float(args.freeze_dopamine), agent.steps
@@ -381,11 +390,15 @@ def run(args: argparse.Namespace) -> None:
             raw_reward = 0.0
             reward_components: dict[str, float] = {}
             interval_activities: list[np.ndarray] = []
+            executed_actions: list[int] = []
             interval_visual_targets: list[np.ndarray] = []
             terminated = truncated = False
             info: dict = {}
-            for _ in range(args.action_repeat):
-                observation, reward, terminated, truncated, info = env.step(action)
+            for executed_action in action_frames(
+                action, bounded=agent.config.bounded_jump_actions, repeat=args.action_repeat
+            ):
+                observation, reward, terminated, truncated, info = env.step(executed_action)
+                executed_actions.append(executed_action)
                 raw_reward += float(reward)
                 for key, component_value in info.get(
                     "reward_components", {}
@@ -411,7 +424,11 @@ def run(args: argparse.Namespace) -> None:
                 if terminated or truncated:
                     break
             if episode_recurrent:
-                next_tokens = stack.append_interval(interval_activities, action)
+                next_tokens = (
+                    append_executed_frames(stack, interval_activities, executed_actions)
+                    if agent.config.bounded_jump_actions
+                    else stack.append_interval(interval_activities, action)
+                )
                 next_visual_targets = (
                     np.stack(interval_visual_targets)
                     if agent.config.temporal_encoder == "vision_fusion_gru_v2"
@@ -646,7 +663,8 @@ def run(args: argparse.Namespace) -> None:
                     flush=True,
                 )
     finally:
-        metrics = _flush(agent, rollout, state, False)
+        # Never retry an optimizer/replay failure while unwinding an exception.
+        metrics = _flush(agent, rollout, state, False) if sys.exc_info()[0] is None else None
         if metrics is not None:
             _record_update_metrics(writer, agent.steps, metrics)
         for action, count in action_counts.items():
@@ -668,6 +686,7 @@ def main() -> None:
         help="train this many more decisions from either a fresh or resumed checkpoint",
     )
     parser.add_argument("--action-repeat", type=int, default=4)
+    parser.add_argument("--bounded-jump-actions", action="store_true")
     parser.add_argument("--rollout-steps", type=int, default=256)
     parser.add_argument("--max-episode-decisions", type=int, default=3000)
     parser.add_argument("--spatial-readout", action="store_true",

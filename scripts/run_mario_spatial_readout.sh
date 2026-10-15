@@ -34,10 +34,24 @@ export MARIO_EVAL_COUNTERFACTUAL=0
 mkdir -p "${run_root}/slurm"
 previous=""
 stages=(smoke)
-for ((target=100000; target<MARIO_READOUT_TARGET_STEPS; target+=100000)); do
+chunk=100000
+if [[ "${MARIO_PPO_BOUNDED_JUMP_ACTIONS:-0}" == "1" ]]; then
+    # Sixteen emulator frames per decision: shorter jobs and intermediate evals.
+    chunk=10000
+    stages+=("progress:2000")
+fi
+for ((target=chunk; target<MARIO_READOUT_TARGET_STEPS; target+=chunk)); do
     stages+=("train:${target}")
+    if [[ "${MARIO_PPO_BOUNDED_JUMP_ACTIONS:-0}" == "1" ]]; then
+        stages+=("progress:${target}")
+    fi
 done
-stages+=("train:${MARIO_READOUT_TARGET_STEPS}" rank evaluate)
+stages+=("train:${MARIO_READOUT_TARGET_STEPS}")
+if [[ "${MARIO_PPO_BOUNDED_JUMP_ACTIONS:-0}" == "1" ]]; then
+    stages+=("progress:${MARIO_READOUT_TARGET_STEPS}" evaluate)
+else
+    stages+=(rank evaluate)
+fi
 for stage_spec in "${stages[@]}"; do
     stage="${stage_spec%%:*}"
     export MARIO_READOUT_STAGE_TARGET="${stage_spec#*:}"

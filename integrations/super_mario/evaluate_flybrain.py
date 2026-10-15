@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from mario_action_macros import MACRO_FRAMES, action_frames, append_executed_frames
+
 import argparse
 import json
 from collections import Counter
@@ -694,6 +696,9 @@ def run(args: argparse.Namespace) -> dict:
             allow_legacy_reward_contract=args.allow_legacy_reward_contract,
         )
         agent.online.eval()
+    bounded_actions = bool(getattr(agent.config, "bounded_jump_actions", False))
+    if bounded_actions and getattr(args, "counterfactual_channels", False):
+        raise ValueError("counterfactual replay does not yet support bounded-action feedback; use full-rollout ablations")
     connectome = MaleCNS(
         data=args.male_cns_data,
         device=args.male_cns_device,
@@ -792,6 +797,7 @@ def run(args: argparse.Namespace) -> dict:
             components = {key: 0.0 for key in REWARD_COMPONENTS}
             raw_total = environment_training_total = legacy_total = 0.0
             max_x = 0
+            stalled_frames = max_stalled_frames = 0
             terminated = truncated = False
             death = completion = False
             jump_press_edges = jump_release_edges = 0
@@ -851,17 +857,19 @@ def run(args: argparse.Namespace) -> dict:
                     if algorithm == "ppo" and recorder is not None
                     else None
                 )
-                jump_now = bool(ACTION_LEVELS[action][2])
-                jump_pressed_edge = jump_now and not previous_jump
-                jump_released_edge = previous_jump and not jump_now
-                jump_hold = jump_hold + 1 if jump_now else 0
-                action_hold = action_hold + 1 if action == previous_action else 1
-                jump_press_edges += int(jump_pressed_edge)
-                jump_release_edges += int(jump_released_edge)
-                max_action_hold = max(max_action_hold, action_hold)
-                max_jump_hold = max(max_jump_hold, jump_hold)
-                previous_jump = jump_now
-                previous_action = action
+                jump_pressed_edge = jump_released_edge = False
+                if not bounded_actions:
+                    jump_now = bool(ACTION_LEVELS[action][2])
+                    jump_pressed_edge = jump_now and not previous_jump
+                    jump_released_edge = previous_jump and not jump_now
+                    jump_hold = jump_hold + 1 if jump_now else 0
+                    action_hold = action_hold + 1 if action == previous_action else 1
+                    jump_press_edges += int(jump_pressed_edge)
+                    jump_release_edges += int(jump_released_edge)
+                    max_action_hold = max(max_action_hold, action_hold)
+                    max_jump_hold = max(max_jump_hold, jump_hold)
+                    previous_jump = jump_now
+                    previous_action = action
                 q_sums += action_scores
                 q_margin_sum += float(
                     np.partition(action_scores, -2)[-1]
@@ -881,13 +889,32 @@ def run(args: argparse.Namespace) -> dict:
                 interval_raw = 0.0
                 interval_components: dict[str, float] = {}
                 interval_activities: list[np.ndarray] = []
+                executed_actions: list[int] = []
+                interval_press_edges = interval_release_edges = 0
                 replay_frames: list[np.ndarray] = []
                 x_before = current_x
                 state_rms = float(np.sqrt(np.mean(np.square(state))))
-                for frame_in_decision in range(1, args.action_repeat + 1):
-                    observation, reward, terminated, truncated, info = env.step(action)
+                frame_actions = action_frames(action, bounded=bounded_actions, repeat=args.action_repeat)
+                for frame_in_decision, executed_action in enumerate(frame_actions, start=1):
+                    observation, reward, terminated, truncated, info = env.step(executed_action)
+                    executed_actions.append(executed_action)
+                    if bounded_actions:
+                        jump_now = bool(ACTION_LEVELS[executed_action][2])
+                        jump_pressed_edge = jump_now and not previous_jump
+                        jump_released_edge = previous_jump and not jump_now
+                        jump_hold = jump_hold + 1 if jump_now else 0
+                        action_hold = action_hold + 1 if executed_action == previous_action else 1
+                        jump_press_edges += int(jump_pressed_edge)
+                        jump_release_edges += int(jump_released_edge)
+                        interval_press_edges += int(jump_pressed_edge)
+                        interval_release_edges += int(jump_released_edge)
+                        max_action_hold = max(max_action_hold, action_hold)
+                        max_jump_hold = max(max_jump_hold, jump_hold)
+                        previous_jump, previous_action = jump_now, executed_action
                     interval_raw += float(reward)
                     current_x = int(info.get("x_pos", current_x))
+                    stalled_frames = 0 if current_x > max_x else stalled_frames + 1
+                    max_stalled_frames = max(max_stalled_frames, stalled_frames)
                     max_x = max(max_x, current_x)
                     for key, component_value in info.get(
                         "reward_components", {}
@@ -900,7 +927,7 @@ def run(args: argparse.Namespace) -> dict:
                     retina_diagnostic = (
                         connectome.retina_diagnostic(observation)
                         if recorder is not None and recorder.retina_view
-                        and (frame_in_decision == args.action_repeat or terminated or truncated)
+                        and (frame_in_decision == len(frame_actions) or terminated or truncated)
                         else None
                     )
                     activity = connectome.observe(
@@ -932,6 +959,8 @@ def run(args: argparse.Namespace) -> dict:
                             "decision": decision,
                             "frame_in_decision": frame_in_decision,
                             "action": action_names[action],
+                            "executed_action": action_names[executed_action],
+                            "hold_counter_units": "frames" if bounded_actions else "decisions",
                             "x": current_x,
                             "y": int(info.get("y_pos", 0)),
                             "reward": float(reward),
@@ -955,10 +984,10 @@ def run(args: argparse.Namespace) -> dict:
                             [
                                 (
                                     f"episode={episode_index} decision={decision} "
-                                    f"frame={frame_in_decision}/{args.action_repeat}"
+                                    f"frame={frame_in_decision}/{len(frame_actions)}"
                                 ),
                                 (
-                                    f"action={action_names[action]} x={current_x} "
+                                    f"action={action_names[executed_action]} x={current_x} "
                                     f"y={frame_row['y']} reward={interval_raw:+.1f}"
                                 ),
                                 (
@@ -995,7 +1024,7 @@ def run(args: argparse.Namespace) -> dict:
                         if (
                             recorder.flyvis_view
                             and (
-                                frame_in_decision == args.action_repeat
+                                frame_in_decision == len(frame_actions)
                                 or terminated
                                 or truncated
                             )
@@ -1021,8 +1050,9 @@ def run(args: argparse.Namespace) -> dict:
                     interval_components, interval_raw
                 )
                 if episode_recurrent:
-                    next_tokens = stack.append_interval(
-                        interval_activities, action
+                    next_tokens = (
+                        append_executed_frames(stack, interval_activities, executed_actions)
+                        if bounded_actions else stack.append_interval(interval_activities, action)
                     )
                     if getattr(args, "reset_gru_every_decision", False):
                         agent.reset_recurrent()
@@ -1070,6 +1100,10 @@ def run(args: argparse.Namespace) -> dict:
                     action_probabilities = [float(value) for value in action_scores]
                     probability_array = np.asarray(action_probabilities)
                     decision_row = {
+                        "executed_actions": [action_names[a] for a in executed_actions],
+                        "interval_jump_press_edges": interval_press_edges if bounded_actions else int(jump_pressed_edge),
+                        "interval_jump_release_edges": interval_release_edges if bounded_actions else int(jump_released_edge),
+                        "hold_counter_units": "frames" if bounded_actions else "decisions",
                         "episode": episode_index,
                         "decision": decision,
                         "x_before": x_before,
@@ -1148,8 +1182,8 @@ def run(args: argparse.Namespace) -> dict:
                         "retina_before_action": retina_before,
                         "retina_after_action": connectome.retina_stats(),
                         "jump_metrics": jump_metrics,
-                        "jump_pressed_edge": jump_pressed_edge,
-                        "jump_released_edge": jump_released_edge,
+                        "jump_pressed_edge": bool(interval_press_edges) if bounded_actions else jump_pressed_edge,
+                        "jump_released_edge": bool(interval_release_edges) if bounded_actions else jump_released_edge,
                         "jump_hold_decisions": jump_hold,
                         "action_hold_decisions": action_hold,
                         "ppo_input_sensitivity": sensitivity,
@@ -1186,6 +1220,7 @@ def run(args: argparse.Namespace) -> dict:
                 "legacy_training_reward": legacy_total,
                 "environment_training_reward": environment_training_total,
                 "max_x": max_x,
+                "max_no_progress_frames": max_stalled_frames,
                 "death": death,
                 "completion": completion,
                 "initial_action": action_names[initial_action],
@@ -1249,6 +1284,9 @@ def run(args: argparse.Namespace) -> dict:
         "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
         "stabilized_vision_gru": getattr(agent.config, "stabilized_vision_gru", False),
         "spatial_readout": getattr(agent.config, "spatial_readout", False),
+        "bounded_jump_actions": bounded_actions,
+        "frames_per_decision": MACRO_FRAMES if bounded_actions else args.action_repeat,
+        "hold_counter_units": "frames" if bounded_actions else "decisions",
         "flyvis_frame_dt": getattr(connectome, "flyvis_frame_dt", None),
         "reset_gru_every_decision": bool(
             getattr(args, "reset_gru_every_decision", False)
@@ -1274,6 +1312,7 @@ def run(args: argparse.Namespace) -> dict:
                 np.mean([row["decisions"] for row in episodes])
             ),
             "mean_max_x": float(np.mean([row["max_x"] for row in episodes])),
+            "mean_max_no_progress_frames": float(np.mean([row["max_no_progress_frames"] for row in episodes])),
             "mean_raw_reward": float(
                 np.mean([row["raw_reward"] for row in episodes])
             ),

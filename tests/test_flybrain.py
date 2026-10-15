@@ -69,9 +69,11 @@ def _load_evaluator(flybrain, rollouts):
     module = importlib.util.module_from_spec(spec)
     assert spec.loader is not None
     sys.modules[spec.name] = module
+    sys.path.insert(0, str(path.parent))
     try:
         spec.loader.exec_module(module)
     finally:
+        sys.path.remove(str(path.parent))
         for name, old_module in previous.items():
             if old_module is None:
                 sys.modules.pop(name, None)

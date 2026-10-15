@@ -44,8 +44,12 @@ def completion_status(reports: list[dict]) -> dict:
             raise ValueError("No evaluated episodes")
         completions[report["mode"]] = sum(row.get("completion") is True for row in episodes)
     passed = any(count > 0 for count in completions.values())
+    deterministic_required = any(report.get("bounded_jump_actions", False) for report in reports)
+    if deterministic_required:
+        passed = completions.get("mean", 0) > 0
     return {"status": "level_completion_observed" if passed else "no_level_completion",
             "completions_by_mode": completions, "level_completion_verified": passed,
+            "deterministic_completion_required": deterministic_required,
             "note": "One completion is evidence of capability, not reliable success across seeds."}
 
 

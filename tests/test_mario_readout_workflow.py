@@ -44,6 +44,12 @@ def test_health_is_not_completion_and_zero_success_fails():
     assert checker.completion_status([report])["status"] == "no_level_completion"
     report["episodes"][0]["completion"] = True
     assert checker.completion_status([report])["level_completion_verified"]
+    report["bounded_jump_actions"] = True
+    sampled = {**report, "mode": "sampled", "episodes": [{"completion": True}]}
+    report["episodes"] = [{"completion": False}]
+    verdict = checker.completion_status([report, sampled])
+    assert verdict["deterministic_completion_required"]
+    assert not verdict["level_completion_verified"]
 
 
 @pytest.mark.parametrize("target,training_targets", [(10000, [10000]), (300000, [100000, 200000, 300000])])
