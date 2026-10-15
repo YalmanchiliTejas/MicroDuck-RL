@@ -13,8 +13,8 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 6
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 7
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
 VISUAL_ENCODERS = (
     "column_v1", "retina_lite_v2", "retina_spatial_v3", "flyvis_spatial_v1"
@@ -62,8 +62,11 @@ class PPOConfig:
     vision_auxiliary_coefficient: float = 0.1
     hidden_saturation_coefficient: float = 0.01
     fusion_gate_warmup_steps: int = 20_000
+    stabilized_vision_gru: bool = False
 
     def __post_init__(self) -> None:
+        if self.stabilized_vision_gru and self.temporal_encoder != "vision_fusion_gru_v2":
+            raise ValueError("stabilized vision GRU requires vision_fusion_gru_v2")
         if self.feature_dim <= 0:
             raise ValueError("feature_dim must be positive")
         if self.temporal_encoder not in TEMPORAL_ENCODERS:
@@ -116,6 +119,35 @@ class PPOConfig:
             raise ValueError("fusion gate warmup cannot be negative")
 
 
+class ObservableGRU(nn.GRU):
+    """Single-layer PyTorch GRU equations with observable gates on all devices."""
+
+    def forward(self, inputs, hx=None):
+        hidden = inputs.new_zeros(inputs.shape[0], self.hidden_size) if hx is None else hx[0]
+        outputs, updates, resets, candidates = [], [], [], []
+        for frame in inputs.unbind(dim=1):
+            ir, iz, inn = F.linear(frame, self.weight_ih_l0, self.bias_ih_l0).chunk(3, -1)
+            hr, hz, hn = F.linear(hidden, self.weight_hh_l0, self.bias_hh_l0).chunk(3, -1)
+            reset = torch.sigmoid(ir + hr)
+            update = torch.sigmoid(iz + hz)
+            candidate = torch.tanh(inn + reset * hn)
+            hidden = (1.0 - update) * candidate + update * hidden
+            outputs.append(hidden)
+            updates.append(update.detach())
+            resets.append(reset.detach())
+            candidates.append(candidate.detach())
+        update, reset, candidate = (torch.stack(values) for values in (updates, resets, candidates))
+        self.gate_metrics = {
+            "update_gate_mean": update.mean(),
+            "update_gate_above_095_fraction": (update > 0.95).float().mean(),
+            "update_gate_below_005_fraction": (update < 0.05).float().mean(),
+            "reset_gate_mean": reset.mean(),
+            "candidate_hidden_rms": candidate.square().mean().sqrt(),
+        }
+        self.raw_sequence = torch.stack(outputs, dim=1)
+        return self.raw_sequence, hidden.unsqueeze(0)
+
+
 class ActorCritic(nn.Module):
     """Shared temporal encoder with categorical or factorized policy heads."""
 
@@ -126,22 +158,31 @@ class ActorCritic(nn.Module):
         self.controller_feature_dim = config.controller_feature_dim
         input_dim = config.feature_dim + config.controller_feature_dim
         self.temporal_encoder = config.temporal_encoder
+        self.stabilized_vision_gru = config.stabilized_vision_gru
         if config.temporal_encoder == "vision_fusion_gru_v2":
             self.frame_projection = nn.Sequential(
                 nn.Linear(config.feature_dim, 256),
                 nn.LayerNorm(256),
                 nn.SiLU(),
             )
-            self.temporal = nn.GRU(
+            gru_type = ObservableGRU if config.stabilized_vision_gru else nn.GRU
+            self.temporal = gru_type(
                 256, EPISODE_GRU_HIDDEN_DIM, batch_first=True
             )
+            if config.stabilized_vision_gru:
+                with torch.no_grad():
+                    self.temporal.bias_ih_l0[256:512].fill_(-1.5)
+                    self.temporal.bias_hh_l0[256:512].zero_()
+                self.vision_output_norm = nn.LayerNorm(256, elementwise_affine=False)
+                self.controller_output_norm = nn.LayerNorm(128, elementwise_affine=False)
             self.controller_projection = nn.Sequential(
                 nn.Linear(COMPACT_CONTROLLER_FEATURE_DIM, 128),
                 nn.LayerNorm(128),
                 nn.SiLU(),
             )
             # alpha = 0.5 + 0.45 * sigmoid(logit); logit=log(2) gives 0.8.
-            self.fusion_gate_logit = nn.Parameter(torch.tensor(float(np.log(2.0))))
+            initial_logit = np.log(1.0 / 5.0) if config.stabilized_vision_gru else np.log(2.0)
+            self.fusion_gate_logit = nn.Parameter(torch.tensor(float(initial_logit)))
             self.shared = nn.Sequential(nn.Linear(256 + 128, 512), nn.SiLU())
             self.vision_decoder = nn.Linear(EPISODE_GRU_HIDDEN_DIM, FLYVIS_SPATIAL_TARGET_DIM)
         else:
@@ -243,12 +284,17 @@ class ActorCritic(nn.Module):
             projected = self.frame_projection(tokens[:, :, : self.feature_dim].float())
         else:
             projected = self.frame_projection(tokens.float())
+        if self.stabilized_vision_gru:
+            projected = 0.5 * torch.tanh(projected)
         features, next_hidden = self.temporal(projected, hidden)
         vision = features[:, -1]
         if self.temporal_encoder == "vision_fusion_gru_v2":
             controller = self.controller_projection(
                 tokens[:, -1, self.feature_dim :].float()
             )
+            if self.stabilized_vision_gru:
+                vision = self.vision_output_norm(vision)
+                controller = self.controller_output_norm(controller)
             alpha = self.fusion_vision_weight()
             fused = torch.cat((alpha * vision, (1.0 - alpha) * controller), dim=1)
             logits, value = self._heads(fused)
@@ -272,6 +318,9 @@ class ActorCritic(nn.Module):
             if controller_state.ndim == 1:
                 controller_state = controller_state.unsqueeze(0)
             controller = self.controller_projection(controller_state.float())
+            if self.stabilized_vision_gru:
+                vision = self.vision_output_norm(vision)
+                controller = self.controller_output_norm(controller)
             alpha = self.fusion_vision_weight()
             vision = torch.cat((alpha * vision, (1.0 - alpha) * controller), dim=1)
         return self._heads(vision)
@@ -279,6 +328,8 @@ class ActorCritic(nn.Module):
     def fusion_vision_weight(self) -> torch.Tensor:
         if self.temporal_encoder != "vision_fusion_gru_v2":
             return torch.ones((), device=next(self.parameters()).device)
+        if self.stabilized_vision_gru:
+            return 0.05 + 0.9 * torch.sigmoid(self.fusion_gate_logit)
         return 0.5 + 0.45 * torch.sigmoid(self.fusion_gate_logit)
 
 
@@ -726,6 +777,11 @@ class PPOAgent:
                 diagnostics["fusion_vision_weight"] = float(
                     self.network.fusion_vision_weight().item()
                 )
+            if self.config.stabilized_vision_gru:
+                diagnostics.update({
+                    name: float(value.item())
+                    for name, value in self.network.temporal.gate_metrics.items()
+                })
             if self.config.policy_mode == "factorized":
                 direction, jump, run = (
                     torch.softmax(head, dim=1)[0].cpu().numpy()
@@ -1033,6 +1089,7 @@ class PPOAgent:
             "hidden_max_abs": 0.0,
             "hidden_saturation_fraction": 0.0,
             "hidden_saturation_loss": 0.0,
+            "weighted_hidden_saturation_loss": 0.0,
             "vision_auxiliary_loss": 0.0,
             "vision_zero_kl": 0.0,
             "vision_zero_greedy_change_fraction": 0.0,
@@ -1040,6 +1097,11 @@ class PPOAgent:
             "controller_grad_norm": 0.0,
             "vision_decoder_grad_norm": 0.0,
         }
+        if self.config.stabilized_vision_gru:
+            totals.update({name: 0.0 for name in (
+                "update_gate_mean", "update_gate_above_095_fraction",
+                "update_gate_below_005_fraction", "reset_gate_mean", "candidate_hidden_rms",
+            )})
         minibatches = 0
         epochs_completed = 0
 
@@ -1055,14 +1117,19 @@ class PPOAgent:
                 reconstruction_parts = []
                 target_parts = []
                 zero_logits_parts = []
+                gate_parts = []
                 for chunk_index in order[batch_start : batch_start + chunks_per_batch]:
                     start, stop = chunks[int(chunk_index)]
                     hidden = torch.as_tensor(
                         initial_hiddens[start], device=self.device
                     ).view(1, 1, EPISODE_GRU_HIDDEN_DIM)
+                    # Diagnostic replay has its own memory and no real-vision history.
+                    # This is a truncated-chunk ablation, not a full-episode replay.
+                    zero_hidden = torch.zeros_like(hidden)
                     for index in range(start, stop):
                         if index > start and dones[index - 1] >= 0.5:
                             hidden = torch.zeros_like(hidden)
+                            zero_hidden = torch.zeros_like(zero_hidden)
                         token_t = torch.as_tensor(
                             tokens[index], device=self.device
                         ).unsqueeze(0)
@@ -1073,7 +1140,11 @@ class PPOAgent:
                         logits_parts.append(logits)
                         value_parts.append(value)
                         index_parts.append(index)
-                        hidden_parts.append(hidden[-1])
+                        if self.config.stabilized_vision_gru:
+                            hidden_parts.append(self.network.temporal.raw_sequence.reshape(-1, 256))
+                            gate_parts.append(dict(self.network.temporal.gate_metrics))
+                        else:
+                            hidden_parts.append(hidden[-1])
                         if reconstruction is not None:
                             assert targets is not None
                             reconstruction_parts.append(reconstruction)
@@ -1082,9 +1153,11 @@ class PPOAgent:
                             ).unsqueeze(0))
                             zero_tokens = token_t.clone()
                             zero_tokens[:, :, : self.config.feature_dim] = 0.0
-                            zero_logits, _, _, _ = self.network.recurrent_tokens_aux(
-                                zero_tokens, hidden_before
-                            )
+                            with torch.no_grad():
+                                zero_logits, _, zero_hidden, _ = self.network.recurrent_tokens_aux(
+                                    zero_tokens,
+                                    zero_hidden if self.config.stabilized_vision_gru else hidden_before,
+                                )
                             zero_logits_parts.append(zero_logits)
                 indices = torch.as_tensor(
                     index_parts, device=self.device, dtype=torch.long
@@ -1121,7 +1194,13 @@ class PPOAgent:
                     zero = entropy.detach() * 0.0
                     direction_entropy = jump_entropy = run_entropy = zero
                 hidden_values = torch.cat(hidden_parts, dim=0)
-                saturation_loss = F.relu(hidden_values.abs() - 0.9).square().mean()
+                if self.config.stabilized_vision_gru:
+                    # Penalize every frame's RMS; averaging across the batch first
+                    # could hide saturated frames among quieter ones.
+                    rms = hidden_values.square().mean(dim=-1).add(1.0e-8).sqrt()
+                    saturation_loss = F.relu(rms - 0.6).square().mean()
+                else:
+                    saturation_loss = F.relu(hidden_values.abs() - 0.9).square().mean()
                 if reconstruction_parts:
                     reconstructions = torch.cat(reconstruction_parts, dim=0)
                     target_t = torch.cat(target_parts, dim=0)
@@ -1201,6 +1280,7 @@ class PPOAgent:
                         (hidden_values.abs() > 0.95).float().mean()
                     ),
                     "hidden_saturation_loss": saturation_loss,
+                    "weighted_hidden_saturation_loss": self.config.hidden_saturation_coefficient * saturation_loss,
                     "vision_auxiliary_loss": vision_auxiliary_loss,
                     "vision_zero_kl": vision_zero_kl,
                     "vision_zero_greedy_change_fraction": greedy_change,
@@ -1208,6 +1288,11 @@ class PPOAgent:
                     "controller_grad_norm": controller_grad,
                     "vision_decoder_grad_norm": decoder_grad,
                 }
+                if gate_parts:
+                    batch_metrics.update({
+                        name: torch.stack([part[name] for part in gate_parts]).mean()
+                        for name in gate_parts[0]
+                    })
                 for key, value in batch_metrics.items():
                     totals[key] += float(value.item())
                 epoch_kl += float(approx_kl.item())

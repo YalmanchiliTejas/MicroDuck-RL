@@ -733,6 +733,7 @@ def run(args: argparse.Namespace) -> dict:
     fatal_terminal_action_counts: Counter[int] = Counter()
     q_sums = np.zeros(agent.config.num_actions, dtype=np.float64)
     q_observations = 0
+    recurrent_health_sums: Counter[str] = Counter()
     q_margin_sum = 0.0
     state_rms_sum = 0.0
     state_delta_rms_sum = 0.0
@@ -1040,6 +1041,18 @@ def run(args: argparse.Namespace) -> dict:
                         controller_diagnostics["fusion_vision_weight"] = float(
                             agent.network.fusion_vision_weight().item()
                         )
+                    if agent.config.stabilized_vision_gru:
+                        controller_diagnostics.update({
+                            name: float(value.item())
+                            for name, value in agent.network.temporal.gate_metrics.items()
+                        })
+                    for name in (
+                        "hidden_rms", "hidden_saturation_fraction", "fusion_vision_weight",
+                        "update_gate_mean", "update_gate_above_095_fraction",
+                        "update_gate_below_005_fraction", "reset_gate_mean", "candidate_hidden_rms",
+                    ):
+                        if name in controller_diagnostics:
+                            recurrent_health_sums[name] += controller_diagnostics[name]
                 elif (
                     algorithm == "ppo"
                     and agent.config.temporal_encoder == "controller_gru"
@@ -1233,6 +1246,7 @@ def run(args: argparse.Namespace) -> dict:
         "visual_ablation": visual_ablation,
         "visual_encoder": getattr(agent.config, "visual_encoder", "column_v1"),
         "temporal_encoder": getattr(agent.config, "temporal_encoder", "conv4"),
+        "stabilized_vision_gru": getattr(agent.config, "stabilized_vision_gru", False),
         "reset_gru_every_decision": bool(
             getattr(args, "reset_gru_every_decision", False)
         ),
@@ -1247,6 +1261,7 @@ def run(args: argparse.Namespace) -> dict:
         "episodes": episodes,
         "forensic_artifacts": forensic_artifacts,
         "summary": {
+            **{f"mean_{name}": value / decision_count for name, value in recurrent_health_sums.items()},
             "episode_count": len(episodes),
             "death_rate": float(np.mean([row["death"] for row in episodes])),
             "completion_rate": float(

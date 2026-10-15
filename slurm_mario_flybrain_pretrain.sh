@@ -279,13 +279,22 @@ if [[ "${EPISODE_GRU}" == "1" ]]; then
     )
 fi
 if [[ "${VISION_FUSION_GRU}" == "1" ]]; then
+    saturation_default=0.01
+    gate_warmup_default=20000
+    if [[ "${MARIO_PPO_STABILIZED_VISION_GRU:-0}" == "1" ]]; then
+        saturation_default=0.3
+        gate_warmup_default=0
+    fi
     policy_args+=(
         --vision-fusion-gru
         --recurrent-sequence-length "${MARIO_PPO_RECURRENT_SEQUENCE_LENGTH:-32}"
         --vision-auxiliary-coefficient "${MARIO_PPO_VISION_AUXILIARY_COEFFICIENT:-0.1}"
-        --hidden-saturation-coefficient "${MARIO_PPO_HIDDEN_SATURATION_COEFFICIENT:-0.01}"
-        --fusion-gate-warmup-steps "${MARIO_PPO_FUSION_GATE_WARMUP_STEPS:-20000}"
+        --hidden-saturation-coefficient "${MARIO_PPO_HIDDEN_SATURATION_COEFFICIENT:-${saturation_default}}"
+        --fusion-gate-warmup-steps "${MARIO_PPO_FUSION_GATE_WARMUP_STEPS:-${gate_warmup_default}}"
     )
+    if [[ "${MARIO_PPO_STABILIZED_VISION_GRU:-0}" == "1" ]]; then
+        policy_args+=(--stabilized-vision-gru)
+    fi
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
     freeze_args+=(--freeze-dopamine)

@@ -349,7 +349,7 @@ MARIO_PRETRAIN_ACTION_REPEAT=4 \
 
 ## Normalized visual fusion GRU
 
-`vision_fusion_gru_v2` is the corrected recurrent architecture. MaleCNS
+The original `vision_fusion_gru_v2` configuration projects MaleCNS
 descending activity is projected to 256 values, LayerNorm-normalized, and sent
 through a visual-only 256-unit GRU. Eight compact controller values (four
 button levels, jump press/release edges, and two hold lengths) use a separate
@@ -373,3 +373,35 @@ MARIO_PPO_RECURRENT_SEQUENCE_LENGTH=32 \
 MARIO_ENABLE_DOPAMINE=0 \
 ./slurm_mario_flybrain_pretrain.sh
 ```
+
+### Stabilized recurrent configuration (checkpoint schema 7)
+
+`MARIO_PPO_STABILIZED_VISION_GRU=1` selects a new configuration of
+`vision_fusion_gru_v2`; old checkpoints keep their original behavior. Start
+in a new run directory. The projection is bounded with `0.5 * tanh`, and the
+GRU uses the exact PyTorch equations with observable update/reset gates.
+Its effective update-gate bias starts at -1.5, encouraging new evidence
+initially. Non-affine LayerNorm is applied to the vision and controller
+outputs before fusion, without altering the persistent raw hidden state.
+
+The fusion starts at 20% vision, learns immediately, and is constrained to
+5%–95%. There is no automatic anneal toward vision: increased vision use
+must earn PPO reward. Weighted concatenation still lets the downstream layer
+rescale branches, so the gate is not a measured percentage of policy influence.
+The reconstruction auxiliary coefficient remains 0.1. The raw hidden penalty
+is now `0.3 * mean(relu(frame_hidden_rms - 0.6)^2)` over every recurrent frame.
+Normalization does not itself prevent internal saturation; monitor the raw
+hidden and gate diagnostics throughout training.
+
+`vision_kl` in this configuration replays zero vision with independent memory
+starting from zero at each truncated training chunk. It uses the recorded
+controller states and is a diagnostic of the chunk, not a full-episode causal
+test. Use frozen whole-episode `all_visual` evaluation as well. Gate metrics
+and raw hidden RMS/saturation are included in evaluation summaries and traces.
+
+After setting `FLY_DATA` to the same frozen MaleCNS directory, submit a smoke
+run with `bash scripts/train_mario_stable_vision.sh 2000`. Inspect the training
+health before continuing the same run with
+`bash scripts/train_mario_stable_vision.sh 300000`. These scripts submit Slurm
+jobs; they do not guarantee gameplay improvement. Compare normal, zero-vision,
+and reset-memory evaluations and watch recorded rollouts before accepting a run.

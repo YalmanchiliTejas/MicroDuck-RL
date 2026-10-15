@@ -482,7 +482,8 @@ def test_vision_fusion_controller_separates_visual_and_compact_state():
     assert controller.last_diagnostics["jump_pressed_edge"]
 
 
-def test_vision_fusion_recurrent_update_logs_auxiliary_and_dependence_metrics(tmp_path):
+@pytest.mark.parametrize("stabilized", [False, True])
+def test_vision_fusion_recurrent_update_logs_auxiliary_and_dependence_metrics(tmp_path, stabilized):
     flybrain = _load_flybrain()
     ppo = _load_ppo(flybrain)
     config = ppo.PPOConfig(
@@ -496,6 +497,7 @@ def test_vision_fusion_recurrent_update_logs_auxiliary_and_dependence_metrics(tm
         minibatch_size=4,
         update_epochs=1,
         fusion_gate_warmup_steps=20_000,
+        stabilized_vision_gru=stabilized,
     )
     agent = ppo.PPOAgent(config, seed=29)
     controller = ppo.VisionFusionGRUController(feature_dim=3)
@@ -538,7 +540,7 @@ def test_vision_fusion_recurrent_update_logs_auxiliary_and_dependence_metrics(tm
 
     assert metrics["vision_auxiliary_loss"] > 0
     assert metrics["vision_zero_kl"] >= 0
-    assert metrics["fusion_vision_weight"] == pytest.approx(0.8)
+    assert metrics["fusion_vision_weight"] == pytest.approx(0.2 if stabilized else 0.8)
     assert metrics["hidden_saturation_fraction"] < 0.5
     assert torch.equal(gate_before, agent.network.fusion_gate_logit)
     assert isinstance(agent.network.frame_projection[1], torch.nn.LayerNorm)
@@ -547,6 +549,93 @@ def test_vision_fusion_recurrent_update_logs_auxiliary_and_dependence_metrics(tm
     restored = ppo.PPOAgent.load(checkpoint)
     assert restored.config.temporal_encoder == "vision_fusion_gru_v2"
     assert restored.config.vision_auxiliary_coefficient == pytest.approx(0.1)
+    assert restored.config.stabilized_vision_gru == stabilized
+    if stabilized:
+        assert metrics["update_gate_mean"] < 0.4
+        assert metrics["update_gate_above_095_fraction"] < 0.01
+        assert metrics["gru_grad_norm"] > 0
+        assert metrics["vision_decoder_grad_norm"] > 0
+        with torch.no_grad():
+            token_t = torch.as_tensor(tokens).unsqueeze(0)
+            assert torch.allclose(
+                agent.network.recurrent_tokens(token_t)[0],
+                restored.network.recurrent_tokens(token_t)[0],
+            )
+
+
+def test_observable_gru_matches_pytorch_outputs_and_gradients():
+    ppo = _load_ppo(_load_flybrain())
+    torch.manual_seed(12)
+    stock = torch.nn.GRU(4, 6, batch_first=True)
+    observable = ppo.ObservableGRU(4, 6, batch_first=True)
+    observable.load_state_dict(stock.state_dict())
+    inputs = torch.randn(2, 7, 4, requires_grad=True)
+    hidden = torch.randn(1, 2, 6)
+    output, final = stock(inputs, hidden)
+    actual, actual_final = observable(inputs, hidden)
+    assert torch.allclose(output, actual, atol=1e-6)
+    assert torch.allclose(final, actual_final, atol=1e-6)
+    expected_gradient = torch.autograd.grad(output.sum(), inputs, retain_graph=True)[0]
+    actual_gradient = torch.autograd.grad(actual.sum(), inputs)[0]
+    assert torch.allclose(expected_gradient, actual_gradient, atol=1e-6)
+
+
+def test_stabilized_gru_tracks_changed_vision_without_initial_saturation():
+    ppo = _load_ppo(_load_flybrain())
+    config = ppo.PPOConfig(
+        feature_dim=32, stack_depth=1, visual_encoder="flyvis_spatial_v1",
+        temporal_encoder="vision_fusion_gru_v2", controller_feature_dim=8,
+        stabilized_vision_gru=True,
+    )
+    agent = ppo.PPOAgent(config, seed=19)
+    network = agent.network
+    with torch.no_grad():
+        zero = torch.zeros(1, 128, 40)
+        changed = zero.clone()
+        changed[:, 64:, :32] = torch.linspace(-10, 10, 32)
+        _, _, baseline = network.recurrent_tokens(zero)
+        _, _, response = network.recurrent_tokens(changed)
+        assert response.square().mean().sqrt() < 0.6
+        assert (response.abs() > 0.95).float().mean() == 0
+        assert (response - baseline).square().mean().sqrt() > 0.01
+        assert network.temporal.gate_metrics["update_gate_above_095_fraction"] == 0
+        # Live action selection and batched training must use identical normalization.
+        logits, _, hidden = network.recurrent_tokens(changed)
+        live_logits, _ = network.recurrent_heads(hidden, changed[:, -1, 32:])
+        assert torch.allclose(logits, live_logits, atol=1e-6)
+
+
+def test_stabilized_gru_learns_visual_targets_without_saturating():
+    """Exercise the auxiliary learning path, not just an untrained forward pass."""
+    ppo = _load_ppo(_load_flybrain())
+    config = ppo.PPOConfig(
+        feature_dim=16, stack_depth=1, visual_encoder="flyvis_spatial_v1",
+        temporal_encoder="vision_fusion_gru_v2", controller_feature_dim=8,
+        stabilized_vision_gru=True, hidden_saturation_coefficient=0.3,
+        fusion_gate_warmup_steps=0,
+    )
+    agent = ppo.PPOAgent(config, seed=7)
+    generator = torch.Generator().manual_seed(5)
+    visual = torch.randn(8, 12, 16, generator=generator)
+    tokens = torch.cat((visual, torch.zeros(8, 12, 8)), dim=-1)
+    mapping = torch.randn(16, ppo.FLYVIS_SPATIAL_TARGET_DIM, generator=generator) / 4
+    target = torch.tanh(visual[:, -1] @ mapping)
+    optimizer = torch.optim.Adam(agent.network.parameters(), lr=1e-3)
+    errors = []
+    for _ in range(40):
+        _, _, hidden, reconstruction = agent.network.recurrent_tokens_aux(tokens)
+        error = torch.nn.functional.mse_loss(reconstruction, target)
+        rms = hidden.square().mean(-1).add(1e-8).sqrt()
+        loss = error + 0.3 * torch.relu(rms - 0.6).square().mean()
+        optimizer.zero_grad()
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(agent.network.parameters(), 0.5)
+        optimizer.step()
+        errors.append(error.item())
+    assert errors[-1] < errors[0] * 0.2
+    assert (hidden.abs() > 0.95).float().mean() < 0.05
+    assert torch.isfinite(hidden).all()
+    assert agent.network.temporal.gate_metrics["update_gate_above_095_fraction"] < 0.05
 
 
 def test_flyvis_target_normalization_is_finite_and_spatial():

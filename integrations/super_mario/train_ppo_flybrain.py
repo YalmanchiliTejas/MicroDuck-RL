@@ -152,6 +152,14 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
                 f" vision_flip={metrics['vision_zero_greedy_change_fraction']:.6f}"
                 f" fusion_vision={metrics['fusion_vision_weight']:.6f}"
             )
+        if "update_gate_mean" in metrics:
+            recurrent_metrics += (
+                f" update_gate={metrics['update_gate_mean']:.6f}"
+                f" update_gate_high={metrics['update_gate_above_095_fraction']:.6f}"
+                f" update_gate_low={metrics['update_gate_below_005_fraction']:.6f}"
+                f" candidate_rms={metrics['candidate_hidden_rms']:.6f}"
+                f" saturation_cost={metrics['weighted_hidden_saturation_loss']:.6f}"
+            )
     print(
         "ppo_update "
         f"step={step} "
@@ -210,6 +218,8 @@ def run(args: argparse.Namespace) -> None:
                 f"checkpoint requires visual encoder {agent.config.visual_encoder!r}, "
                 f"not {args.visual_encoder!r}"
             )
+        if args.stabilized_vision_gru and not agent.config.stabilized_vision_gru:
+            raise ValueError("stabilized vision GRU requires a fresh run or a stabilized checkpoint")
     else:
         agent = PPOAgent(
             PPOConfig(
@@ -241,6 +251,7 @@ def run(args: argparse.Namespace) -> None:
                 vision_auxiliary_coefficient=args.vision_auxiliary_coefficient,
                 hidden_saturation_coefficient=args.hidden_saturation_coefficient,
                 fusion_gate_warmup_steps=args.fusion_gate_warmup_steps,
+                stabilized_vision_gru=args.stabilized_vision_gru,
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -693,9 +704,13 @@ def main() -> None:
         "--vision-auxiliary-coefficient", type=float, default=0.1
     )
     parser.add_argument(
-        "--hidden-saturation-coefficient", type=float, default=0.01
+        "--stabilized-vision-gru", action="store_true",
+        help="bounded visual inputs, observable GRU gates and normalized fusion; fresh runs only",
     )
-    parser.add_argument("--fusion-gate-warmup-steps", type=int, default=20_000)
+    parser.add_argument(
+        "--hidden-saturation-coefficient", type=float, default=None
+    )
+    parser.add_argument("--fusion-gate-warmup-steps", type=int, default=None)
     parser.add_argument(
         "--recurrent-sequence-length",
         type=int,
@@ -727,6 +742,10 @@ def main() -> None:
         help="load learned dopamine synapses but do not update them",
     )
     args = parser.parse_args()
+    if args.hidden_saturation_coefficient is None:
+        args.hidden_saturation_coefficient = 0.3 if args.stabilized_vision_gru else 0.01
+    if args.fusion_gate_warmup_steps is None:
+        args.fusion_gate_warmup_steps = 0 if args.stabilized_vision_gru else 20_000
     if min(args.steps, args.action_repeat, args.rollout_steps, args.save_every) <= 0:
         parser.error("steps, action repeat, rollout steps, and save interval must be positive")
     if args.additional_steps is not None and args.additional_steps <= 0:
@@ -742,6 +761,8 @@ def main() -> None:
         parser.error("choose only one temporal controller architecture")
     if args.vision_fusion_gru and args.visual_encoder != "flyvis_spatial_v1":
         parser.error("--vision-fusion-gru requires --visual-encoder flyvis_spatial_v1")
+    if args.stabilized_vision_gru and not args.vision_fusion_gru:
+        parser.error("--stabilized-vision-gru requires --vision-fusion-gru")
     if args.vision_auxiliary_coefficient < 0 or args.hidden_saturation_coefficient < 0:
         parser.error("auxiliary and saturation coefficients cannot be negative")
     if args.fusion_gate_warmup_steps < 0:
