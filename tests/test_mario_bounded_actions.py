@@ -170,13 +170,14 @@ def fake_nes(monkeypatch):
     return env, Brain
 
 
-def test_evaluation_sends_macro_buttons_and_counts_physical_edges(monkeypatch, tmp_path):
+@pytest.mark.parametrize("direct", [False, True])
+def test_evaluation_sends_macro_buttons_and_counts_physical_edges(monkeypatch, tmp_path, direct):
     import evaluate_flybrain as evaluator
     env, brain = fake_nes(monkeypatch)
     monkeypatch.setattr(evaluator, "MaleCNS", brain)
     config = PPOConfig(feature_dim=3, stack_depth=1, controller_feature_dim=8,
         visual_encoder="flyvis_spatial_v1", temporal_encoder="vision_fusion_gru_v2",
-        stabilized_vision_gru=True, bounded_jump_actions=True)
+        stabilized_vision_gru=True, bounded_jump_actions=not direct, direct_four_frame=direct)
     agent = PPOAgent(config)
     with torch.no_grad():
         agent.network.policy.weight.zero_()
@@ -189,27 +190,33 @@ def test_evaluation_sends_macro_buttons_and_counts_physical_edges(monkeypatch, t
         env="fixture", episodes=1, max_decisions_per_episode=10, action_repeat=4,
         sample_actions=False, epsilon=0., first_actions=10, output=None)
     report = evaluator.run(args)
-    expected = action_frames(9, bounded=True, repeat=4)
-    assert env.actions == list(expected + expected[:3])
+    expected = action_frames(9, bounded=not direct, repeat=4)
+    assert env.actions == (list(expected + expected[:3]) if not direct else [9] * 19)
     assert report["hold_counter_units"] == "frames"
-    assert report["summary"]["mean_jump_press_edges"] == 2
-    assert report["summary"]["mean_jump_release_edges"] == 1
-    assert report["summary"]["mean_max_jump_hold_decisions"] == 12
+    assert report["summary"]["mean_jump_press_edges"] == (1 if direct else 2)
+    assert report["summary"]["mean_jump_release_edges"] == (0 if direct else 1)
+    assert report["summary"]["mean_max_jump_hold_decisions"] == (19 if direct else 12)
+    assert report["direct_four_frame"] == direct
     assert report["summary"]["mean_max_no_progress_frames"] == 0
 
 
-def test_training_api_smoke_collects_and_replays_bounded_rollouts(monkeypatch, tmp_path):
+@pytest.mark.parametrize("direct", [False, True])
+def test_training_api_smoke_collects_and_replays_bounded_rollouts(monkeypatch, tmp_path, direct):
     import train_ppo_flybrain as trainer
     env, brain = fake_nes(monkeypatch)
     monkeypatch.setattr(trainer, "MaleCNS", brain)
     monkeypatch.setattr(sys, "argv", ["train", "--steps", "6", "--rollout-steps", "2",
-        "--vision-fusion-gru", "--stabilized-vision-gru", "--bounded-jump-actions",
+        "--vision-fusion-gru", "--stabilized-vision-gru", "--direct-four-frame" if direct else "--bounded-jump-actions",
         "--visual-encoder", "flyvis_spatial_v1", "--device", "cpu",
         "--flyvis-model", "fixture", "--flyvis-python", "fixture", "--flyvis-worker", "fixture",
         "--tensorboard-dir", str(tmp_path / "tb"), "--output", str(tmp_path / "trained.pt")])
     trainer.main()
     trained = PPOAgent.load(tmp_path / "trained.pt")
     assert trained.steps == 6
-    assert trained.updates == 3
-    assert trained.config.bounded_jump_actions
-    assert len(env.actions) == 3 * 19
+    # Bounded macros terminate the 19-frame fixture every two decisions (three
+    # episodes -> three flushes). Direct four-frame holds need five decisions
+    # for the first 19-frame episode, so the same six decisions flush twice.
+    assert trained.updates == (2 if direct else 3)
+    assert trained.config.bounded_jump_actions == (not direct)
+    assert trained.config.direct_four_frame == direct
+    assert len(env.actions) == (23 if direct else 3 * 19)

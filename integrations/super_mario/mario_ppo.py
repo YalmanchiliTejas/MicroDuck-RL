@@ -13,8 +13,8 @@ from reward_contract import REWARD_CONTRACT
 from torch import nn
 from torch.nn import functional as F
 
-PPO_CHECKPOINT_SCHEMA = 9
-SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, PPO_CHECKPOINT_SCHEMA)
+PPO_CHECKPOINT_SCHEMA = 10
+SUPPORTED_CHECKPOINT_SCHEMAS = (1, 2, 3, 4, 5, 6, 7, 8, 9, PPO_CHECKPOINT_SCHEMA)
 POLICY_MODES = ("categorical", "factorized")
 VISUAL_ENCODERS = (
     "column_v1", "retina_lite_v2", "retina_spatial_v3", "flyvis_spatial_v1"
@@ -65,8 +65,14 @@ class PPOConfig:
     stabilized_vision_gru: bool = False
     spatial_readout: bool = False
     bounded_jump_actions: bool = False
+    direct_four_frame: bool = False
 
     def __post_init__(self) -> None:
+        if self.direct_four_frame and (
+            self.bounded_jump_actions or self.temporal_encoder != "vision_fusion_gru_v2"
+            or self.policy_mode != "categorical"
+        ):
+            raise ValueError("direct four-frame control requires categorical vision fusion without macros")
         if self.bounded_jump_actions and (
             self.temporal_encoder != "vision_fusion_gru_v2" or self.policy_mode != "categorical"
         ):
@@ -1111,7 +1117,7 @@ class PPOAgent:
             )
         advantages = np.asarray(advantages, dtype=np.float32)
         replay_error = None
-        if self.config.bounded_jump_actions:
+        if self.config.bounded_jump_actions or self.config.direct_four_frame:
             replay_error = self.check_recurrent_replay(
                 tokens, initial_hiddens, actions, old_log_probabilities, dones
             )

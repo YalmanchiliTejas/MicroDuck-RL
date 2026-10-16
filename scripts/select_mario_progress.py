@@ -8,8 +8,8 @@ from pathlib import Path
 def selection_key(report):
     if (report.get("mode") != "mean" or report.get("learning_enabled") is not False
             or report.get("visual_ablation") != "normal" or not report.get("episodes")
-            or not report.get("bounded_jump_actions")):
-        raise ValueError("Need a frozen, normal, deterministic bounded-action report")
+            or not (report.get("bounded_jump_actions") or report.get("direct_four_frame"))):
+        raise ValueError("Need a frozen, normal, deterministic frame-feedback report")
     summary = report["summary"]
     return [summary["completion_rate"], summary["mean_max_x"], summary["mean_raw_reward"],
             -summary["mean_max_no_progress_frames"]]

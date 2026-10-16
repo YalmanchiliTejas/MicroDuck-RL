@@ -187,6 +187,9 @@ def _record_update_metrics(writer, step: int, metrics: dict[str, float]) -> None
 
 
 def run(args: argparse.Namespace) -> None:
+    direct_four_frame = getattr(args, "direct_four_frame", False)
+    if direct_four_frame and args.action_repeat != 4:
+        raise ValueError("direct four-frame checkpoints require action-repeat=4")
     import gym_super_mario_bros  # noqa: F401
     import gymnasium as gym
     from nes_py.wrappers import JoypadSpace
@@ -234,6 +237,8 @@ def run(args: argparse.Namespace) -> None:
             raise ValueError("spatial readout setting differs from checkpoint; use a fresh run")
         if agent.config.bounded_jump_actions != args.bounded_jump_actions:
             raise ValueError("action semantics differ from checkpoint; use a fresh run")
+        if agent.config.direct_four_frame != direct_four_frame:
+            raise ValueError("controller feedback/action contract differs; use a fresh run")
     else:
         agent = PPOAgent(
             PPOConfig(
@@ -268,6 +273,7 @@ def run(args: argparse.Namespace) -> None:
                 stabilized_vision_gru=args.stabilized_vision_gru,
                 spatial_readout=args.spatial_readout,
                 bounded_jump_actions=args.bounded_jump_actions,
+                direct_four_frame=direct_four_frame,
             ),
             device=_device(args.device),
             seed=args.seed,
@@ -292,7 +298,8 @@ def run(args: argparse.Namespace) -> None:
         f"gate_warmup={agent.config.fusion_gate_warmup_steps} "
         f"spatial_readout={int(agent.config.spatial_readout)} "
         f"bounded_jump_actions={int(agent.config.bounded_jump_actions)} "
-        f"hold_counter_units={'frames' if agent.config.bounded_jump_actions else 'decisions'}",
+        f"direct_four_frame={int(agent.config.direct_four_frame)} "
+        f"hold_counter_units={'frames' if agent.config.bounded_jump_actions or direct_four_frame else 'decisions'}",
         flush=True,
     )
     if agent.config.feature_dim != connectome.feature_dim:
@@ -426,7 +433,7 @@ def run(args: argparse.Namespace) -> None:
             if episode_recurrent:
                 next_tokens = (
                     append_executed_frames(stack, interval_activities, executed_actions)
-                    if agent.config.bounded_jump_actions
+                    if agent.config.bounded_jump_actions or direct_four_frame
                     else stack.append_interval(interval_activities, action)
                 )
                 next_visual_targets = (
@@ -782,6 +789,8 @@ def main() -> None:
         action="store_true",
         help="load learned dopamine synapses but do not update them",
     )
+    parser.add_argument("--direct-four-frame", action="store_true",
+        help="uninterrupted four-frame buttons with per-frame controller feedback; fresh runs only")
     args = parser.parse_args()
     if args.hidden_saturation_coefficient is None:
         args.hidden_saturation_coefficient = 0.3 if args.stabilized_vision_gru else 0.01

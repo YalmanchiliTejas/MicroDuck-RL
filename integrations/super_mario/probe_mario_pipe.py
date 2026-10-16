@@ -206,9 +206,10 @@ def run(args, env_factory=None):
         raise ValueError("Need positive horizon and clear-x beyond this pipe (greater than 780)")
     rows = load_trace(args.trace)
     source_report = json.loads(args.report.read_text())
-    if (not source_report.get("bounded_jump_actions") or source_report.get("mode") != "mean"
+    if (not (source_report.get("bounded_jump_actions") or source_report.get("direct_four_frame"))
+            or source_report.get("mode") != "mean"
             or source_report.get("learning_enabled") is not False):
-        raise ValueError("Use the frozen mean report from the bounded-jump run")
+        raise ValueError("Use the frozen mean report from a frame-feedback run")
     seed = int(source_report["seed"]) + int(rows[0]["episode"])
     starts = anchors(rows)
     output = args.output

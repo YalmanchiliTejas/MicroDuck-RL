@@ -697,8 +697,12 @@ def run(args: argparse.Namespace) -> dict:
         )
         agent.online.eval()
     bounded_actions = bool(getattr(agent.config, "bounded_jump_actions", False))
-    if bounded_actions and getattr(args, "counterfactual_channels", False):
-        raise ValueError("counterfactual replay does not yet support bounded-action feedback; use full-rollout ablations")
+    direct_four_frame = bool(getattr(agent.config, "direct_four_frame", False))
+    frame_feedback = bounded_actions or direct_four_frame
+    if direct_four_frame and args.action_repeat != 4:
+        raise ValueError("direct four-frame checkpoint requires action-repeat=4")
+    if frame_feedback and getattr(args, "counterfactual_channels", False):
+        raise ValueError("counterfactual replay does not yet support per-frame feedback; use full-rollout ablations")
     connectome = MaleCNS(
         data=args.male_cns_data,
         device=args.male_cns_device,
@@ -858,7 +862,7 @@ def run(args: argparse.Namespace) -> dict:
                     else None
                 )
                 jump_pressed_edge = jump_released_edge = False
-                if not bounded_actions:
+                if not frame_feedback:
                     jump_now = bool(ACTION_LEVELS[action][2])
                     jump_pressed_edge = jump_now and not previous_jump
                     jump_released_edge = previous_jump and not jump_now
@@ -898,7 +902,7 @@ def run(args: argparse.Namespace) -> dict:
                 for frame_in_decision, executed_action in enumerate(frame_actions, start=1):
                     observation, reward, terminated, truncated, info = env.step(executed_action)
                     executed_actions.append(executed_action)
-                    if bounded_actions:
+                    if frame_feedback:
                         jump_now = bool(ACTION_LEVELS[executed_action][2])
                         jump_pressed_edge = jump_now and not previous_jump
                         jump_released_edge = previous_jump and not jump_now
@@ -960,7 +964,7 @@ def run(args: argparse.Namespace) -> dict:
                             "frame_in_decision": frame_in_decision,
                             "action": action_names[action],
                             "executed_action": action_names[executed_action],
-                            "hold_counter_units": "frames" if bounded_actions else "decisions",
+                            "hold_counter_units": "frames" if frame_feedback else "decisions",
                             "x": current_x,
                             "y": int(info.get("y_pos", 0)),
                             "reward": float(reward),
@@ -1052,7 +1056,7 @@ def run(args: argparse.Namespace) -> dict:
                 if episode_recurrent:
                     next_tokens = (
                         append_executed_frames(stack, interval_activities, executed_actions)
-                        if bounded_actions else stack.append_interval(interval_activities, action)
+                        if frame_feedback else stack.append_interval(interval_activities, action)
                     )
                     if getattr(args, "reset_gru_every_decision", False):
                         agent.reset_recurrent()
@@ -1101,9 +1105,9 @@ def run(args: argparse.Namespace) -> dict:
                     probability_array = np.asarray(action_probabilities)
                     decision_row = {
                         "executed_actions": [action_names[a] for a in executed_actions],
-                        "interval_jump_press_edges": interval_press_edges if bounded_actions else int(jump_pressed_edge),
-                        "interval_jump_release_edges": interval_release_edges if bounded_actions else int(jump_released_edge),
-                        "hold_counter_units": "frames" if bounded_actions else "decisions",
+                        "interval_jump_press_edges": interval_press_edges if frame_feedback else int(jump_pressed_edge),
+                        "interval_jump_release_edges": interval_release_edges if frame_feedback else int(jump_released_edge),
+                        "hold_counter_units": "frames" if frame_feedback else "decisions",
                         "episode": episode_index,
                         "decision": decision,
                         "x_before": x_before,
@@ -1182,8 +1186,8 @@ def run(args: argparse.Namespace) -> dict:
                         "retina_before_action": retina_before,
                         "retina_after_action": connectome.retina_stats(),
                         "jump_metrics": jump_metrics,
-                        "jump_pressed_edge": bool(interval_press_edges) if bounded_actions else jump_pressed_edge,
-                        "jump_released_edge": bool(interval_release_edges) if bounded_actions else jump_released_edge,
+                        "jump_pressed_edge": bool(interval_press_edges) if frame_feedback else jump_pressed_edge,
+                        "jump_released_edge": bool(interval_release_edges) if frame_feedback else jump_released_edge,
                         "jump_hold_decisions": jump_hold,
                         "action_hold_decisions": action_hold,
                         "ppo_input_sensitivity": sensitivity,
@@ -1285,8 +1289,9 @@ def run(args: argparse.Namespace) -> dict:
         "stabilized_vision_gru": getattr(agent.config, "stabilized_vision_gru", False),
         "spatial_readout": getattr(agent.config, "spatial_readout", False),
         "bounded_jump_actions": bounded_actions,
+        "direct_four_frame": direct_four_frame,
         "frames_per_decision": MACRO_FRAMES if bounded_actions else args.action_repeat,
-        "hold_counter_units": "frames" if bounded_actions else "decisions",
+        "hold_counter_units": "frames" if frame_feedback else "decisions",
         "flyvis_frame_dt": getattr(connectome, "flyvis_frame_dt", None),
         "reset_gru_every_decision": bool(
             getattr(args, "reset_gru_every_decision", False)

@@ -298,8 +298,15 @@ if [[ "${VISION_FUSION_GRU}" == "1" ]]; then
     if [[ "${MARIO_PPO_SPATIAL_READOUT:-0}" == "1" ]]; then
         policy_args+=(--spatial-readout)
     fi
+    if [[ "${MARIO_PPO_BOUNDED_JUMP_ACTIONS:-0}" == "1" && "${MARIO_PPO_DIRECT_FOUR_FRAME:-0}" == "1" ]]; then
+        echo "ERROR: MARIO_PPO_BOUNDED_JUMP_ACTIONS and MARIO_PPO_DIRECT_FOUR_FRAME are mutually exclusive." >&2
+        exit 1
+    fi
     if [[ "${MARIO_PPO_BOUNDED_JUMP_ACTIONS:-0}" == "1" ]]; then
         policy_args+=(--bounded-jump-actions)
+    fi
+    if [[ "${MARIO_PPO_DIRECT_FOUR_FRAME:-0}" == "1" ]]; then
+        policy_args+=(--direct-four-frame)
     fi
 fi
 if [[ "${FREEZE_DOPAMINE}" == "1" ]]; then
@@ -310,6 +317,7 @@ srun "${SIDECAR_VENV}/bin/python" \
     "${REPO_DIR}/integrations/super_mario/train_ppo_flybrain.py" \
     "${step_args[@]}" \
     --action-repeat "${ACTION_REPEAT}" \
+    --seed "${MARIO_PRETRAIN_SEED:-123}" \
     --save-every "${SAVE_EVERY}" \
     --rollout-steps "${MARIO_PPO_ROLLOUT_STEPS:-256}" \
     --max-episode-decisions "${MARIO_PRETRAIN_MAX_EPISODE_DECISIONS:-3000}" \
